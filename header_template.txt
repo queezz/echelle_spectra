@@ -1,0 +1,21 @@
+# [Parameters]
+# Name = '{diag_name}'
+# ShotNo = {shot}
+# Date = '{date}'
+#
+# DimNo = {dimno}
+# DimName = '{dimname}'
+# DimSize = {dimsize}
+# DimUnit = '{dimunits}'
+#
+# ValNo = {nval}
+# ValName = {vnames}
+# ValUnit = {vunit}
+# [Comments]
+# The Echelle spectroscopy views the divertor region at 3.5L port from 4-O (AL-02).
+# For detailes of viewing area, please see "A. Kuzmin et al., PFR vol.13 (2018) 3402058.".
+# CH/D-band = 429.0-431.5 nm
+# Contact: M. Kobayashi (2169)
+# time = {trigdelay} + frameNo*{cycletime} (s)
+#
+# [data]
