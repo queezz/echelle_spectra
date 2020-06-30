@@ -2,6 +2,9 @@
 # *.sif files - images
 *.sif
 
+# VS code
+*.code-workspace
+# VIM
 *.swp
 # Byte-compiled / optimized / DLL files
 __pycache__/
