@@ -1,6 +1,6 @@
 .DS_store
 # *.sif files - images
-*.sif
+#*.sif
 
 # VS code
 *.code-workspace

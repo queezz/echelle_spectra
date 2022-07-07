@@ -1,7 +1,8 @@
 """
 Tools for Echelle spectrometer images
 """
-from sif_reader import np_open
+# from sif_reader import np_open
+from sif_parser import np_open
 import numpy as np
 import os
 from os.path import join
@@ -57,9 +58,7 @@ class EchelleImage:
         imin = np.min(image)
         if image.min() > imin:
             impin = image.min()
-        im = ax.imshow(
-            image, cmap=clrs["cmap"], norm=mpl.colors.LogNorm(imin, image.max() * scale)
-        )
+        im = ax.imshow(image, cmap=clrs["cmap"], norm=mpl.colors.LogNorm(imin, image.max() * scale))
         # im = plt.imshow(a, norm = mpl.colors.LogNorm(1e2,5e3))
         im.cmap.set_under(clrs["under"])
         im.cmap.set_over(clrs["over"])
@@ -69,17 +68,9 @@ class EchelleImage:
             #             transform = ax.transAxes, fontsize = fs['shotname'])
             cbaxes = fig.add_axes([0.255, 0.99, 0.51, 0.05])
             cb = plt.colorbar(im, extend="both", cax=cbaxes, orientation="horizontal")
-            cb.ax.set_xticklabels(
-                cb.ax.get_xticklabels(), rotation=0, fontsize=fs["cb"]
-            )
+            cb.ax.set_xticklabels(cb.ax.get_xticklabels(), rotation=0, fontsize=fs["cb"])
             cb.ax.text(
-                0.4,
-                0.2,
-                "counts",
-                fontsize=fs["cbname"],
-                rotation=0,
-                color="w",
-                transform=cb.ax.transAxes,
+                0.4, 0.2, "counts", fontsize=fs["cbname"], rotation=0, color="w", transform=cb.ax.transAxes,
             )
             if kws.get("axlabel", True):
                 ax.text(-0.2 * ymax, ymax * 0.95, "vertical pixel", rotation=90)
@@ -96,10 +87,7 @@ class EchelleImage:
                 clbr = self.clbr
             clbr.show_masks(dv=8)
             plt.imshow(
-                np.invert(clbr.masks.sum(axis=0)),
-                origin="lower",
-                alpha=0.4,
-                cmap="binary",
+                np.invert(clbr.masks.sum(axis=0)), origin="lower", alpha=0.4, cmap="binary",
             )
 
         ax.set_xlim(0, xmax)
@@ -130,10 +118,7 @@ class EchelleImage:
         orders = range(clbr.pattern.shape[1])
 
         self.order_spectra = np.array(
-            [
-                np.array([self.order_image(fi, o, sm=True) for o in orders])
-                for fi in frames
-            ]
+            [np.array([self.order_image(fi, o, sm=True) for o in orders]) for fi in frames]
         )
 
     def correct_order_shapes(self):
@@ -170,9 +155,7 @@ class EchelleImage:
 
         a = remove_npnans(self.spectra)
 
-        self.spectra = a.reshape(
-            self.info["NumberOfFrames"], int(len(a) / self.info["NumberOfFrames"])
-        )
+        self.spectra = a.reshape(self.info["NumberOfFrames"], int(len(a) / self.info["NumberOfFrames"]))
 
         self.wavelength = remove_npnans(clbr.wavelength)
 
@@ -192,9 +175,7 @@ class EchelleImage:
         NORD = self.clbr.pattern.shape[1]
 
         fig, axs = plt.subplots(NORD, 1)
-        plt.subplots_adjust(
-            left=None, bottom=None, right=None, top=None, wspace=0.0, hspace=0.0
-        )
+        plt.subplots_adjust(left=None, bottom=None, right=None, top=None, wspace=0.0, hspace=0.0)
         [ax.set_xticks([]) for ax in axs[:-1]]
         [ax.set_yticks([]) for ax in axs[:-1]]
         [ax.set_xlim([0, self.clbr.DIMW]) for ax in axs]
@@ -205,13 +186,7 @@ class EchelleImage:
             ax.get_yaxis().set_visible(False)
             # ax.axis('off')
             ax.text(
-                0,
-                0.5,
-                o,
-                transform=ax.transAxes,
-                color="#fff83a",
-                va="center",
-                ha="left",
+                0, 0.5, o, transform=ax.transAxes, color="#fff83a", va="center", ha="left",
             )
 
 
@@ -265,15 +240,11 @@ class Calibrations:
             [self.sphr.info["xbin"], self.sphr.info["ybin"],]
         )
 
-        bDIMW, bDIMO = self.bkgr.info["size"] * np.array(
-            [self.bkgr.info["xbin"], self.bkgr.info["ybin"],]
-        )
+        bDIMW, bDIMO = self.bkgr.info["size"] * np.array([self.bkgr.info["xbin"], self.bkgr.info["ybin"],])
 
         if self.DIMW != bDIMW or self.DIMO != bDIMO:
             raise ValueError(
-                "Wrong background size: {}x{} vs {}x{}".format(
-                    self.DIMW, self.DIMO, bDIMW, bDIMO
-                )
+                "Wrong background size: {}x{} vs {}x{}".format(self.DIMW, self.DIMO, bDIMW, bDIMO)
             )
 
     def load_pattern(self):
@@ -293,9 +264,7 @@ class Calibrations:
         cc = np.arange(-dv, dv + 1, 1)
         ii = ((np.zeros([self.DIMW, 1]) + cc).T + l).flatten()
 
-        jj = np.repeat(
-            np.arange(self.DIMW)[np.newaxis, ...], dv * 2 + 1, axis=0,
-        ).flatten()
+        jj = np.repeat(np.arange(self.DIMW)[np.newaxis, ...], dv * 2 + 1, axis=0,).flatten()
 
         mask = (ii.astype(int, copy=False), jj.astype(int, copy=False))
         if not show:
@@ -308,14 +277,10 @@ class Calibrations:
     def make_cutting_masks(self, **kws):
         """ make cutting masks for each diffraction order"""
         self.dv = kws.get("dv", self.dv)
-        self.cutting_masks = [
-            self.make_mask(i, dv=self.dv) for i in range(self.pattern.shape[1])
-        ]
+        self.cutting_masks = [self.make_mask(i, dv=self.dv) for i in range(self.pattern.shape[1])]
 
         # check if pixel in the mask is out of top bound (for 28th order, CMOS)
-        ordrs = [
-            i for i, j in enumerate(self.cutting_masks) if j[0].max() > self.DIMO - 1
-        ]
+        ordrs = [i for i, j in enumerate(self.cutting_masks) if j[0].max() > self.DIMO - 1]
 
         for o in ordrs:
             ind = self.cutting_masks[o][0] > self.DIMO - 1
@@ -330,9 +295,7 @@ class Calibrations:
     def show_masks(self, **kws):
         """ show all masks """
         dv = kws.get("dv", self.dv)
-        self.masks = np.array(
-            [self.make_mask(i, show=True, dv=dv) for i in range(self.pattern.shape[1])]
-        )
+        self.masks = np.array([self.make_mask(i, show=True, dv=dv) for i in range(self.pattern.shape[1])])
 
     # =============================
     # WAVELENGTH
@@ -352,10 +315,7 @@ class Calibrations:
         x = np.arange(self.DIMW)
 
         self.order_wavel = np.array(
-            [
-                np.poly1d(np.polyfit(w[m][:, 3], w[m][:, 4], p))(x)
-                for m, p in zip(msks, pwrs)
-            ]
+            [np.poly1d(np.polyfit(w[m][:, 3], w[m][:, 4], p))(x) for m, p in zip(msks, pwrs)]
         )
         if kws.get("rtrn", False):
             return self.order_wavel
@@ -522,13 +482,9 @@ class Calibrations:
         y = self.sphr.spectra[0] - self.bkgr.spectra[0]
         x = self.sphr.wavelength
         # np.nans Warning here:
-        wmsr = (
-            self.integral(x) * self.sphr.info["ExposureTime"] / y * 1e-2
-        )  # W/(m2 sr nm)
+        wmsr = self.integral(x) * self.sphr.info["ExposureTime"] / y * 1e-2  # W/(m2 sr nm)
         wm = wmsr * 4 * np.pi  # W/(m2 sr nm)
-        phmsr = (
-            wmsr * x * 1e-9 / (speed_of_light * Planck)
-        )  # convert W (or J/s) to Nph/s
+        phmsr = wmsr * x * 1e-9 / (speed_of_light * Planck)  # convert W (or J/s) to Nph/s
 
         self.absolute = {"wmsr": wmsr, "wm": wm, "phmsr": phmsr}
 
@@ -616,9 +572,7 @@ class Spectrum:
             trigdelay=self.trigdelay,
         )
 
-        pth = join(
-            self.path_output, "{}_{}.txt".format(self.shotnumber, "echelle_spec")
-        )
+        pth = join(self.path_output, "{}_{}.txt".format(self.shotnumber, "echelle_spec"))
 
         data = np.vstack((self.wavelength, self.spectra_to_save[self.saveunits]))
         try:

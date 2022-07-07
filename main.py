@@ -124,6 +124,8 @@ class EchelleAnalizer(QtGui.QMainWindow, mainwindow.Ui_MainWindow):
         if not os.path.exists(self.path_output):
             os.makedirs(self.path_output)
 
+        print(self.path_output)
+
         self.path_header_template = "header_template.txt"
 
     def read_header_template(self):
