@@ -1,0 +1,5 @@
+include src/echelle_spectra/examples/*
+include src/echelle_spectra/resources/*
+include src/echelle_spectra/resources/calibration_files/*
+include src/echelle_spectra/resources/graphics/*
+include src/echelle_spectra/resources/test_data/*
