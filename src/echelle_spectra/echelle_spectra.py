@@ -4,10 +4,18 @@ from datetime import datetime
 from pathlib import Path
 from pyqtgraph.Qt import QtCore, QtGui
 
-import tools.echelle as ech
-import tools.emissionbands as eb
-import tools.emissiondata as ebd
-from resources import window_layout
+try:
+    # script-level imports for local work
+    import tools.echelle as ech
+    import tools.emissionbands as eb
+    import tools.emissiondata as ebd
+    from resources import window_layout
+except ModuleNotFoundError:
+    # module-level imports for running script via python -m echelle_spectra
+    import echelle_spectra.tools.echelle as ech
+    import echelle_spectra.tools.emissionbands as eb
+    import echelle_spectra.tools.emissiondata as ebd
+    from echelle_spectra.resources import window_layout
 
 
 class EchelleSpectra(QtGui.QMainWindow, window_layout.Ui_MainWindow):
@@ -104,9 +112,9 @@ class EchelleSpectra(QtGui.QMainWindow, window_layout.Ui_MainWindow):
                                      .replace("{workdir}", str(Path().absolute()))))
             getattr(self, path).mkdir(parents=True, exist_ok=True)
 
-        self.path_calibration = "./resources/calibration_files"
-        self.path_header_template = "./resources/header_template.txt"
-        self.path_last_shot = "./.last_shot"
+        self.path_calibration = self.config["base_path"] / "resources/calibration_files"
+        self.path_header_template = self.config["base_path"] / "resources/header_template.txt"
+        self.path_last_shot = self.config["base_path"] / ".last_shot"
 
     def get_header_template(self):
         """Get header template used when saving data
