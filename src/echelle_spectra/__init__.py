@@ -1,5 +1,5 @@
-import sys
 import pathlib
+import sys
 
 # temporarily add this module's directory to PATH
 _echelle_base = pathlib.Path(__file__).parent.absolute()
@@ -11,6 +11,9 @@ from tools import echelle
 from tools import emissionbands
 from tools import emissiondata
 from tools.config_loader import load_config
+
+# remove unneeded names from namespace
+del pathlib, sys
 
 # echelle_spectra version
 __version__ = "0.0.1"
