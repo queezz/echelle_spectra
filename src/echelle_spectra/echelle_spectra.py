@@ -4,10 +4,18 @@ from datetime import datetime
 from pathlib import Path
 from pyqtgraph.Qt import QtCore, QtGui
 
-import tools.echelle as ech
-import tools.emissionbands as eb
-import tools.emissiondata as ebd
-from resources import window_layout
+try:
+    # script-level imports for local work
+    import tools.echelle as ech
+    import tools.emissionbands as eb
+    import tools.emissiondata as ebd
+    from resources import window_layout
+except ModuleNotFoundError:
+    # module-level imports for running script via python -m echelle_spectra
+    import echelle_spectra.tools.echelle as ech
+    import echelle_spectra.tools.emissionbands as eb
+    import echelle_spectra.tools.emissiondata as ebd
+    from echelle_spectra.resources import window_layout
 
 
 class EchelleSpectra(QtGui.QMainWindow, window_layout.Ui_MainWindow):
