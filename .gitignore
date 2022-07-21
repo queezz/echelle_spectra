@@ -152,3 +152,4 @@ cython_debug/
 /src/echelle_spectra/config.toml
 /src/echelle_spectra/echelle_spectra/
 /src/echelle_spectra/.last_shot
+/echelle_spectra/

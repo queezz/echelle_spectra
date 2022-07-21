@@ -1,24 +1,20 @@
+import ctypes
 import numpy as np
-import os
+import sys
 from datetime import datetime
 from pathlib import Path
+from PyQt5.QtWidgets import QApplication
 from pyqtgraph.Qt import QtCore, QtGui
 
-try:
-    # script-level imports for local work
-    import tools.echelle as ech
-    import tools.emissionbands as eb
-    import tools.emissiondata as ebd
-    from resources import window_layout
-except ModuleNotFoundError:
-    # module-level imports for running script via python -m echelle_spectra
-    import echelle_spectra.tools.echelle as ech
-    import echelle_spectra.tools.emissionbands as eb
-    import echelle_spectra.tools.emissiondata as ebd
-    from echelle_spectra.resources import window_layout
+import tools.echelle as ech
+import tools.emissionbands as eb
+import tools.emissiondata as ebd
+from __init__ import __version__
+from __init__ import _config
+from resources import window_layout
 
 
-class EchelleSpectra(QtGui.QMainWindow, window_layout.Ui_MainWindow):
+class EchelleSpectraGUI(QtGui.QMainWindow, window_layout.Ui_MainWindow):
     """GUI window for the echelle_spectra app"""
     def __init__(self, config):
         super(self.__class__, self).__init__()
@@ -487,7 +483,7 @@ class EchelleSpectra(QtGui.QMainWindow, window_layout.Ui_MainWindow):
         shot = self.shot_number.value()
         pth = self.output_path / f"{shot}_{self.config['diag_name']}.txt"
 
-        if os.path.exists(pth) and not self.overwrite.isChecked():
+        if Path(pth).is_file() and not self.overwrite.isChecked():
             return
 
         header = self.header.format(
@@ -795,5 +791,18 @@ class SaveSpectraThread(QtCore.QThread):
         self.pass_result.emit(self.spectra)
 
 
+def start():
+    try:
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(f"echelle_spectra-{__version__}")
+    except OSError:
+        pass
+
+    app = QApplication(sys.argv)
+    app.setWindowIcon(QtGui.QIcon(str(_config["base_path"] / "resources/graphics/echelle.png")))
+    win = EchelleSpectraGUI(_config)
+    win.show()
+    sys.exit(app.exec_())
+
+
 if __name__ == "__main__":
-    pass
+    start()

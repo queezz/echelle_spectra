@@ -43,3 +43,6 @@ dev = ["black", "jupyter", "peakutils", "PyQt5-stubs", "twine"]
 [project.urls]
 "Homepage" = "https://github.com/queezz/echelle_spectra"
 "Bug Tracker" = "https://github.com/queezz/echelle_spectra/issues"
+
+[project.scripts]
+echelle_spectra = "echelle_spectra.echelle_spectra_gui:start"
