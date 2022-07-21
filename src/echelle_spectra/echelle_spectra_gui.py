@@ -528,11 +528,13 @@ class EchelleSpectraGUI(QtGui.QMainWindow, window_layout.Ui_MainWindow):
               <font size = {fs}>xbin: {xbin}</font><br>
               <font size = {fs}>ybin: {ybin}</font><br>
               """
+        background_str = ("[{}..{}] ({})".format(self.em.info["BackgroundFrames"][0],
+                                                 self.em.info["BackgroundFrames"][-1],
+                                                 len(self.em.info["BackgroundFrames"]))
+                          if len(self.em.info["BackgroundFrames"]) != 0 else "None")
         txt = txt.format(
             frames=self.em.info["NumberOfFrames"],
-            background="[{}..{}] ({})".format(self.em.info["BackgroundFrames"][0],
-                                              self.em.info["BackgroundFrames"][-1],
-                                              len(self.em.info["BackgroundFrames"])),
+            background=background_str,
             temp=self.em.info["DetectorTemperature"],
             exposure=self.em.info["ExposureTime"],
             cycle=self.em.info["CycleTime"],

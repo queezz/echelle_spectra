@@ -519,6 +519,7 @@ class Spectrum:
             subtract = np.sum(image.spectra[self.info["BackgroundFrames"]], axis=0) / len(self.info["BackgroundFrames"])
             self.counts = image.spectra - subtract
         else:
+            self.info["BackgroundFrames"] = []
             self.counts = image.spectra
 
         self.absolute = image.clbr.absolute
