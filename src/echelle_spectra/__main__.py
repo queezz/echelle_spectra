@@ -18,6 +18,10 @@ except ModuleNotFoundError:
     from .__init__ import __version__
     from .echelle_spectra import EchelleSpectra
 
+try:
+    ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(f"echelle_spectra-{__version__}")
+except OSError:
+    pass
 
 base_path = Path(__file__).parent.absolute()
 
@@ -34,13 +38,9 @@ except (tomli.TOMLDecodeError, OSError):
     shutil.copy(base_path / "resources/defaults.toml", base_path / "config.toml")
     config = load_config(base_path)
 
-try:
-    ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(f"echelle_spectra-{__version__}")
-except OSError:
-    pass
-
 app = QApplication(sys.argv)
-app.setWindowIcon(QtGui.QIcon(base_path / "resources/graphics/echelle.png"))
+app.setWindowIcon(QtGui.QIcon(str(base_path / "resources/graphics/echelle.png")))
+config["base_path"] = base_path
 win = EchelleSpectra(config)
 win.show()
 sys.exit(app.exec_())

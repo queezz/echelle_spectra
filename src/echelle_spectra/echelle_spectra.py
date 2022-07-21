@@ -112,9 +112,9 @@ class EchelleSpectra(QtGui.QMainWindow, window_layout.Ui_MainWindow):
                                      .replace("{workdir}", str(Path().absolute()))))
             getattr(self, path).mkdir(parents=True, exist_ok=True)
 
-        self.path_calibration = "./resources/calibration_files"
-        self.path_header_template = "./resources/header_template.txt"
-        self.path_last_shot = "./.last_shot"
+        self.path_calibration = self.config["base_path"] / "resources/calibration_files"
+        self.path_header_template = self.config["base_path"] / "resources/header_template.txt"
+        self.path_last_shot = self.config["base_path"] / ".last_shot"
 
     def get_header_template(self):
         """Get header template used when saving data
