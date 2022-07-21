@@ -16,7 +16,7 @@ from tools.config_loader import load_config
 del pathlib, sys
 
 # echelle_spectra version
-__version__ = "0.0.1"
+__version__ = "0.0.2"
 
 # other useful module-level variables
 _config = load_config(_echelle_base)

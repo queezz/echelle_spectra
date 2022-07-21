@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "echelle_spectra"
-version = "0.0.1"
+version = "0.0.2"
 description = "Graphical tool for the extraction and analysis of calibrated spectra from 2D Echelle spectrometer images"
 readme = "README.md"
 requires-python = ">=3.8"
