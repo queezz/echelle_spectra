@@ -1,0 +1,2 @@
+# Note that unlike in the rest of this module, the Python files in this folder have not been cleaned up or otherwise
+# optimised during the packaging reorganistaion process (18/07/2022).

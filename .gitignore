@@ -1,11 +1,3 @@
-.DS_store
-# *.sif files - images
-#*.sif
-
-# VS code
-*.code-workspace
-# VIM
-*.swp
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
@@ -144,3 +136,20 @@ dmypy.json
 
 # Cython debug symbols
 cython_debug/
+
+# NON-DEFAULT #
+
+# macOS
+*.DS_store
+
+# VS Code
+*.code-workspace
+
+# Vim
+*.swp
+
+# Project-specific
+/src/echelle_spectra/config.toml
+/src/echelle_spectra/echelle_spectra/
+/src/echelle_spectra/.last_shot
+/echelle_spectra/
