@@ -1,8 +1,9 @@
 """
 Tools for Echelle spectrometer images
 """
-# from sif_reader import np_open
-from sif_parser import np_open
+# from sif_reader import np_open # obsolete
+# now import inside read_image to ignore coflicts with PIL tiff pluging
+# from sif_parser import np_open
 import numpy as np
 import os
 from os.path import join
@@ -13,29 +14,115 @@ DIMO = 1024  # pixel dimension in the order direction
 remove_npnans = lambda a: a[~np.isnan(a)]  # remove nans from numpy array
 
 
+def read_image(fpth, spec="black", crop=[0, -1]):
+    """
+    Load image from Echelle Spectrometer
+
+    Parameters
+    ==========
+    fpth: str
+        paht to image file
+    spec: str
+        spectrometer code name
+        black - Black Echelle
+        fujii - new Echelle
+    crop: list
+        crop indexes in the order direction
+    """
+    if spec == "fujii":
+        # If images are saved as tiff.
+        # TODO: save in fits with custom description?
+        # Camera is for now: Hamamatsu Orca QUEST
+        from PIL import Image
+
+        # crop = [1400, 2600]
+
+        # print(spec, fpth)
+
+        tifim = Image.open(fpth)
+        info = {"NumberOfFrames": tifim.n_frames, "ybin": 1, "xbin": 1}
+        # Transpose image (because orientation is different)
+        image = np.array(tifim).T
+        # Crop image, because calibration is done only for Fulcher for now
+        image = image[crop[0] : crop[1]]
+        info["size"] = image.shape[::-1]
+        if info["NumberOfFrames"] == 1:
+            images = np.array([image])
+
+    if spec == "black":
+        # Camera for now is Andor CMOS ...
+        # Was Andor CCD ...
+        # print(spec, fpth)
+        from sif_parser import np_open
+
+        images, info = np_open(fpth)
+        # If images are binned
+        images = images.repeat(info["ybin"], axis=1)
+        images = images.repeat(info["xbin"], axis=2)
+
+    return images, info
+
+
 class EchelleImage:
     """"""
 
-    def __init__(self, fpth, clbr=None):
+    def __init__(self, fpth, clbr=None, spec="black", crop=[0, -1]):
         """ Sif Image container with tools to convert Echelle image into spectra
         fpth - path to sif file
         """
         self.fpth = fpth
+        self.spec = spec
+        self.crop = crop
         self.read_image()
         if clbr is not None:
             self.clbr = clbr
 
+    def calibrate(self):
+        """
+        Run all calibrations
+        """
+        self.calculate_order_spectra()  # image -> order spectra
+        self.correct_order_shapes()  # remove out of bounds boundaries
+        self.calculate_spectra()  # order spectra -> fullwidth spectra
+
     def read_image(self):
         """
+        Wrapper for read_image
         """
-        images, self.info = np_open(self.fpth)
-        images = images.repeat(self.info["ybin"], axis=1)
-        self.images = images.repeat(self.info["xbin"], axis=2)
+        self.images, self.info = read_image(self.fpth, spec=self.spec, crop=self.crop)
+
+    # TODO: Remove
+    #    def read_image(self):
+    #        """
+    #        """
+    #        images, self.info = np_open(self.fpth)
+    #        images = images.repeat(self.info["ybin"], axis=1)
+    #        self.images = images.repeat(self.info["xbin"], axis=2)
 
     def plot_frame(self, frame, **kws):
-        """show a frame of the sif image from fpth"""
+        """
+        Plots a frame of the image
+
+        Parameters
+        ==========
+        frame: int
+            frame of a multipage image
+        scale: float
+            image colormap scale factor
+        dark: bool
+            image style: dark or not
+        axis: bool
+            show axis?
+        axlabel: bool
+            show axlabels?
+        pattern: bool
+            show pattern?
+        aspect: float
+            image aspect ratio
+        """
         import matplotlib.pylab as plt
         import matplotlib as mpl
+        import matplotlib.ticker as mticker
 
         # font sizes
         fs = {"cb": 6, "cbname": 8, "pattern": 5, "hint": 3}
@@ -57,8 +144,11 @@ class EchelleImage:
         ax = fig.add_subplot(111)
         imin = np.min(image)
         if image.min() > imin:
-            impin = image.min()
-        im = ax.imshow(image, cmap=clrs["cmap"], norm=mpl.colors.LogNorm(imin, image.max() * scale))
+            imin = image.min()
+        aspect = kws.get("aspect", 1)
+        im = ax.imshow(
+            image, cmap=clrs["cmap"], norm=mpl.colors.LogNorm(imin, image.max() * scale), aspect=aspect
+        )
         # im = plt.imshow(a, norm = mpl.colors.LogNorm(1e2,5e3))
         im.cmap.set_under(clrs["under"])
         im.cmap.set_over(clrs["over"])
@@ -68,12 +158,15 @@ class EchelleImage:
             #             transform = ax.transAxes, fontsize = fs['shotname'])
             cbaxes = fig.add_axes([0.255, 0.99, 0.51, 0.05])
             cb = plt.colorbar(im, extend="both", cax=cbaxes, orientation="horizontal")
+            # FixedLocator is used to avoid UserWarning from Matplotlib
+            ticks_loc = cbaxes.get_xticks().tolist()
+            cbaxes.xaxis.set_major_locator(mticker.FixedLocator(ticks_loc))
             cb.ax.set_xticklabels(cb.ax.get_xticklabels(), rotation=0, fontsize=fs["cb"])
             cb.ax.text(
                 0.4, 0.2, "counts", fontsize=fs["cbname"], rotation=0, color="w", transform=cb.ax.transAxes,
             )
             if kws.get("axlabel", True):
-                ax.text(-0.2 * ymax, ymax * 0.95, "vertical pixel", rotation=90)
+                ax.text(-0.25 * ymax, ymax * 0.85, "vertical pixel", rotation=90)
                 ax.text(xmax * 0.65, -xmax * 0.15, "horizontal pixel")
         else:
             plt.axis("off")
@@ -85,9 +178,9 @@ class EchelleImage:
             clbr = kws.get("clbr", None)
             if clbr is None:
                 clbr = self.clbr
-            clbr.show_masks(dv=8)
-            plt.imshow(
-                np.invert(clbr.masks.sum(axis=0)), origin="lower", alpha=0.4, cmap="binary",
+
+            ax.imshow(
+                np.invert(clbr.pattern_image), origin="lower", alpha=0.4, cmap="binary",
             )
 
         ax.set_xlim(0, xmax)
@@ -97,8 +190,20 @@ class EchelleImage:
         return
 
     def order_image(self, frame, ordind, sm=False):
-        """ Cut the image along the order
-        clbr - instance of Calibrations, already "started"
+        """
+        Cut the image along the order
+
+        Parameters
+        ==========
+
+        clbr: Calibrations
+            instance of Calibrations, already "started"
+        frame: int
+            image frame
+        ordind: int
+            order number
+        sm: bool
+            sum the order image?
         """
         clbr = self.clbr
         img = self.images[frame][clbr.cutting_masks[ordind]]
@@ -117,8 +222,12 @@ class EchelleImage:
         frames = range(self.info["NumberOfFrames"])
         orders = range(clbr.pattern.shape[1])
 
+        # To correct VisibleDeprecationWarning from numpy, added dtype=object
+        # This is because order images are not always of equal length
+        # And they form a ragged array. I'm using even partial diffraction orders,
+        # which is the reason for non-equal order image lengths.
         self.order_spectra = np.array(
-            [np.array([self.order_image(fi, o, sm=True) for o in orders]) for fi in frames]
+            [np.array([self.order_image(fi, o, sm=True) for o in orders], dtype=object) for fi in frames]
         )
 
     def correct_order_shapes(self):
@@ -167,10 +276,23 @@ class EchelleImage:
             self.order_image(frame, ordind), origin="lower", aspect=aspect,
         )
 
-    def plot_cut_image(self, frame, aspect=2):
-        """ Plot images of all orders in one picture
+    def plot_cut_image(self, frame, aspect=2, norm="log", scale=1):
+        """
+        Plot images of all orders in one picture
+
+        Parameters
+        ==========
+        frame: int
+            frame number
+        aspect: float
+            image aspect ratio
+        norm: log or lin
+            colormap
+        scale: float
+            colormap scale multiplier
         """
         import matplotlib.pylab as plt
+        import matplotlib as mpl
 
         NORD = self.clbr.pattern.shape[1]
 
@@ -181,7 +303,16 @@ class EchelleImage:
         [ax.set_xlim([0, self.clbr.DIMW]) for ax in axs]
 
         for o, ax in enumerate(reversed(axs)):
-            ax.imshow(self.order_image(frame, o), aspect=aspect)
+            orderimage = self.order_image(frame, o)
+            if norm == "log":
+                ax.imshow(
+                    orderimage,
+                    aspect=aspect,
+                    norm=mpl.colors.LogNorm(orderimage.min(), orderimage.max() * scale),
+                )
+            else:
+                ax.imshow(orderimage, aspect=aspect)
+
             ax.get_xaxis().set_visible(False)
             ax.get_yaxis().set_visible(False)
             # ax.axis('off')
@@ -193,20 +324,41 @@ class EchelleImage:
 class Calibrations:
     """ """
 
+    # Default filenames and order width.
     folder = join("../resources/calibration_files")
     dv = 8  # dv*2 + 1 - width of the order in pixels
+    filenames = {
+        "orders": "pattern.txt",
+        "wavelength": "Th_wavelength.txt",
+        "sphr": "absolute_20170613_b8_0.2_v2.sif",
+        "bkgr": "absolute_20170613_b8_0.2_bkg.sif",
+        "integral": "integrating_sphere.txt",
+    }
 
-    def __init__(self, folder=folder):
-        """ """
+    # TODO: calibration file names: load from a settings file.
+    # Settings file for each Echelle spectrometer.
+    # Maybe provide here only path to settings file for
+    # Given spectromenter / experiment.
+    # Need to make some sort of a database of experiments...
+    def __init__(self, folder=folder, filenames=filenames, dv=dv, spec="black", crop=[0, -1]):
+        """
+        Set filenames. To make it work universally, supply 
+        filenames as an argument.
+        """
         self.folder = folder
-        self.filenames = {
-            "orders": "pattern.txt",
-            "wavelength": "Th_wavelength.txt",
-            "sphr": "absolute_20170613_b8_0.2_v2.sif",
-            "bkgr": "absolute_20170613_b8_0.2_bkg.sif",
-            "integral": "integrating_sphere.txt",
-        }
+        self.filenames = filenames
+        self.dv = dv
+        self.spec = spec
+        self.crop = crop
         # print(os.listdir(folder))
+
+    def start_cut(self):
+        """
+        Load pattern and prep order images, no wavelength calibraiton
+        """
+        self.load_pattern()
+        self.load_sphere()
+        self.make_cutting_masks()
 
     def start(self):
         """ Prepare calibrations:
@@ -232,9 +384,13 @@ class Calibrations:
         1. Get image dimentions to make cutting patterns
         2. Use it in absolute calibraiton
         """
-        self.sphr = EchelleImage(join(self.folder, self.filenames["sphr"]), clbr=self,)
+        self.sphr = EchelleImage(
+            join(self.folder, self.filenames["sphr"]), clbr=self, spec=self.spec, crop=self.crop
+        )
 
-        self.bkgr = EchelleImage(join(self.folder, self.filenames["bkgr"]), clbr=self,)
+        self.bkgr = EchelleImage(
+            join(self.folder, self.filenames["bkgr"]), clbr=self, spec=self.spec, crop=self.crop
+        )
 
         self.DIMW, self.DIMO = self.sphr.info["size"] * np.array(
             [self.sphr.info["xbin"], self.sphr.info["ybin"],]
@@ -270,7 +426,7 @@ class Calibrations:
         if not show:
             return mask
         else:
-            pp = np.zeros((self.DIMW, self.DIMO), dtype=bool)
+            pp = np.zeros((self.DIMO, self.DIMW), dtype=bool)
             pp[mask] = True
             return pp
 
@@ -292,10 +448,21 @@ class Calibrations:
             )
             # dimw = int(cmsk[0].shape[0]/self.dv)
 
-    def show_masks(self, **kws):
-        """ show all masks """
-        dv = kws.get("dv", self.dv)
-        self.masks = np.array([self.make_mask(i, show=True, dv=dv) for i in range(self.pattern.shape[1])])
+        self.make_pattern_image()
+
+    #    def show_masks(self, **kws):
+    #        """ show all masks """
+    #        dv = kws.get("dv", self.dv)
+    #        self.masks = np.array([self.make_mask(i, show=True, dv=dv) for i in range(self.pattern.shape[1])])
+
+    def make_pattern_image(self):
+        """
+        make pattern image
+        """
+        pp = np.zeros((self.DIMO, self.DIMW), dtype=bool)
+        for mask in self.cutting_masks:
+            pp[mask] = True
+        self.pattern_image = pp
 
     # =============================
     # WAVELENGTH
@@ -465,7 +632,8 @@ class Calibrations:
     # Absolute
     # =============================
     def absolute_calibration(self):
-        """ Read the integrating sphere wavelength characteristic
+        """
+        Read the integrating sphere wavelength characteristic
         """
         from scipy.interpolate import interp1d
         from scipy.constants import speed_of_light, Planck
@@ -512,11 +680,17 @@ class Spectrum:
         self.fpth = image.fpth
         if image.spectra.shape[0] > 1:
             # look for all frames that match background criteria
-            b_fms = np.array([i for i, f in enumerate(image.spectra) if not any(f > np.mean(f) + (np.std(f) * 5))])
+            b_fms = np.array(
+                [i for i, f in enumerate(image.spectra) if not any(f > np.mean(f) + (np.std(f) * 5))]
+            )
             # identify the longest consecutive chain of frames, and use that as list of background frame indices
-            self.info["BackgroundFrames"] = max(np.split(b_fms, np.where(np.diff(b_fms) != 1)[0] + 1), key=len).tolist()
+            self.info["BackgroundFrames"] = max(
+                np.split(b_fms, np.where(np.diff(b_fms) != 1)[0] + 1), key=len
+            ).tolist()
             # average over all selected background frames, subtract this average background frame from all other frames
-            subtract = np.sum(image.spectra[self.info["BackgroundFrames"]], axis=0) / len(self.info["BackgroundFrames"])
+            subtract = np.sum(image.spectra[self.info["BackgroundFrames"]], axis=0) / len(
+                self.info["BackgroundFrames"]
+            )
             self.counts = image.spectra - subtract
         else:
             self.info["BackgroundFrames"] = []
