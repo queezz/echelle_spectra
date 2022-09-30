@@ -23,7 +23,7 @@ DIMO = 1024  # pixel dimension in the order direction
 remove_npnans = lambda a: a[~pd.isnull(a)]  # remove nans from numpy array
 
 
-def read_image(fpth, spec="black", crop=[0, -1]):
+def read_image(fpth, spec="black", crop=[0, -1], exptime=1):
     """
     Load image from Echelle Spectrometer
 
@@ -52,14 +52,14 @@ def read_image(fpth, spec="black", crop=[0, -1]):
         info = {"NumberOfFrames": tifim.n_frames, "ybin": 1, "xbin": 1}
         # Now Hamamatsu software saves in *.tiff, and no camera parameters are saved.
         # TODO: fix this
-        info["ExposureTime"] = 0.1  # s, for integrating sphere exposure and absolute calibration
+        info["ExposureTime"] = exptime  # s, for integrating sphere exposure and absolute calibration
         # Transpose image (because orientation is different)
         image = np.array(tifim).T
         # Crop image, because calibration is done only for Fulcher for now
         image = image[crop[0] : crop[1]]
-        # rotate the image 
+        # rotate the image
         # so orders increas in the upward direction
-        #image = np.rot90(np.rot90(image))        
+        # image = np.rot90(np.rot90(image))
         info["size"] = image.shape[::-1]
         if info["NumberOfFrames"] == 1:
             images = np.array([image])
@@ -81,13 +81,14 @@ def read_image(fpth, spec="black", crop=[0, -1]):
 class EchelleImage:
     """"""
 
-    def __init__(self, fpth, clbr=None, spec="black", crop=[0, -1]):
+    def __init__(self, fpth, clbr=None, spec="black", crop=[0, -1], exptime=1):
         """Sif Image container with tools to convert Echelle image into spectra
         fpth - path to sif file
         """
         self.fpth = fpth
-        self.spec = spec
+        self.spectrometer = spec
         self.crop = crop
+        self.exposure_time = exptime
         self.read_image()
         if clbr is not None:
             self.clbr = clbr
@@ -104,7 +105,11 @@ class EchelleImage:
         """
         Wrapper for read_image
         """
-        self.images, self.info = read_image(self.fpth, spec=self.spec, crop=self.crop)
+        self.images, self.info = read_image(
+            self.fpth, spec=self.spectrometer, crop=self.crop, exptime=self.exposure_time
+        )
+        if self.spectrometer == "black":
+            self.exposure_time = self.info["ExposureTime"]
 
     # TODO: Remove
     #    def read_image(self):
@@ -157,9 +162,7 @@ class EchelleImage:
 
         fig = plt.figure()
         ax = fig.add_subplot(111)
-        imin = np.min(image)
-        if image.min() > imin:
-            imin = image.min()
+        imin = image.min()        
         aspect = kws.get("aspect", 1)
         im = ax.imshow(
             image, cmap=clrs["cmap"], norm=mpl.colors.LogNorm(imin, image.max() * scale), aspect=aspect,
@@ -244,6 +247,7 @@ class EchelleImage:
         self.order_spectra = np.array(
             [np.array([self.order_image(fi, o, sm=True) for o in orders], dtype=object) for fi in frames]
         )
+
 
     def correct_order_shapes(self):
         """
@@ -355,7 +359,7 @@ class Calibrations:
     # Maybe provide here only path to settings file for
     # Given spectromenter / experiment.
     # Need to make some sort of a database of experiments...
-    def __init__(self, folder=folder, filenames=filenames, dv=dv, spec="black", crop=[0, -1]):
+    def __init__(self, folder=folder, filenames=filenames, dv=dv, spec="black", crop=[0, -1], exptime=1):
         """
         Set filenames. To make it work universally, supply
         filenames as an argument.
@@ -363,7 +367,9 @@ class Calibrations:
         self.folder = folder
         self.filenames = filenames
         self.dv = dv
-        self.spec = spec
+        # For Tiff images without info about the shot, provide explicitly
+        self.sphere_exposure_time = exptime
+        self.spectrometer = spec
         self.crop = crop
         # print(os.listdir(folder))
 
@@ -400,11 +406,19 @@ class Calibrations:
         2. Use it in absolute calibraiton
         """
         self.sphr = EchelleImage(
-            join(self.folder, self.filenames["sphr"]), clbr=self, spec=self.spec, crop=self.crop,
+            join(self.folder, self.filenames["sphr"]),
+            clbr=self,
+            spec=self.spectrometer,
+            crop=self.crop,
+            exptime=self.sphere_exposure_time,
         )
 
         self.bkgr = EchelleImage(
-            join(self.folder, self.filenames["bkgr"]), clbr=self, spec=self.spec, crop=self.crop,
+            join(self.folder, self.filenames["bkgr"]),
+            clbr=self,
+            spec=self.spectrometer,
+            crop=self.crop,
+            exptime=self.sphere_exposure_time,  # for tiff files
         )
 
         self.DIMW, self.DIMO = self.sphr.info["size"] * np.array(
@@ -530,6 +544,10 @@ class Calibrations:
         self.orders_bad_shape = wrong_shapes
         self.orders_bad_froms = np.array(froms)
 
+        # check if lambda \propto -pix or +pix
+        direction = self.order_wavel[0][-1] - self.order_wavel[0][0]
+        self.direction = direction / np.abs(direction)
+
     def print_bad_shapes(self):
         """Print orders with bad shapes and the indices where the np.nan starts"""
         for o, i in zip(self.orders_bad_shape, self.orders_bad_froms):
@@ -558,7 +576,8 @@ class Calibrations:
         """
 
         def isc(x1, y1, x2, y2):
-            """For two neighbor orders with lambda \propto -pix
+            """
+            For two neighbor orders with lambda \propto -pix
             find end index for x1 and start index for x2 so they will
             not intersect
             x1 < ind1 and x2 >= ind2
@@ -573,20 +592,20 @@ class Calibrations:
             x2 = x2[i2]
             y2 = y2[i2]
 
-            if x1[0] < x2[0]:
-                # swap places
-                a, b = x1, y1
-                x1, y1 = x2, y2
-                x2, y2 = a, b
-
             f1 = interp1d(x1, y1, 1)
             f2 = interp1d(x2, y2, 1)
             x = np.linspace(*sorted([x1[0], x1[-1], x2[0], x2[-1]])[1:-1], len(x2))
             x0 = x[np.argmin(np.abs(f1(x) - f2(x)))]
             ind2 = np.where(x2 <= x0)
             ind1 = np.where(x1 > x0)
+            # Account for opposite wavelength direction
+            if self.direction > 0:
+                # If wavlength \propto +pixel
+                return ind1[0][0] + 1, ind2[0][-1]
+            if self.direction < 0:
+                # If wavlength \propto -pixel
 
-            return ind1[0][-1] + 1, ind2[0][0]
+                return ind1[0][-1] + 1, ind2[0][0]
 
         self.sphr.correct_order_shapes()
 
@@ -717,12 +736,14 @@ class Spectrum:
             self.counts = image.spectra
 
         self.absolute = image.clbr.absolute
+        self.direction = image.clbr.direction
         image = None
 
         # Flip wavelength, it is from high to low by default for black Echelle
-        self.wavelength = np.flip(self.wavelength)
-        self.counts = np.flip(self.counts, axis=1)
-        self.absolute = {i: np.flip(j) for i, j in self.absolute.items()}
+        if self.direction < 0:
+            self.wavelength = np.flip(self.wavelength)
+            self.counts = np.flip(self.counts, axis=1)
+            self.absolute = {i: np.flip(j) for i, j in self.absolute.items()}
 
         self.wm = self.counts * self.absolute["wm"] / self.info["ExposureTime"]
         self.wmsr = self.counts * self.absolute["wmsr"] / self.info["ExposureTime"]
