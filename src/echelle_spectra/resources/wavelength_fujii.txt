@@ -1,0 +1,6 @@
+# Wavelength calibration lool-up table for new Echelle spectrometer
+# Last update 29/09/2022
+#order from to      center      wavelength  band
+
+3	0378	0403	0390.9491	772.42072	ArI
+

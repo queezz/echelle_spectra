@@ -7,11 +7,20 @@ Tools for Echelle spectrometer images
 import numpy as np
 import os
 from os.path import join
+import pandas as pd
 
 DIMW = 1024  # pixel dimension in the wavelength direction
 DIMO = 1024  # pixel dimension in the order direction
 
-remove_npnans = lambda a: a[~np.isnan(a)]  # remove nans from numpy array
+# TypeError: ufunc 'isnan' not supported for
+# the input types, and the inputs could not be safely
+# coerced to any supported types according to the casting rule ''safe''
+# Changing from ~np.isnan(a) to
+# ~pd.isnull(a) to avoid this error for clbr.sphr.order_spectra[0,nord]
+#
+# remove_npnans = lambda a: a[~np.isnan(a)]  # remove nans from numpy array
+
+remove_npnans = lambda a: a[~pd.isnull(a)]  # remove nans from numpy array
 
 
 def read_image(fpth, spec="black", crop=[0, -1]):
@@ -41,10 +50,16 @@ def read_image(fpth, spec="black", crop=[0, -1]):
 
         tifim = Image.open(fpth)
         info = {"NumberOfFrames": tifim.n_frames, "ybin": 1, "xbin": 1}
+        # Now Hamamatsu software saves in *.tiff, and no camera parameters are saved.
+        # TODO: fix this
+        info["ExposureTime"] = 0.1  # s, for integrating sphere exposure and absolute calibration
         # Transpose image (because orientation is different)
         image = np.array(tifim).T
         # Crop image, because calibration is done only for Fulcher for now
         image = image[crop[0] : crop[1]]
+        # rotate the image 
+        # so orders increas in the upward direction
+        #image = np.rot90(np.rot90(image))        
         info["size"] = image.shape[::-1]
         if info["NumberOfFrames"] == 1:
             images = np.array([image])
@@ -67,7 +82,7 @@ class EchelleImage:
     """"""
 
     def __init__(self, fpth, clbr=None, spec="black", crop=[0, -1]):
-        """ Sif Image container with tools to convert Echelle image into spectra
+        """Sif Image container with tools to convert Echelle image into spectra
         fpth - path to sif file
         """
         self.fpth = fpth
@@ -147,7 +162,7 @@ class EchelleImage:
             imin = image.min()
         aspect = kws.get("aspect", 1)
         im = ax.imshow(
-            image, cmap=clrs["cmap"], norm=mpl.colors.LogNorm(imin, image.max() * scale), aspect=aspect
+            image, cmap=clrs["cmap"], norm=mpl.colors.LogNorm(imin, image.max() * scale), aspect=aspect,
         )
         # im = plt.imshow(a, norm = mpl.colors.LogNorm(1e2,5e3))
         im.cmap.set_under(clrs["under"])
@@ -255,7 +270,7 @@ class EchelleImage:
         )
 
     def calculate_spectra(self):
-        """ calculate continuous spectra from order_spectra
+        """calculate continuous spectra from order_spectra
         using order borders from calibration clbr
         """
         clbr = self.clbr
@@ -269,7 +284,7 @@ class EchelleImage:
         self.wavelength = remove_npnans(clbr.wavelength)
 
     def plot_order_image(self, frame, ordind, aspect=2):
-        """ Plot order image"""
+        """Plot order image"""
         import matplotlib.pylab as plt
 
         plt.imshow(
@@ -342,7 +357,7 @@ class Calibrations:
     # Need to make some sort of a database of experiments...
     def __init__(self, folder=folder, filenames=filenames, dv=dv, spec="black", crop=[0, -1]):
         """
-        Set filenames. To make it work universally, supply 
+        Set filenames. To make it work universally, supply
         filenames as an argument.
         """
         self.folder = folder
@@ -361,10 +376,10 @@ class Calibrations:
         self.make_cutting_masks()
 
     def start(self):
-        """ Prepare calibrations:
-            1. Cutting patterns for all diffraction orders
-            2. Wavelength calibration
-            3. Absolute calibration
+        """Prepare calibrations:
+        1. Cutting patterns for all diffraction orders
+        2. Wavelength calibration
+        3. Absolute calibration
         """
         self.load_pattern()
         self.load_sphere()
@@ -385,11 +400,11 @@ class Calibrations:
         2. Use it in absolute calibraiton
         """
         self.sphr = EchelleImage(
-            join(self.folder, self.filenames["sphr"]), clbr=self, spec=self.spec, crop=self.crop
+            join(self.folder, self.filenames["sphr"]), clbr=self, spec=self.spec, crop=self.crop,
         )
 
         self.bkgr = EchelleImage(
-            join(self.folder, self.filenames["bkgr"]), clbr=self, spec=self.spec, crop=self.crop
+            join(self.folder, self.filenames["bkgr"]), clbr=self, spec=self.spec, crop=self.crop,
         )
 
         self.DIMW, self.DIMO = self.sphr.info["size"] * np.array(
@@ -404,7 +419,7 @@ class Calibrations:
             )
 
     def load_pattern(self):
-        """ Read file with coordinats for each difraction order of 
+        """Read file with coordinats for each difraction order of
         the Echelle spectrometer
         """
         pth = join(self.folder, self.filenames["orders"])
@@ -431,7 +446,7 @@ class Calibrations:
             return pp
 
     def make_cutting_masks(self, **kws):
-        """ make cutting masks for each diffraction order"""
+        """make cutting masks for each diffraction order"""
         self.dv = kws.get("dv", self.dv)
         self.cutting_masks = [self.make_mask(i, dv=self.dv) for i in range(self.pattern.shape[1])]
 
@@ -516,8 +531,7 @@ class Calibrations:
         self.orders_bad_froms = np.array(froms)
 
     def print_bad_shapes(self):
-        """ Print orders with bad shapes and the indices where the np.nan starts
-        """
+        """Print orders with bad shapes and the indices where the np.nan starts"""
         for o, i in zip(self.orders_bad_shape, self.orders_bad_froms):
             print(o, i)
 
@@ -539,13 +553,13 @@ class Calibrations:
     #     return d.loc[[0, 1, 26, 27, 28], range(i, i + 12)].round(2)
 
     def calculate_order_borders(self):
-        """ Calculate mask for the orders from a Integrating Sphere Image
+        """Calculate mask for the orders from a Integrating Sphere Image
         sphr - EchelleImage('IntegratingSphere.SIF')
         """
 
         def isc(x1, y1, x2, y2):
-            """ For two neighbor orders with lambda \propto -pix
-            find end index for x1 and start index for x2 so they will 
+            """For two neighbor orders with lambda \propto -pix
+            find end index for x1 and start index for x2 so they will
             not intersect
             x1 < ind1 and x2 >= ind2
             """
@@ -558,6 +572,12 @@ class Calibrations:
             y1 = y1[i1]
             x2 = x2[i2]
             y2 = y2[i2]
+
+            if x1[0] < x2[0]:
+                # swap places
+                a, b = x1, y1
+                x1, y1 = x2, y2
+                x2, y2 = a, b
 
             f1 = interp1d(x1, y1, 1)
             f2 = interp1d(x2, y2, 1)
@@ -591,7 +611,7 @@ class Calibrations:
         self.wavelength = self.order_wavel[self.order_borders]
 
     def plot_order_borders(self):
-        """ Plot order spectra vs wavelength and show how the borders are
+        """Plot order spectra vs wavelength and show how the borders are
         selected
         """
         import matplotlib.pylab as plt
@@ -659,7 +679,7 @@ class Calibrations:
 
 class Spectrum:
 
-    """ Echelle spectra converted from EchelleImage
+    """Echelle spectra converted from EchelleImage
     Contains image info, input - EchelleImage.order_image(....,sm=True)
 
     Background subtraction is carried out on all "background" frames identified by having no visible peaks or extrema
@@ -721,8 +741,7 @@ class Spectrum:
         self.spectra_to_save = {i: j for i, j in zip(self.units_kws, spectra_to_save)}
 
     def save(self):
-        """ save spectra
-        """
+        """save spectra"""
         import datetime
         import time
 
