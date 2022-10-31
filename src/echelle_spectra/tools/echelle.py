@@ -532,7 +532,7 @@ class Calibrations:
 
         spectra_shapes = np.array([s.shape[0] for s in self.sphr.order_spectra[0]])
         lambda_shapes = np.array([ow.shape[0] for ow in self.order_wavel])
-        wrong_shapes = spectra_shapes - lambda_shapes
+        wrong_shapes = np.setdiff1d(spectra_shapes, lambda_shapes)
         wrong_shapes = np.where(wrong_shapes != 0)[0]
 
         froms = []
