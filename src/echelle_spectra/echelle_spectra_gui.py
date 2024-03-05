@@ -6,6 +6,10 @@ from pathlib import Path
 from PyQt5.QtWidgets import QApplication
 from pyqtgraph.Qt import QtCore, QtGui
 
+# Qt.QtGui has no attribute QMainWindow error
+from PyQt5.QtWidgets import QMainWindow
+from PyQt5 import QtWidgets
+
 import tools.echelle as ech
 import tools.emissionbands as eb
 import tools.emissiondata as ebd
@@ -14,7 +18,7 @@ from __init__ import _config
 from resources import window_layout
 
 
-class EchelleSpectraGUI(QtGui.QMainWindow, window_layout.Ui_MainWindow):
+class EchelleSpectraGUI(QMainWindow, window_layout.Ui_MainWindow):
     """GUI window for the echelle_spectra app"""
     def __init__(self, config):
         super(self.__class__, self).__init__()
@@ -274,7 +278,7 @@ class EchelleSpectraGUI(QtGui.QMainWindow, window_layout.Ui_MainWindow):
 
     def openfile(self):
         """Open file dialog for selection of SIF file to load"""
-        self.filename = QtGui.QFileDialog.getOpenFileName(None, "Open file to plot", str(self.data_path),
+        self.filename = QtWidgets.QFileDialog.getOpenFileName(None, "Open file to plot", str(self.data_path),
                                                           "*.sif;;*.SIF;;*.*")[0]
         if self.filename:
             self.emitted()
