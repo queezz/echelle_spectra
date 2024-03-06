@@ -20,6 +20,7 @@ from resources import window_layout
 
 class EchelleSpectraGUI(QMainWindow, window_layout.Ui_MainWindow):
     """GUI window for the echelle_spectra app"""
+
     def __init__(self, config):
         super(self.__class__, self).__init__()
         self.setupUi(self)
@@ -107,13 +108,21 @@ class EchelleSpectraGUI(QMainWindow, window_layout.Ui_MainWindow):
     def update_paths(self):
         """Set-up file paths for calibration, data folder, output folder etc."""
         for path in ["data_path", "output_path"]:
-            setattr(self, path, Path(self.config[path]
-                                     .replace("{homedir}", str(Path.home()))
-                                     .replace("{workdir}", str(Path().absolute()))))
+            setattr(
+                self,
+                path,
+                Path(
+                    self.config[path]
+                    .replace("{homedir}", str(Path.home()))
+                    .replace("{workdir}", str(Path().absolute()))
+                ),
+            )
             getattr(self, path).mkdir(parents=True, exist_ok=True)
 
         self.path_calibration = self.config["base_path"] / "resources/calibration_files"
-        self.path_header_template = self.config["base_path"] / "resources/header_template.txt"
+        self.path_header_template = (
+            self.config["base_path"] / "resources/header_template.txt"
+        )
         self.path_last_shot = self.config["base_path"] / ".last_shot"
 
     def get_header_template(self):
@@ -164,7 +173,9 @@ class EchelleSpectraGUI(QMainWindow, window_layout.Ui_MainWindow):
         """
         self.statusBar().showMessage("Loading calibration files")
         self._enable_controls(False)
-        self.coursor_bw.setText("""<font size = 6 color = "#d1451b">Loading Calibrations</font>""")
+        self.coursor_bw.setText(
+            """<font size = 6 color = "#d1451b">Loading Calibrations</font>"""
+        )
 
         self.calib_threads[clbr.name] = LoadCalibrationsThread(clbr, self.config)
         self.calib_threads[clbr.name].taskFinished.connect(self._on_calibration_loaded)
@@ -174,12 +185,12 @@ class EchelleSpectraGUI(QMainWindow, window_layout.Ui_MainWindow):
         """When calibration loaded, release buttons and get ready to work"""
         if result.name == "CCD":
             self.cb_CCD = result
-            if self.config['debug']:
+            if self.config["debug"]:
                 print("CCD")
 
         if result.name == "CMOS":
             self.cb_CMOS = result
-            if self.config['debug']:
+            if self.config["debug"]:
                 print("CMOS")
 
         self.statusBar().showMessage("Calibration files loaded. Ready to work.")
@@ -188,11 +199,35 @@ class EchelleSpectraGUI(QMainWindow, window_layout.Ui_MainWindow):
 
     def setup_bands(self):
         """Create list of band objects from EmissionBand class"""
-        self.hbands = [band.copy() for band in [ebd.halpha, ebd.hbeta, ebd.hgamma, ebd.hdelta]]
-        self.hebands = [band.copy() for band in [ebd.he447, ebd.he492, ebd.he501, ebd.he504, ebd.he587, ebd.he667,
-                                                 ebd.he706, ebd.he728]]
-        self.cbands = [band.copy() for band in [ebd.c515, ebd.c464, ebd.c580, ebd.c444, ebd.c465, ebd.c772, ebd.c706,
-                                                ebd.c547]]
+        self.hbands = [
+            band.copy() for band in [ebd.halpha, ebd.hbeta, ebd.hgamma, ebd.hdelta]
+        ]
+        self.hebands = [
+            band.copy()
+            for band in [
+                ebd.he447,
+                ebd.he492,
+                ebd.he501,
+                ebd.he504,
+                ebd.he587,
+                ebd.he667,
+                ebd.he706,
+                ebd.he728,
+            ]
+        ]
+        self.cbands = [
+            band.copy()
+            for band in [
+                ebd.c515,
+                ebd.c464,
+                ebd.c580,
+                ebd.c444,
+                ebd.c465,
+                ebd.c772,
+                ebd.c706,
+                ebd.c547,
+            ]
+        ]
         self.chband = eb.EB(name="CHD-band", bounds=[429, 431.5])
 
         self.bands = self.hbands + self.hebands + self.cbands + [self.chband]
@@ -224,9 +259,13 @@ class EchelleSpectraGUI(QMainWindow, window_layout.Ui_MainWindow):
         self.shot_range_index = 0
         self.update_shot_dict()
 
-        self.shot_range = [shot for shot in self.shot_range if shot in list(self.shot_dict)]
+        self.shot_range = [
+            shot for shot in self.shot_range if shot in list(self.shot_dict)
+        ]
         if not len(self.shot_range):
-            self.coursor_bw.setText('<font size = 6 color = "#e5c40d">Empty Range</font>')
+            self.coursor_bw.setText(
+                '<font size = 6 color = "#e5c40d">Empty Range</font>'
+            )
             return
 
         self.progress_range.setRange(0, len(self.shot_range))
@@ -265,7 +304,9 @@ class EchelleSpectraGUI(QMainWindow, window_layout.Ui_MainWindow):
         """Abort the loop"""
         if len(self.shot_range):
             self.shot_range = []
-            self.coursor_bw.append('<font size = 6 color = "#d1451b">Aborting Loop</font>')
+            self.coursor_bw.append(
+                '<font size = 6 color = "#d1451b">Aborting Loop</font>'
+            )
             self.abort_register.setEnabled(False)
 
     # ===========================================================================
@@ -278,14 +319,17 @@ class EchelleSpectraGUI(QMainWindow, window_layout.Ui_MainWindow):
 
     def openfile(self):
         """Open file dialog for selection of SIF file to load"""
-        self.filename = QtWidgets.QFileDialog.getOpenFileName(None, "Open file to plot", str(self.data_path),
-                                                          "*.sif;;*.SIF;;*.*")[0]
+        self.filename = QtWidgets.QFileDialog.getOpenFileName(
+            None, "Open file to plot", str(self.data_path), "*.sif;;*.SIF;;*.*"
+        )[0]
         if self.filename:
             self.emitted()
 
     def update_shot_dict(self):
         """Convert list of *_Echelle.sif files into shot list and make a dictionary of {shot_number: path to shot}"""
-        self.shot_dict = {int(f.stem.split("_")[0]): f for f in self.data_path.rglob("*_Echelle.SIF")}
+        self.shot_dict = {
+            int(f.stem.split("_")[0]): f for f in self.data_path.rglob("*_Echelle.SIF")
+        }
 
     def get_shot_range(self):
         """Get first and last shot numbers from the data folder after indexing it"""
@@ -300,7 +344,9 @@ class EchelleSpectraGUI(QMainWindow, window_layout.Ui_MainWindow):
             self.filename = self.shot_dict[self.shot_number.value()]
             self.load_image()
         except KeyError:
-            self.statusBar().showMessage(f"Failed to load shot {self.shot_number.value()}")
+            self.statusBar().showMessage(
+                f"Failed to load shot {self.shot_number.value()}"
+            )
 
     # ===========================================================================
     #                 ^^^   Open shot image or file   ^^^
@@ -330,11 +376,11 @@ class EchelleSpectraGUI(QMainWindow, window_layout.Ui_MainWindow):
 
         if self.CameraCMOS.isChecked():
             cb = self.cb_CMOS
-            if self.config['debug']:
+            if self.config["debug"]:
                 print("CMOS selected")
         elif self.CameraCCD.isChecked():
             cb = self.cb_CCD
-            if self.config['debug']:
+            if self.config["debug"]:
                 print("CCD selected")
         else:
             cb = self.cb_CCD
@@ -372,7 +418,9 @@ class EchelleSpectraGUI(QMainWindow, window_layout.Ui_MainWindow):
         if not self.in_loop:
             self._enable_controls(True)
         self.statusBar().showMessage(f"SIF image loaded: {self.filename}")
-        self.coursor_bw.setText(f'<font size = 5 color = "#187031">{Path(self.filename).stem}</font>')
+        self.coursor_bw.setText(
+            f'<font size = 5 color = "#187031">{Path(self.filename).stem}</font>'
+        )
 
         if self.specsave_bx.isChecked():
             self.spectra.shotnumber = int(self.shot_number.value())
@@ -419,7 +467,9 @@ class EchelleSpectraGUI(QMainWindow, window_layout.Ui_MainWindow):
 
         # plot other traces
         for band in self.hbands:
-            self.htraces[band.name].setData(x=full_frames, y=self.fres[band.name].intensities)
+            self.htraces[band.name].setData(
+                x=full_frames, y=self.fres[band.name].intensities
+            )
         self.chtrace.setData(x=full_frames, y=self.fres[self.chband.name].intensities)
 
         # also plot traces for bandstofit, without a fit for a start
@@ -446,7 +496,9 @@ class EchelleSpectraGUI(QMainWindow, window_layout.Ui_MainWindow):
             self.fres[band.name].set_frames(frames)
             self.fres[band.name].set_info(self.em.info["NumberOfFrames"])
 
-        self.fit_thread = FitLinesThread(self.spectra, self.bandstofit, self.fres, frames)
+        self.fit_thread = FitLinesThread(
+            self.spectra, self.bandstofit, self.fres, frames
+        )
         self.fit_thread.pass_result.connect(self._on_fit_end)
         self.fit_thread.progress.connect(self._on_fit_progress)
         self.fit_thread.start()
@@ -481,7 +533,9 @@ class EchelleSpectraGUI(QMainWindow, window_layout.Ui_MainWindow):
 
         # self.trigger_delay.setValue(2.5) # to change the default value if needed
         times = self.trigger_delay.value() + frames * self.em.info["CycleTime"]
-        data = np.array([times] + [self.fres[b.name].intensities_combined for b in self.bands])
+        data = np.array(
+            [times] + [self.fres[b.name].intensities_combined for b in self.bands]
+        )
         data = data.T[1:]  # [1:] to remove frame 0, where values are np.nan
 
         shot = self.shot_number.value()
@@ -504,7 +558,14 @@ class EchelleSpectraGUI(QMainWindow, window_layout.Ui_MainWindow):
             trigdelay=self.trigger_delay.value(),
             cycletime=self.em.info["CycleTime"],
         ).strip()
-        np.savetxt(pth, data, delimiter=", ", header=header, comments="", fmt=["%.5f"] + ["%.6e"] * len(names))
+        np.savetxt(
+            pth,
+            data,
+            delimiter=", ",
+            header=header,
+            comments="",
+            fmt=["%.5f"] + ["%.6e"] * len(names),
+        )
 
     # ===========================================================================
     #                   Display Plots and info
@@ -532,10 +593,15 @@ class EchelleSpectraGUI(QMainWindow, window_layout.Ui_MainWindow):
               <font size = {fs}>xbin: {xbin}</font><br>
               <font size = {fs}>ybin: {ybin}</font><br>
               """
-        background_str = ("[{}..{}] ({})".format(self.em.info["BackgroundFrames"][0],
-                                                 self.em.info["BackgroundFrames"][-1],
-                                                 len(self.em.info["BackgroundFrames"]))
-                          if len(self.em.info["BackgroundFrames"]) != 0 else "None")
+        background_str = (
+            "[{}..{}] ({})".format(
+                self.em.info["BackgroundFrames"][0],
+                self.em.info["BackgroundFrames"][-1],
+                len(self.em.info["BackgroundFrames"]),
+            )
+            if len(self.em.info["BackgroundFrames"]) != 0
+            else "None"
+        )
         txt = txt.format(
             frames=self.em.info["NumberOfFrames"],
             background=background_str,
@@ -556,20 +622,29 @@ class EchelleSpectraGUI(QMainWindow, window_layout.Ui_MainWindow):
 
         self.img.setImage(self.em.images[frame])
         if self.check_autoscale.isChecked():
-            self.hist.setLevels(min=np.percentile(self.em.images[frame], 1),
-                                max=np.percentile(self.em.images[frame], 99))
+            self.hist.setLevels(
+                min=np.percentile(self.em.images[frame], 1),
+                max=np.percentile(self.em.images[frame], 99),
+            )
         self.show_spectrum()
 
     def show_spectrum(self):
         """Show the current frame spectrum in counts and calibrated"""
         frame = int(self.frame.value())
-        self.spec_counts.setData(x=self.spectra.wavelength, y=self.spectra.counts[frame])
+        self.spec_counts.setData(
+            x=self.spectra.wavelength, y=self.spectra.counts[frame]
+        )
 
         # show calibrated spectrum
         # str() - for PyQt4, to convert QString into py string
         units = str(self.spec_units.currentText())
-        self.p3.setLabel("left", text=f'<font color = "#d62300" size="6">{self.spec_labels[units]}</font>')
-        self.spec_wm.setData(x=self.spectra.wavelength, y=self.spectra.spectra_to_save[units][frame])
+        self.p3.setLabel(
+            "left",
+            text=f'<font color = "#d62300" size="6">{self.spec_labels[units]}</font>',
+        )
+        self.spec_wm.setData(
+            x=self.spectra.wavelength, y=self.spectra.spectra_to_save[units][frame]
+        )
 
     def show_balmer_frame(self):
         """Update the plots for H-balmer series experimental spectra"""
@@ -579,7 +654,9 @@ class EchelleSpectraGUI(QMainWindow, window_layout.Ui_MainWindow):
         if frame >= self.em.info["NumberOfFrames"]:
             return
 
-        for b, k in zip(self.hbands + [self.chband], [b.name for b in self.hbands] + ["CH"]):
+        for b, k in zip(
+            self.hbands + [self.chband], [b.name for b in self.hbands] + ["CH"]
+        ):
             if self.fres[b.name].x is None:
                 x, y = eb.banddata(b, frame, self.spectra, doblin=False)
                 self.h_data[k].setData(x=x, y=y)
@@ -659,7 +736,9 @@ class EchelleSpectraGUI(QMainWindow, window_layout.Ui_MainWindow):
 
     def _setup_frame(self):
         """Setup frames on all tabs"""
-        window_layout.gui_setup_spinbox(self.frame, 0, 0, self.em.info["NumberOfFrames"] - 1)
+        window_layout.gui_setup_spinbox(
+            self.frame, 0, 0, self.em.info["NumberOfFrames"] - 1
+        )
         for gi in self.frame_spinners:
             gi.setMaximum(self.em.info["NumberOfFrames"] - 1)
 
@@ -703,7 +782,7 @@ class LoadCalibrationsThread(QtCore.QThread):
         self.calibration.start()
         cb = self.calibration
 
-        if self.config['debug']:
+        if self.config["debug"]:
             print("\n" + cb.name, cb.DIMO, cb.DIMW)
             [print(a, " " * (12 - len(a)), b) for a, b in cb.filenames.items()]
 
@@ -730,8 +809,10 @@ class LoadImageThread(QtCore.QThread):
             self.taskFinished.emit(None)
             return
 
-        if self.config['debug']:
-            print(em.info["DetectorDimensions"], self.cb.DIMO, self.cb.DIMW, self.cb.name)
+        if self.config["debug"]:
+            print(
+                em.info["DetectorDimensions"], self.cb.DIMO, self.cb.DIMW, self.cb.name
+            )
 
         if not em.info["DetectorDimensions"] == (self.cb.DIMW, self.cb.DIMO):
             self.taskFinished.emit(None)
@@ -798,13 +879,22 @@ class SaveSpectraThread(QtCore.QThread):
 
 
 def start():
-    try:
-        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(f"echelle_spectra-{__version__}")
-    except OSError:
-        pass
+    import platform
+
+    if platform.system() == "Windows":
+        try:
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
+                f"echelle_spectra-{__version__}"
+            )
+        except OSError:
+            pass
+        finally:
+            pass
 
     app = QApplication(sys.argv)
-    app.setWindowIcon(QtGui.QIcon(str(_config["base_path"] / "resources/graphics/echelle.png")))
+    app.setWindowIcon(
+        QtGui.QIcon(str(_config["base_path"] / "resources/graphics/echelle.png"))
+    )
     win = EchelleSpectraGUI(_config)
     win.show()
     sys.exit(app.exec_())
