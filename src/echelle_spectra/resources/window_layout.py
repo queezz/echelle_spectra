@@ -6,18 +6,19 @@
 import pyqtgraph as pg
 from pyqtgraph.Qt import QtCore, QtGui
 from pyqtgraph.dockarea import DockArea, Dock
+from PyQt5 import QtWidgets
 
 
 def gui_setup_spinbox(spbox, val, min, max):
-    """set up spinbox value, min and max """
+    """set up spinbox value, min and max"""
     spbox.setMinimum(min)
     spbox.setMaximum(max)
     spbox.setValue(val)
 
 
 def html_snc(text, color="red", size=6):
-    """ change text color for html output """
-    txt = u'<font color = "{c}" size="{s}">{t}</font>'
+    """change text color for html output"""
+    txt = '<font color = "{c}" size="{s}">{t}</font>'
     return txt.format(c=color, t=text, s=size)
 
 
@@ -27,8 +28,8 @@ class Ui_MainWindow(object):
         # Interpret image data as row-major instead of col-major
         pg.setConfigOptions(imageAxisOrder="row-major")
         # == == == == == == == == == == == == == == == == == == == == == == ====
-        self.centralwidget = QtGui.QWidget(MainWindow)
-        self.tabwidg = QtGui.QTabWidget()
+        self.centralwidget = QtWidgets.QMainWindow
+        self.tabwidg = QtWidgets.QTabWidget()
         self.area = DockArea()
         self.area_civ = DockArea()
         self.area_he = DockArea()
@@ -41,7 +42,7 @@ class Ui_MainWindow(object):
         self.tabwidg.addTab(self.area_cmd, "CMD")
         MainWindow.setCentralWidget(self.tabwidg)
 
-        MainWindow.setWindowTitle(u"Echelle viewer")
+        MainWindow.setWindowTitle("Echelle viewer")
         MainWindow.resize(1000, 900)
         MainWindow.statusBar().showMessage(" ")
         MainWindow.setAcceptDrops(True)
@@ -72,58 +73,58 @@ class Ui_MainWindow(object):
         # == == == == == == == == == == == == == == == == == == == == == == ====
         # Controls
         # == == == == == == == == == == == == == == == == == == == == == == ====
-        self.btn_open = QtGui.QPushButton("Manual SIF load")
-        self.lbl_show = QtGui.QLabel("Selected shot:")
+        self.btn_open = QtWidgets.QPushButton("Manual SIF load")
+        self.lbl_show = QtWidgets.QLabel("Selected shot:")
         self.btn_open.setToolTip("Manually open single SIF image")
-        self.show_btn = QtGui.QPushButton("Load selected")
+        self.show_btn = QtWidgets.QPushButton("Load selected")
         self.show_btn.setToolTip("Load image from currently selected shot number")
-        self.shot_number = QtGui.QSpinBox()
+        self.shot_number = QtWidgets.QSpinBox()
         gui_setup_spinbox(self.shot_number, 139529, 1, 599999)
         self.shot_number.setToolTip("Shot number")
-        self.last_shot_btn = QtGui.QPushButton("Select last")
+        self.last_shot_btn = QtWidgets.QPushButton("Select last")
         self.last_shot_btn.setToolTip("Select last shot from data folder")
-        self.check_autoscale = QtGui.QCheckBox("Autoscale")
+        self.check_autoscale = QtWidgets.QCheckBox("Autoscale")
         msg = "Autoscale spectrum when hovering over image with Ctrl depressed"
         self.check_autoscale.setToolTip(msg)
         self.check_autoscale.setChecked(True)
 
-        self.CameraCCD = QtGui.QRadioButton()
+        self.CameraCCD = QtWidgets.QRadioButton()
         self.CameraCCD.setText("CCD")
         self.CameraCCD.setToolTip("Calibration for CCD camera selected")
-        self.CameraCMOS = QtGui.QRadioButton()
+        self.CameraCMOS = QtWidgets.QRadioButton()
         self.CameraCMOS.setText("CMOS")
         self.CameraCMOS.setToolTip("Calibration for CMOS camera selected")
 
-        self.lbl_units = QtGui.QLabel("Spectra units:")
-        self.spec_units = QtGui.QComboBox()
+        self.lbl_units = QtWidgets.QLabel("Spectra units:")
+        self.spec_units = QtWidgets.QComboBox()
         [self.spec_units.addItem(i) for i in ["counts", "wm", "wmsr", "phmsr"]]
         self.spec_units.setToolTip("Units of the spectra")
         self.spec_units.setCurrentIndex(1)
 
-        self.specsave_bx = QtGui.QCheckBox("Save spec")
+        self.specsave_bx = QtWidgets.QCheckBox("Save spec")
         msg = "Save spectra to output folder, always overwrite"
         self.specsave_bx.setToolTip(msg)
-        self.fit_lines_bx = QtGui.QCheckBox("Fit spec")
+        self.fit_lines_bx = QtWidgets.QCheckBox("Fit spec")
         self.fit_lines_bx.setToolTip("Fit spec")
-        self.save_lines_bx = QtGui.QCheckBox("Save lines")
+        self.save_lines_bx = QtWidgets.QCheckBox("Save lines")
         self.save_lines_bx.setToolTip("Save lines to output folder")
-        self.overwrite = QtGui.QCheckBox("Overwrite all existing output")
+        self.overwrite = QtWidgets.QCheckBox("Overwrite all existing output")
         self.overwrite.setToolTip("Overwrite all existing spectra and intensity data")
-        self.progress_bands = QtGui.QProgressBar()
+        self.progress_bands = QtWidgets.QProgressBar()
         self.progress_bands.setRange(0, 1)
         self.progress_bands.setToolTip("Fitting lines")
 
-        self.lbl_frame = QtGui.QLabel("Selected frame:")
-        self.frame = QtGui.QSpinBox()
+        self.lbl_frame = QtWidgets.QLabel("Selected frame:")
+        self.frame = QtWidgets.QSpinBox()
         gui_setup_spinbox(self.frame, 0, 0, 0)
         self.frame.setToolTip("Selected frame number of loaded image")
 
-        self.frame_civ = QtGui.QSpinBox()
+        self.frame_civ = QtWidgets.QSpinBox()
         gui_setup_spinbox(self.frame_civ, 1, 1, 1)
 
-        self.coursor_bw = QtGui.QTextBrowser()
+        self.coursor_bw = QtWidgets.QTextBrowser()
         self.coursor_bw.setMaximumHeight(65)
-        self.image_info_bw = QtGui.QTextBrowser()
+        self.image_info_bw = QtWidgets.QTextBrowser()
         # == == == == == == == == == == == == == == == == == == == == == == ====
 
         self.w3 = pg.LayoutWidget()
@@ -151,7 +152,7 @@ class Ui_MainWindow(object):
             self.shot_number,
             self.last_shot_btn,
             self.show_btn,
-            self.overwrite
+            self.overwrite,
         ]
 
         self.d3.addWidget(self.w3)
@@ -166,14 +167,14 @@ class Ui_MainWindow(object):
         # == == == == == == == == == == == == == == == == == == == == == == ====
         self.wfit = pg.LayoutWidget()
 
-        self.region_show = QtGui.QPushButton("fit tool")
-        self.btn_region_hide = QtGui.QPushButton("hide tool")
-        self.fit_model = QtGui.QComboBox()
+        self.region_show = QtWidgets.QPushButton("fit tool")
+        self.btn_region_hide = QtWidgets.QPushButton("hide tool")
+        self.fit_model = QtWidgets.QComboBox()
         self.fit_model.addItem("gauss")
         self.fit_model.addItem("gauss2")
         self.fit_model.addItem("lorentz")
-        self.btn_fit = QtGui.QPushButton("fit")
-        self.fit_bw = QtGui.QTextBrowser()
+        self.btn_fit = QtWidgets.QPushButton("fit")
+        self.fit_bw = QtWidgets.QTextBrowser()
 
         self.region_fit = pg.LinearRegionItem(values=[0, 1])
         self.region_fit.setBrush(QtGui.QColor(249, 247, 232, 50))
@@ -242,28 +243,28 @@ class Ui_MainWindow(object):
         # == == == == == == == == == == == == == == == == == == == == == == ====
         self.wreg = pg.LayoutWidget()
 
-        self.shot_range_btn = QtGui.QPushButton("Get available shot range")
+        self.shot_range_btn = QtWidgets.QPushButton("Get available shot range")
         msg = "Get the highest and lowest available shot numbers from the data folder"
         self.shot_range_btn.setToolTip(msg)
-        self.start_shot = QtGui.QSpinBox()
+        self.start_shot = QtWidgets.QSpinBox()
         gui_setup_spinbox(self.start_shot, 100000, 1, 599999)
         self.start_shot.setToolTip("Start shot")
-        self.end_shot = QtGui.QSpinBox()
+        self.end_shot = QtWidgets.QSpinBox()
         gui_setup_spinbox(self.end_shot, 599999, 1, 599999)
         self.end_shot.setToolTip("End shot")
-        self.trigger_delay_lbl = QtGui.QLabel("Trigger delay:")
-        self.trigger_delay = QtGui.QDoubleSpinBox()
+        self.trigger_delay_lbl = QtWidgets.QLabel("Trigger delay:")
+        self.trigger_delay = QtWidgets.QDoubleSpinBox()
         gui_setup_spinbox(self.trigger_delay, 2.75, 0.0, 1000.0)
         self.trigger_delay.setSuffix(" s")
         self.trigger_delay.setSingleStep(0.05)
         self.trigger_delay.setToolTip("Trigger delay (s)")
-        self.start_register = QtGui.QPushButton("Start")
+        self.start_register = QtWidgets.QPushButton("Start")
         msg = "Calculate spectra and line intensities for the shot range"
         self.start_register.setToolTip(msg)
-        self.abort_register = QtGui.QPushButton("Abort")
+        self.abort_register = QtWidgets.QPushButton("Abort")
         msg = "Abort the loop after current image is analyzed"
         self.abort_register.setToolTip(msg)
-        self.progress_range = QtGui.QProgressBar()
+        self.progress_range = QtWidgets.QProgressBar()
         self.progress_range.setToolTip("Loop trough available shot numbers")
 
         self.wreg.addWidget(self.shot_range_btn, 0, 0, 1, 2)
@@ -300,10 +301,10 @@ class Ui_MainWindow(object):
         # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
         self.w_civ_controls = pg.LayoutWidget()
 
-        self.frame_civ = QtGui.QSpinBox()
+        self.frame_civ = QtWidgets.QSpinBox()
         gui_setup_spinbox(self.frame_civ, 1, 1, 1)
         self.frame_civ.setSuffix(" frame")
-        self.bw_civ = QtGui.QTextBrowser()
+        self.bw_civ = QtWidgets.QTextBrowser()
 
         self.w_civ_controls.addWidget(self.frame_civ, 0, 0)
         self.w_civ_controls.addWidget(self.bw_civ, 10, 0, 2, 1)
@@ -330,10 +331,10 @@ class Ui_MainWindow(object):
         # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
         self.w_he_controls = pg.LayoutWidget()
 
-        self.frame_he = QtGui.QSpinBox()
+        self.frame_he = QtWidgets.QSpinBox()
         gui_setup_spinbox(self.frame_he, 1, 1, 1)
         self.frame_he.setSuffix(" frame")
-        self.bw_he = QtGui.QTextBrowser()
+        self.bw_he = QtWidgets.QTextBrowser()
 
         self.w_he_controls.addWidget(self.frame_he, 0, 0)
         self.w_he_controls.addWidget(self.bw_he, 10, 0, 2, 1)
@@ -360,10 +361,10 @@ class Ui_MainWindow(object):
         # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
         self.w_h_controls = pg.LayoutWidget()
 
-        self.frame_h = QtGui.QSpinBox()
+        self.frame_h = QtWidgets.QSpinBox()
         gui_setup_spinbox(self.frame_h, 1, 1, 1)
         self.frame_h.setSuffix(" frame")
-        self.bw_h = QtGui.QTextBrowser()
+        self.bw_h = QtWidgets.QTextBrowser()
 
         self.w_h_controls.addWidget(self.frame_h, 0, 0)
         self.w_h_controls.addWidget(self.bw_h, 10, 0, 2, 1)
@@ -383,7 +384,7 @@ class Ui_MainWindow(object):
         self.area_cmd.addDock(self.d_cmd)
         # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
         self.w_cmd = pg.LayoutWidget()
-        self.cmd_bw = QtGui.QTextBrowser()
+        self.cmd_bw = QtWidgets.QTextBrowser()
         self.w_cmd.addWidget(self.cmd_bw)
         self.d_cmd.addWidget(self.w_cmd)
         # == == == == == == == == == == == == == == == == == == == == == == == =
@@ -477,8 +478,7 @@ class Ui_MainWindow(object):
             self.c_he_trace[name] = self.c_tr.plot(**kws)
 
     def create_plots(self, names, plotwidg):
-        """ Create plots for Carbon, He or Hydrogen bands
-        """
+        """Create plots for Carbon, He or Hydrogen bands"""
         bandplots = [
             plotwidg.addPlot(row=ii // 2, col=ii % 2) for ii, name in enumerate(names)
         ]
@@ -543,4 +543,3 @@ if __name__ == "__main__":
     ui.setupUi(MainWindow)
     MainWindow.show()
     sys.exit(app.exec_())
-
