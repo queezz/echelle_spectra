@@ -1,6 +1,7 @@
 """
 Tools for Echelle spectrometer images
 """
+
 # from sif_reader import np_open # obsolete
 # now import inside read_image to ignore coflicts with PIL tiff pluging
 # from sif_parser import np_open
@@ -52,7 +53,9 @@ def read_image(fpth, spec="black", crop=[0, -1], exptime=1):
         info = {"NumberOfFrames": tifim.n_frames, "ybin": 1, "xbin": 1}
         # Now Hamamatsu software saves in *.tiff, and no camera parameters are saved.
         # TODO: fix this
-        info["ExposureTime"] = exptime  # s, for integrating sphere exposure and absolute calibration
+        info["ExposureTime"] = (
+            exptime  # s, for integrating sphere exposure and absolute calibration
+        )
         # Transpose image (because orientation is different)
         image = np.array(tifim).T
         # Crop image, because calibration is done only for Fulcher for now
@@ -106,7 +109,10 @@ class EchelleImage:
         Wrapper for read_image
         """
         self.images, self.info = read_image(
-            self.fpth, spec=self.spectrometer, crop=self.crop, exptime=self.exposure_time
+            self.fpth,
+            spec=self.spectrometer,
+            crop=self.crop,
+            exptime=self.exposure_time,
         )
         if self.spectrometer == "black":
             self.exposure_time = self.info["ExposureTime"]
@@ -162,10 +168,13 @@ class EchelleImage:
 
         fig = plt.figure()
         ax = fig.add_subplot(111)
-        imin = image.min()        
+        imin = image.min()
         aspect = kws.get("aspect", 1)
         im = ax.imshow(
-            image, cmap=clrs["cmap"], norm=mpl.colors.LogNorm(imin, image.max() * scale), aspect=aspect,
+            image,
+            cmap=clrs["cmap"],
+            norm=mpl.colors.LogNorm(imin, image.max() * scale),
+            aspect=aspect,
         )
         # im = plt.imshow(a, norm = mpl.colors.LogNorm(1e2,5e3))
         im.cmap.set_under(clrs["under"])
@@ -179,9 +188,17 @@ class EchelleImage:
             # FixedLocator is used to avoid UserWarning from Matplotlib
             ticks_loc = cbaxes.get_xticks().tolist()
             cbaxes.xaxis.set_major_locator(mticker.FixedLocator(ticks_loc))
-            cb.ax.set_xticklabels(cb.ax.get_xticklabels(), rotation=0, fontsize=fs["cb"])
+            cb.ax.set_xticklabels(
+                cb.ax.get_xticklabels(), rotation=0, fontsize=fs["cb"]
+            )
             cb.ax.text(
-                0.4, 0.2, "counts", fontsize=fs["cbname"], rotation=0, color="w", transform=cb.ax.transAxes,
+                0.4,
+                0.2,
+                "counts",
+                fontsize=fs["cbname"],
+                rotation=0,
+                color="w",
+                transform=cb.ax.transAxes,
             )
             if kws.get("axlabel", True):
                 ax.text(-0.25 * ymax, ymax * 0.85, "vertical pixel", rotation=90)
@@ -198,7 +215,10 @@ class EchelleImage:
                 clbr = self.clbr
 
             ax.imshow(
-                np.invert(clbr.pattern_image), origin="lower", alpha=0.4, cmap="binary",
+                np.invert(clbr.pattern_image),
+                origin="lower",
+                alpha=0.4,
+                cmap="binary",
             )
 
         ax.set_xlim(0, xmax)
@@ -245,9 +265,13 @@ class EchelleImage:
         # And they form a ragged array. I'm using even partial diffraction orders,
         # which is the reason for non-equal order image lengths.
         self.order_spectra = np.array(
-            [np.array([self.order_image(fi, o, sm=True) for o in orders], dtype=object) for fi in frames]
+            [
+                np.array(
+                    [self.order_image(fi, o, sm=True) for o in orders], dtype=object
+                )
+                for fi in frames
+            ]
         )
-
 
     def correct_order_shapes(self):
         """
@@ -283,7 +307,9 @@ class EchelleImage:
 
         a = remove_npnans(self.spectra)
 
-        self.spectra = a.reshape(self.info["NumberOfFrames"], int(len(a) / self.info["NumberOfFrames"]))
+        self.spectra = a.reshape(
+            self.info["NumberOfFrames"], int(len(a) / self.info["NumberOfFrames"])
+        )
 
         self.wavelength = remove_npnans(clbr.wavelength)
 
@@ -292,7 +318,9 @@ class EchelleImage:
         import matplotlib.pylab as plt
 
         plt.imshow(
-            self.order_image(frame, ordind), origin="lower", aspect=aspect,
+            self.order_image(frame, ordind),
+            origin="lower",
+            aspect=aspect,
         )
 
     def plot_cut_image(self, frame, aspect=2, norm="log", scale=1):
@@ -316,7 +344,9 @@ class EchelleImage:
         NORD = self.clbr.pattern.shape[1]
 
         fig, axs = plt.subplots(NORD, 1)
-        plt.subplots_adjust(left=None, bottom=None, right=None, top=None, wspace=0.0, hspace=0.0)
+        plt.subplots_adjust(
+            left=None, bottom=None, right=None, top=None, wspace=0.0, hspace=0.0
+        )
         [ax.set_xticks([]) for ax in axs[:-1]]
         [ax.set_yticks([]) for ax in axs[:-1]]
         [ax.set_xlim([0, self.clbr.DIMW]) for ax in axs]
@@ -336,7 +366,13 @@ class EchelleImage:
             ax.get_yaxis().set_visible(False)
             # ax.axis('off')
             ax.text(
-                0, 0.5, o, transform=ax.transAxes, color="#fff83a", va="center", ha="left",
+                0,
+                0.5,
+                o,
+                transform=ax.transAxes,
+                color="#fff83a",
+                va="center",
+                ha="left",
             )
 
 
@@ -359,7 +395,15 @@ class Calibrations:
     # Maybe provide here only path to settings file for
     # Given spectromenter / experiment.
     # Need to make some sort of a database of experiments...
-    def __init__(self, folder=folder, filenames=filenames, dv=dv, spec="black", crop=[0, -1], exptime=1):
+    def __init__(
+        self,
+        folder=folder,
+        filenames=filenames,
+        dv=dv,
+        spec="black",
+        crop=[0, -1],
+        exptime=1,
+    ):
         """
         Set filenames. To make it work universally, supply
         filenames as an argument.
@@ -422,14 +466,24 @@ class Calibrations:
         )
 
         self.DIMW, self.DIMO = self.sphr.info["size"] * np.array(
-            [self.sphr.info["xbin"], self.sphr.info["ybin"],]
+            [
+                self.sphr.info["xbin"],
+                self.sphr.info["ybin"],
+            ]
         )
 
-        bDIMW, bDIMO = self.bkgr.info["size"] * np.array([self.bkgr.info["xbin"], self.bkgr.info["ybin"],])
+        bDIMW, bDIMO = self.bkgr.info["size"] * np.array(
+            [
+                self.bkgr.info["xbin"],
+                self.bkgr.info["ybin"],
+            ]
+        )
 
         if self.DIMW != bDIMW or self.DIMO != bDIMO:
             raise ValueError(
-                "Wrong background size: {}x{} vs {}x{}".format(self.DIMW, self.DIMO, bDIMW, bDIMO)
+                "Wrong background size: {}x{} vs {}x{}".format(
+                    self.DIMW, self.DIMO, bDIMW, bDIMO
+                )
             )
 
     def load_pattern(self):
@@ -449,7 +503,11 @@ class Calibrations:
         cc = np.arange(-dv, dv + 1, 1)
         ii = ((np.zeros([self.DIMW, 1]) + cc).T + l).flatten()
 
-        jj = np.repeat(np.arange(self.DIMW)[np.newaxis, ...], dv * 2 + 1, axis=0,).flatten()
+        jj = np.repeat(
+            np.arange(self.DIMW)[np.newaxis, ...],
+            dv * 2 + 1,
+            axis=0,
+        ).flatten()
 
         mask = (ii.astype(int, copy=False), jj.astype(int, copy=False))
         if not show:
@@ -462,10 +520,14 @@ class Calibrations:
     def make_cutting_masks(self, **kws):
         """make cutting masks for each diffraction order"""
         self.dv = kws.get("dv", self.dv)
-        self.cutting_masks = [self.make_mask(i, dv=self.dv) for i in range(self.pattern.shape[1])]
+        self.cutting_masks = [
+            self.make_mask(i, dv=self.dv) for i in range(self.pattern.shape[1])
+        ]
 
         # check if pixel in the mask is out of top bound (for 28th order, CMOS)
-        ordrs = [i for i, j in enumerate(self.cutting_masks) if j[0].max() > self.DIMO - 1]
+        ordrs = [
+            i for i, j in enumerate(self.cutting_masks) if j[0].max() > self.DIMO - 1
+        ]
 
         for o in ordrs:
             ind = self.cutting_masks[o][0] > self.DIMO - 1
@@ -497,7 +559,8 @@ class Calibrations:
     # WAVELENGTH
     # =============================
     def wavelength_calibration(self, **kws):
-        """Read calibration data, containing list of identified lines from
+        """
+        Read calibration data, containing list of identified lines from
         lamp spectra in format [order pixfrom pixto center wavelength]
         """
         fpth = join(self.folder, self.filenames["wavelength"])
@@ -511,7 +574,10 @@ class Calibrations:
         x = np.arange(self.DIMW)
 
         self.order_wavel = np.array(
-            [np.poly1d(np.polyfit(w[m][:, 3], w[m][:, 4], p))(x) for m, p in zip(msks, pwrs)]
+            [
+                np.poly1d(np.polyfit(w[m][:, 3], w[m][:, 4], p))(x)
+                for m, p in zip(msks, pwrs)
+            ]
         )
         if kws.get("rtrn", False):
             return self.order_wavel
@@ -532,16 +598,15 @@ class Calibrations:
 
         spectra_shapes = np.array([s.shape[0] for s in self.sphr.order_spectra[0]])
         lambda_shapes = np.array([ow.shape[0] for ow in self.order_wavel])
-        wrong_shapes = np.setdiff1d(spectra_shapes, lambda_shapes)
-        wrong_shapes = np.where(wrong_shapes != 0)[0]
+        shorter_order_indexes = np.where(spectra_shapes != lambda_shapes)[0]
 
         froms = []
-        for o in wrong_shapes:
+        for o in shorter_order_indexes:
             newshape = spectra_shapes[o]
             self.order_wavel[o][newshape:] = np.nan
             froms.append(newshape)
 
-        self.orders_bad_shape = wrong_shapes
+        self.orders_bad_shape = shorter_order_indexes
         self.orders_bad_froms = np.array(froms)
 
         # check if lambda \propto -pix or +pix
@@ -644,13 +709,17 @@ class Calibrations:
             sig = self.sphr.order_spectra[0][o]
 
             plt.plot(
-                lam, sig, c="gray",
+                lam,
+                sig,
+                c="gray",
             )
 
             try:
                 ind = self.order_borders[o]
                 plt.plot(
-                    lam[ind], sig[ind], c=clrs[o % 2],
+                    lam[ind],
+                    sig[ind],
+                    c=clrs[o % 2],
                 )
             except:
                 pass
@@ -689,15 +758,18 @@ class Calibrations:
         y = self.sphr.spectra[0] - self.bkgr.spectra[0]
         x = self.sphr.wavelength
         # np.nans Warning here:
-        wmsr = self.integral(x) * self.sphr.info["ExposureTime"] / y * 1e-2  # W/(m2 sr nm)
+        wmsr = (
+            self.integral(x) * self.sphr.info["ExposureTime"] / y * 1e-2
+        )  # W/(m2 sr nm)
         wm = wmsr * 4 * np.pi  # W/(m2 sr nm)
-        phmsr = wmsr * x * 1e-9 / (speed_of_light * Planck)  # convert W (or J/s) to Nph/s
+        phmsr = (
+            wmsr * x * 1e-9 / (speed_of_light * Planck)
+        )  # convert W (or J/s) to Nph/s
 
         self.absolute = {"wmsr": wmsr, "wm": wm, "phmsr": phmsr}
 
 
 class Spectrum:
-
     """Echelle spectra converted from EchelleImage
     Contains image info, input - EchelleImage.order_image(....,sm=True)
 
@@ -720,16 +792,20 @@ class Spectrum:
         if image.spectra.shape[0] > 1:
             # look for all frames that match background criteria
             b_fms = np.array(
-                [i for i, f in enumerate(image.spectra) if not any(f > np.mean(f) + (np.std(f) * 5))]
+                [
+                    i
+                    for i, f in enumerate(image.spectra)
+                    if not any(f > np.mean(f) + (np.std(f) * 5))
+                ]
             )
             # identify the longest consecutive chain of frames, and use that as list of background frame indices
             self.info["BackgroundFrames"] = max(
                 np.split(b_fms, np.where(np.diff(b_fms) != 1)[0] + 1), key=len
             ).tolist()
             # average over all selected background frames, subtract this average background frame from all other frames
-            subtract = np.sum(image.spectra[self.info["BackgroundFrames"]], axis=0) / len(
-                self.info["BackgroundFrames"]
-            )
+            subtract = np.sum(
+                image.spectra[self.info["BackgroundFrames"]], axis=0
+            ) / len(self.info["BackgroundFrames"])
             self.counts = image.spectra - subtract
         else:
             self.info["BackgroundFrames"] = []
@@ -788,7 +864,9 @@ class Spectrum:
             trigdelay=self.trigdelay,
         )
 
-        pth = join(self.output_path, "{}_{}.txt".format(self.shotnumber, "echelle_spec"))
+        pth = join(
+            self.output_path, "{}_{}.txt".format(self.shotnumber, "echelle_spec")
+        )
 
         data = np.vstack((self.wavelength, self.spectra_to_save[self.saveunits]))
         try:

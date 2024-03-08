@@ -4,6 +4,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 from PyQt5.QtWidgets import QApplication
+from PyQt5 import QtWidgets
 
 from pyqtgraph.Qt import QtCore, QtGui
 
@@ -319,7 +320,7 @@ class EchelleSpectraGUI(QMainWindow, window_layout.Ui_MainWindow):
 
     def openfile(self):
         """Open file dialog for selection of SIF file to load"""
-        self.filename = QtGui.QFileDialog.getOpenFileName(
+        self.filename = QtWidgets.QFileDialog.getOpenFileName(
             None, "Open file to plot", str(self.data_path), "*.sif;;*.SIF;;*.*"
         )[0]
         if self.filename:
