@@ -880,12 +880,15 @@ class SaveSpectraThread(QtCore.QThread):
 
 
 def start():
-    try:
-        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
-            f"echelle_spectra-{__version__}"
-        )
-    except OSError:
-        pass
+    import platform
+
+    if platform.system() == "Windows":
+        try:
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
+                f"echelle_spectra-{__version__}"
+            )
+        except OSError:
+            pass
 
     app = QApplication(sys.argv)
     app.setWindowIcon(
