@@ -11,6 +11,7 @@ def load_config(base_path):
     try:
         config = get_config_from_file(base_path / "config.toml")
     except (tomli.TOMLDecodeError, OSError):
+        print("TOMLDecodError in config_loader.py")
         print("Warning: restoring default config file")
         shutil.copy(base_path / "resources/defaults.toml", base_path / "config.toml")
         config = get_config_from_file(base_path / "config.toml")

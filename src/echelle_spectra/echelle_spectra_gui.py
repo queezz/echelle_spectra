@@ -3,13 +3,10 @@ import numpy as np
 import sys
 from datetime import datetime
 from pathlib import Path
-from PyQt5.QtWidgets import QApplication
+from PyQt5.QtWidgets import QApplication, QMainWindow
 from PyQt5 import QtWidgets
 
 from pyqtgraph.Qt import QtCore, QtGui
-
-# Qt.QtGui has no attribute QMainWindow error
-from PyQt5.QtWidgets import QMainWindow
 
 import tools.echelle as ech
 import tools.emissionbands as eb
@@ -125,6 +122,9 @@ class EchelleSpectraGUI(QMainWindow, window_layout.Ui_MainWindow):
             self.config["base_path"] / "resources/header_template.txt"
         )
         self.path_last_shot = self.config["base_path"] / ".last_shot"
+
+        if self.config["debug"]:
+            print(self.config)
 
     def get_header_template(self):
         """Get header template used when saving data
