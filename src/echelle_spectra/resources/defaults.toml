@@ -1,3 +1,7 @@
+# {homedir} will be replaced with current user folder directory
+# {workdir}" will be replaced with the script folder
+# When using absolute path on Windows, escape backslashes like "C:\\your\\path\\in\\windows"
+#
 data_path = "{workdir}/echelle_spectra/data"    # path to directory containing .sif files (see output_path for string format)
 debug = false                                   # if true, additional print statements are printed
 diag_name = "spec_div1"                         # default name of the diagnostic
