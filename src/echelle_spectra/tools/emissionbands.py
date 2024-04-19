@@ -75,11 +75,13 @@ class EB:
         """
 
     HTML_REPORT_TEMP = (
+        "<div class='report'>"
         "<span style='font-size: 20px; color: red;'>{}</span><br>"
         "<span style='font-size: 14px; color: #3b9cd4;'>"
         "Boundaries, nm<br>"
         "</span>"
         "{}<br>"
+        "</div>"
     )
 
     def report_html(self):
@@ -181,6 +183,7 @@ class EmissionBand(object):
         return report_text
 
     HTML_REPORT_TEMP = (
+        "<div class='report'>"
         "<span style='font-size: 20px; color: red;'>{}</span><br>"
         "central wavelengths, nm<br>"
         "{}<br>"
@@ -205,6 +208,7 @@ class EmissionBand(object):
         "Boundaries, nm<br>"
         "</span>"
         "{}<br>"
+        "</div>"
     )
 
     def report_html(self):

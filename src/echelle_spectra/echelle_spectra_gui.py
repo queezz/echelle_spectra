@@ -234,9 +234,34 @@ class EchelleSpectraGUI(QMainWindow, window_layout.Ui_MainWindow):
         self.bands = self.hbands + self.hebands + self.cbands + [self.chband]
         self.bandstofit = self.cbands + self.hebands
 
-        # txt = '<font size = 6 color = "#d1451b">{}</font>'.format(txt)
+        html_content = """<!DOCTYPE html>
+                        <html>
+                        <head>
+                        <style>
+                        .report-container {
+                            display: grid;
+                            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+                            grid-gap: 10px;
+                        }
+                        .report {
+                            background-color: #e8caa2;
+                            border-style: solid;
+                            border-color: #cc2f1b;
+                            margin: 3px;
+                            padding: 5px;
+                        }
+                        </style>
+                        </head>
+                        <body>"""
+
+        html_content += "<div class='report-container'>"
         for band in self.bands:
-            self.cmd_bw.append(band.report_html())
+            html_content += band.report_html()
+        html_content += "</div></body></html>"
+
+        self.cmd_bw.append(html_content)
+        with open("band_data.html", "w") as file:
+            file.write(html_content)
 
     # ===========================================================================
     #                        End of Initialization

@@ -384,9 +384,21 @@ class Ui_MainWindow(object):
         self.area_cmd.addDock(self.d_cmd)
         # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
         self.w_cmd = pg.LayoutWidget()
+
         self.cmd_bw = QtWidgets.QTextBrowser()
+
+        style_sheet = """
+            QTextBrowser {
+                font-size: 16px;
+                color: black;
+                background-color: #f5deb0;
+            }
+        """
+        self.cmd_bw.setStyleSheet(style_sheet)
+
         self.w_cmd.addWidget(self.cmd_bw)
         self.d_cmd.addWidget(self.w_cmd)
+
         # == == == == == == == == == == == == == == == == == == == == == == == =
         # END of GUI
         # == == == == == == == == == == == == == == == == == == == == == == == =
