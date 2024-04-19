@@ -234,6 +234,10 @@ class EchelleSpectraGUI(QMainWindow, window_layout.Ui_MainWindow):
         self.bands = self.hbands + self.hebands + self.cbands + [self.chband]
         self.bandstofit = self.cbands + self.hebands
 
+        # txt = '<font size = 6 color = "#d1451b">{}</font>'.format(txt)
+        for band in self.bands:
+            self.cmd_bw.append(band.report_html())
+
     # ===========================================================================
     #                        End of Initialization
     # ===========================================================================

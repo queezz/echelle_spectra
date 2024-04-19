@@ -3,7 +3,7 @@ from lmfit.lineshapes import gaussian
 
 
 def baseline_als(y, lam, p, niter=10):
-    """ Asymmetric Least Squares Smoothing" by P. Eilers and H. Boelens
+    """Asymmetric Least Squares Smoothing" by P. Eilers and H. Boelens
     y - signal, lam - parameter (float or array), p - weight (float, array?)
     """
     from scipy.sparse import csc_matrix, spdiags
@@ -21,7 +21,7 @@ def baseline_als(y, lam, p, niter=10):
 
 
 def banddata(band, frame, s, **kws):
-    """ Extract data from the spctra at the frame,
+    """Extract data from the spctra at the frame,
     x = band.bounds
     """
     wl = s.wavelength
@@ -57,7 +57,7 @@ def banddata(band, frame, s, **kws):
 
 
 class EB:
-    """ Mimic EmissionBand object for intensity calculations
+    """Mimic EmissionBand object for intensity calculations
     bounds - interval where intesities are wanted
     name - name of this band
     method calculate intensity
@@ -70,17 +70,24 @@ class EB:
         self.name = kws.get("name", None)
 
     def intensity(self, s):
-        """ s - Spectrum Object from echelle.py 
+        """s - Spectrum Object from echelle.py
         (spectra for all frames, caiblrated)
         """
 
+    HTML_REPORT_TEMP = (
+        "<span style='font-size: 20px; color: red;'>{}</span><br>"
+        "<span style='font-size: 14px; color: #3b9cd4;'>"
+        "Boundaries, nm<br>"
+        "</span>"
+        "{}<br>"
+    )
 
-REPOT_TMP = """{}\nlambdas,nm\n{}
-   ------------------------
-    Eterm = {:.2f}     [eV]
-    <Ak>  = {:.2e}
-    <wg>  = {:.0f}
-   ------------------------\nwg\n{}\nAk\n{}\nConfiguration\n{}\nJ-J\n{}"""
+    def report_html(self):
+        """Generate band report in html friendly format"""
+        return self.HTML_REPORT_TEMP.format(
+            self.name,
+            f"{self.bounds[0]:.2f} - {self.bounds[-1]:.2f}",
+        )
 
 
 class EmissionBand(object):
@@ -128,7 +135,7 @@ class EmissionBand(object):
         return np.array([self.stat_weight(i) for i in range(self.nw)])
 
     def calc_average_Ak(self):
-        """ Calculate average Ak for a band"""
+        """Calculate average Ak for a band"""
         return sum(self.Ak * self.stat_weights) / sum(self.stat_weights)
 
     def fracfloat(self, frac_str):
@@ -146,8 +153,20 @@ class EmissionBand(object):
             frac = float(num) / float(denom)
             return whole - frac if whole < 0 else whole + frac
 
+    REPORT_TEMP = (
+        "{}\nlambdas,nm\n{}\n"
+        "------------------------\n"
+        "Eterm = {:.2f}     [eV]\n"
+        "<Ak>  = {:.2e}\n"
+        "<wg>  = {:.0f}\n"
+        "------------------------\n"
+        "wg\n{}\nAk\n{}\nConfiguration\n{}\nJ-J{}\n"
+        "Boundaries\n{}"
+    )
+
     def report(self):
-        report_text = REPOT_TMP.format(
+        """Generate band report as plain text"""
+        report_text = self.REPORT_TEMP.format(
             self.name,
             self.cw,
             np.mean(self.energ_high),
@@ -157,12 +176,54 @@ class EmissionBand(object):
             ["%.2e" % i for i in self.Ak],
             self.configs,
             self.Js,
+            f"{self.bounds[0]:.2f} - {self.bounds[-1]:.2f} (nm)",
         )
-        print(report_text)
+        return report_text
+
+    HTML_REPORT_TEMP = (
+        "<span style='font-size: 20px; color: red;'>{}</span><br>"
+        "central wavelengths, nm<br>"
+        "{}<br>"
+        "------------------------<br>"
+        "Eterm = {:.2f} [eV]<br>"
+        "&lt;Ak&gt; = {:.2e}<br>"
+        "&lt;wg&gt; = {:.0f}<br>"
+        "------------------------<br>"
+        "wg<br>"
+        "{}<br>"
+        "Ak<br>"
+        "{}<br>"
+        "<span style='font-size: 14px; color: #3b9cd4;'>"
+        "Configuration<br>"
+        "</span>"
+        "{}<br>"
+        "<span style='font-size: 14px; color: #3b9cd4;'>"
+        "J-J<br>"
+        "</span>"
+        "{}<br>"
+        "<span style='font-size: 14px; color: #3b9cd4;'>"
+        "Boundaries, nm<br>"
+        "</span>"
+        "{}<br>"
+    )
+
+    def report_html(self):
+        """Generate band report in html friendly format"""
+        return self.HTML_REPORT_TEMP.format(
+            self.name,
+            self.cw,
+            np.mean(self.energ_high),
+            self.average_Ak,
+            sum(self.stat_weights),
+            self.stat_weights,
+            ["%.2e" % i for i in self.Ak],
+            self.configs,
+            self.Js,
+            f"{self.bounds[0]:.2f} - {self.bounds[-1]:.2f}",
+        )
 
     def make_model(self):
-        """ Make lmfit model to fit the experimental data
-        """
+        """Make lmfit model to fit the experimental data"""
         from lmfit.models import GaussianModel
         from lmfit.lineshapes import gaussian
 
@@ -205,8 +266,7 @@ class EmissionBand(object):
         self.model = np.sum(gauss)
 
     def fitb(self, frame, s, **kws):
-        """ fit band
-        """
+        """fit band"""
         doblin = kws.get("doblin", True)
         x, y = banddata(self, frame, s, doblin=doblin)
         ymax = y.max()
@@ -257,7 +317,7 @@ class FitResult:
         self.frames = frames
 
     def set_info(self, n):
-        """ set number of frames from SIF image """
+        """set number of frames from SIF image"""
         self.NumberOfFrames = n
         # make a mask for the full frame range, True if intensities
         #  are calculated for the frame
@@ -300,7 +360,7 @@ class FitResult:
                 )
 
     def fill_nans(self):
-        """ fill missing values in the fitted intensities from
+        """fill missing values in the fitted intensities from
         numerically integrated values of unfitted data
         """
         self.intensities_combined = self.intensities_fit
