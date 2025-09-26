@@ -341,6 +341,10 @@ class EchelleSpectraGUI(QMainWindow, window_layout.Ui_MainWindow):
         self.update_shot_dict()
         self.start_shot.setValue(min(self.shot_dict))
         self.end_shot.setValue(max(self.shot_dict))
+        if self.config["debug"]:
+            print("checking shot_dict min max")
+            print(min(self.shot_dict))
+            print(max(self.shot_dict))
 
     def load_shot_number(self):
         """Try to load image of the selected shot number from the data folder"""

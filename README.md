@@ -12,21 +12,21 @@
   <a href="https://www.python.org/downloads/release/python-395">
     <img src="https://img.shields.io/badge/python-3.9-brigtgreen.svg" alt="Python 3.7">
   </a>
-  
-  <a href="https://github.com/queezz/echelle_spectra/blob/master/LICENSE">
+
+<a href="https://github.com/queezz/echelle_spectra/blob/master/LICENSE">
     <img src="https://img.shields.io/github/license/queezz/echelle_spectra" alt="MIT License">
   </a>
-  
-  <a href="https://github.com/queezz/echelle_spectra/releases/latest">
+
+<a href="https://github.com/queezz/echelle_spectra/releases/latest">
     <img src="https://img.shields.io/github/v/release/queezz/echelle_spectra?include_prereleases&sort=semver"
          alt="Latest release">
   </a>
-  
-  <a href="https://github.com/ajulik1997/queezz/echelle_spectra/latest">
+
+<a href="https://github.com/ajulik1997/queezz/echelle_spectra/latest">
     <img src="https://img.shields.io/github/release-date-pre/queezz/echelle_spectra" alt="Latest release date">
   </a>
-  
-  <a href="https://github.com/queezz/echelle_spectra/commits">
+
+<a href="https://github.com/queezz/echelle_spectra/commits">
     <img src="https://img.shields.io/github/commits-since/queezz/echelle_spectra/latest" alt="Commits since latest release">
   </a>
 </p>
@@ -43,6 +43,33 @@
   <img src="images/gui_image.png" width="500" />
   <img src="images/gui_civ.png" width="500" />
 </p>
+
+## # Start with venv
+
+Install a venv locally in the project folder
+
+```
+python -m venv ./.venv/echelle
+```
+
+Activate it
+```powershell
+./.venv/echelle/Scripts/Activate.ps1
+```
+
+Update pip
+```
+python -m pip install -U pip
+```
+
+Install `echelle_spectra` in editable mode with dev tools:
+```
+python -m pip install -e ".[dev]"
+```
+Run the GUI program
+```bash
+python ./src/echelle_spectra/__main__.py
+```
 
 ## Quick start
 
@@ -91,10 +118,11 @@ Other tabs are also available in the GUI, which contain plots populated by snipp
 ### Bulk processing
 
 # GUI for Echelle image processing
-To convert Echelle images to spectra two options are avaliable: use this GUI, or import `EchelleImage` class to read, calibrate, and produce a `Spectrum` class, from wicht data could be exported. See examples for [CCD](src/echelle_spectra/examples/testtool-CCD.ipynb) and [CMOS](src/echelle_spectra/examples/testtool-CMOS.ipynb) sensors.
-| CCD image                           | CMOS image                           |
-| --------------------------------    | --------------------------------     |
-| ![UI](src/echelle_spectra/examples/CCD_cut.png) | ![UI](src/echelle_spectra/examples/CMOS_cut.png) |
 
+To convert Echelle images to spectra two options are avaliable: use this GUI, or import `EchelleImage` class to read, calibrate, and produce a `Spectrum` class, from wicht data could be exported. See examples for [CCD](src/echelle_spectra/examples/testtool-CCD.ipynb) and [CMOS](src/echelle_spectra/examples/testtool-CMOS.ipynb) sensors.
+
+| CCD image                                     | CMOS image                                     |
+| --------------------------------------------- | ---------------------------------------------- |
+| ![UI](src/echelle_spectra/examples/CCD_cut.png) | ![UI](src/echelle_spectra/examples/CMOS_cut.png) |
 
  ![UI](images/gui.png)
