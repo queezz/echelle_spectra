@@ -1,12 +1,3 @@
-<h1 align="center">
-  <br>
-  <img src="src/echelle_spectra/resources/graphics/echelle.png" alt="Echelle Spectra Logo" width="200">
-  <br>
-  Echelle Spectra
-  <br>
-</h1>
-
-<h4 align="center">Graphical tool for the extraction and analysis of calibrated spectra from 2D Echelle spectrometer images</h4>
 
 <p align="center">
   <a href="https://www.python.org/downloads/release/python-395">
@@ -31,7 +22,19 @@
   </a>
 </p>
 
+<h2 align="center">
+  <br>
+  <img src="src/echelle_spectra/resources/graphics/echelle.png" alt="Echelle Spectra Logo" width="60">
+  <br>
+  Echelle Spectra
+  <br>
+</h2>
+
+<h4 align="center">Graphical tool for the extraction and analysis of calibrated spectra from 2D Echelle spectrometer images</h4>
+
+
 <p align="center">
+  <a href="#start-with-venv">Start with Venv</a> •
   <a href="#quick-start">Quick start</a> •
   <a href="#usage">Usage</a> •
   <a href="#configuration">Configuration</a> •
@@ -39,12 +42,13 @@
   <a href="#license">License</a>
 </p>
 
-<p float="left">
-  <img src="images/gui_image.png" width="500" />
-  <img src="images/gui_civ.png" width="500" />
-</p>
 
-## # Start with venv
+## Install with venv
+There are plentiful ways to install a package, but for now we recommend [venv](https://docs.python.org/3/library/venv.html).
+Clone the repo into your folder of choice (use `.` to put it inside current dir)
+```bash
+git clone https://github.com/queezz/echelle_spectra.git .
+```
 
 Install a venv locally in the project folder
 
@@ -71,29 +75,25 @@ Run the GUI program
 python ./src/echelle_spectra/__main__.py
 ```
 
+### External venv
+If you use your code with some cloud, it may be better to keep venv oustide the cloud storage. Then put venvs somewhere central. On Windows:
+`$env:USERPROFILE\.venvs\` is a goood place.
+```shell
+python -m venv $env:USERPROFILE\.venvs\echelle
+```
+Activate
+```shell
+& $env:USERPROFILE\.venvs\echelle\Scripts\Activate.ps1
+```
+
 ## Quick start
-
-The echelle_spectra module can be installed directly from PyPI via `pip`:
-
-`pip install echelle_spectra --upgrade`
-
-The echelle_spectra app GUI can be invoked directly as a Python module:
-
-`python -m echelle_spectra`
-
-Alternatively, the module can imported and the GUI started from within a Python script:
-
+Run GUI from python:
 ```python
 import echelle_spectra
 echelle_spectra.gui.start()
 ```
-
-If you instead wish to run the tool from its source, clone this repository using `git`, install the project requirements, and execute the `__main__.py` script file as follows:
-
+Or from the command prompt:
 ```shell
-git clone https://github.com/queezz/echelle_spectra.git
-cd echelle_spectra
-pip install -r requirements.txt
 python ./src/echelle_spectra/__main__.py
 ```
 
@@ -107,22 +107,7 @@ After a file is successfully loaded, the first frame will be graphically display
 
 Other tabs are also available in the GUI, which contain plots populated by snippets of spectral data in common regions of interest. If fitting was enabled during loading, a convolution of one or more Gaussian curves is plotted that best approximates the emissive intensity in those wavelength regions.
 
-### Data loading
 
-(Info box)
-
-### Calibration
-
-### Data export
-
-### Bulk processing
-
-# GUI for Echelle image processing
-
-To convert Echelle images to spectra two options are avaliable: use this GUI, or import `EchelleImage` class to read, calibrate, and produce a `Spectrum` class, from wicht data could be exported. See examples for [CCD](src/echelle_spectra/examples/testtool-CCD.ipynb) and [CMOS](src/echelle_spectra/examples/testtool-CMOS.ipynb) sensors.
-
-| CCD image                                     | CMOS image                                     |
-| --------------------------------------------- | ---------------------------------------------- |
-| ![UI](src/echelle_spectra/examples/CCD_cut.png) | ![UI](src/echelle_spectra/examples/CMOS_cut.png) |
+# GUI
 
  ![UI](images/gui.png)
