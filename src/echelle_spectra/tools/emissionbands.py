@@ -342,7 +342,7 @@ class FitResult:
 
     def integrate_spectra(self):
         """ """
-        intensities = np.array([(np.trapz(s, self.x)) for s in self.spectra])
+        intensities = np.array([(np.trapezoid(s, self.x)) for s in self.spectra])
 
         self.intensities = np.empty(self.NumberOfFrames)
         self.intensities[:] = np.nan
@@ -355,7 +355,7 @@ class FitResult:
 
         for frame in list(self.spectra_fit):
             if self.spectra_fit[frame] is not None:
-                self.intensities_fit[frame] = np.trapz(
+                self.intensities_fit[frame] = np.trapezoid(
                     self.spectra_fit[frame].sum(axis=0), self.x_fit
                 )
 
