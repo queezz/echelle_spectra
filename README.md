@@ -39,6 +39,9 @@
   <a href="#license">License</a>
 </p>
 
+<img src="images/gui_image.png" width="500" />
+
+
 <p float="left">
   <img src="images/gui_image.png" width="500" />
   <img src="images/gui_civ.png" width="500" />

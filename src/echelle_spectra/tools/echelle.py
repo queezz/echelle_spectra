@@ -23,7 +23,7 @@ DIMO = 1024  # pixel dimension in the order direction
 
 remove_npnans = lambda a: a[~pd.isnull(a)]  # remove nans from numpy array
 
-
+# MARK: Read image
 def read_image(fpth, spec="black", crop=[0, -1], exptime=1):
     """
     Load image from Echelle Spectrometer
@@ -80,7 +80,7 @@ def read_image(fpth, spec="black", crop=[0, -1], exptime=1):
 
     return images, info
 
-
+# MARK: EchelleImage
 class EchelleImage:
     """"""
 
@@ -375,7 +375,7 @@ class EchelleImage:
                 ha="left",
             )
 
-
+# MARK: Calibrations
 class Calibrations:
     """ """
 
@@ -441,7 +441,7 @@ class Calibrations:
         self.absolute_calibration()
 
     # =============================
-    # PATTERN
+    # MARK: PATTERN
     # =============================
     def load_sphere(self):
         """
@@ -556,7 +556,7 @@ class Calibrations:
         self.pattern_image = pp
 
     # =============================
-    # WAVELENGTH
+    # MARK: WAVELENGTH
     # =============================
     def wavelength_calibration(self, **kws):
         """
@@ -737,7 +737,7 @@ class Calibrations:
         plt.gcf().set_size_inches([20, 5])
 
     # =============================
-    # Absolute
+    # MARK: Absolute
     # =============================
     def absolute_calibration(self):
         """
@@ -768,7 +768,7 @@ class Calibrations:
 
         self.absolute = {"wmsr": wmsr, "wm": wm, "phmsr": phmsr}
 
-
+# MARK: Spectrum
 class Spectrum:
     """Echelle spectra converted from EchelleImage
     Contains image info, input - EchelleImage.order_image(....,sm=True)
@@ -874,7 +874,7 @@ class Spectrum:
         except Exception as err:
             print("failed to save spectra\n{}".format(err))
 
-
+# MARK: Header template
 header_template = """# [Parameters]
 # Name = 'Echelle Spectra'
 # ShotNo = {shot}
