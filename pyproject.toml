@@ -24,8 +24,7 @@ dependencies = [
   "pyqt5>=5.15.7",
   "pyqtgraph>=0.12.4",
   "scipy>=1.8.1",
-  # Make sif_parser optional via extra (see [project.optional-dependencies] below)
-  # "sif_parser>=0.3.0",
+  "sif_parser>=0.3.0",
   'tomli>=2.0.1; python_version < "3.11"',
 ]
 classifiers = [
@@ -62,10 +61,6 @@ dev = [
   "build",
   "twine",
 ]
-# Make sif_parser optional if your runtime can handle its absence
-cameras = [
-  "sif_parser>=0.3.0"
-]
 
 [tool.black]
 line-length = 100
@@ -77,12 +72,20 @@ target-version = "py38"
 lint.select = ["E", "F", "W", "I"]  # basic cleanups + import sort
 
 [tool.setuptools]
-# If you have package data / icons, turn this on and ship MANIFEST.in
 include-package-data = true
 
-# If you prefer explicit discovery:
-# [tool.setuptools.packages.find]
-# include = ["echelle_spectra*"]
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+"echelle_spectra" = [
+  "resources/*.toml",
+  "resources/*.txt",
+  "resources/*.py",
+  "resources/graphics/*",
+  "resources/calibration_files/*",
+  "resources/test_data/*",
+]
 
 # Optional: if/when you switch to setuptools_scm for auto-versioning:
 # [tool.setuptools_scm]

@@ -8,12 +8,11 @@ from PyQt5 import QtWidgets
 
 from pyqtgraph.Qt import QtCore, QtGui
 
-import tools.echelle as ech
-import tools.emissionbands as eb
-import tools.emissiondata as ebd
-from __init__ import __version__
-from __init__ import _config
-from resources import window_layout
+from .tools import echelle as ech
+from .tools import emissionbands as eb
+from .tools import emissiondata as ebd
+from . import __version__, _config
+from .resources import window_layout
 
 
 class EchelleSpectraGUI(QMainWindow, window_layout.Ui_MainWindow):

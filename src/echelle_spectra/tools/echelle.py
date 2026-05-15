@@ -2,26 +2,13 @@
 Tools for Echelle spectrometer images
 """
 
-# from sif_reader import np_open # obsolete
-# now import inside read_image to ignore coflicts with PIL tiff pluging
-# from sif_parser import np_open
 import numpy as np
 import os
 from os.path import join
 import pandas as pd
 
-DIMW = 1024  # pixel dimension in the wavelength direction
-DIMO = 1024  # pixel dimension in the order direction
-
-# TypeError: ufunc 'isnan' not supported for
-# the input types, and the inputs could not be safely
-# coerced to any supported types according to the casting rule ''safe''
-# Changing from ~np.isnan(a) to
-# ~pd.isnull(a) to avoid this error for clbr.sphr.order_spectra[0,nord]
-#
-# remove_npnans = lambda a: a[~np.isnan(a)]  # remove nans from numpy array
-
-remove_npnans = lambda a: a[~pd.isnull(a)]  # remove nans from numpy array
+# pd.isnull handles NaNs in object arrays where np.isnan can fail
+remove_npnans = lambda a: a[~pd.isnull(a)]
 
 # MARK: Read image
 def read_image(fpth, spec="black", crop=[0, -1], exptime=1):
@@ -116,14 +103,6 @@ class EchelleImage:
         )
         if self.spectrometer == "black":
             self.exposure_time = self.info["ExposureTime"]
-
-    # TODO: Remove
-    #    def read_image(self):
-    #        """
-    #        """
-    #        images, self.info = np_open(self.fpth)
-    #        images = images.repeat(self.info["ybin"], axis=1)
-    #        self.images = images.repeat(self.info["xbin"], axis=2)
 
     def plot_frame(self, frame, **kws):
         """
@@ -541,11 +520,6 @@ class Calibrations:
 
         self.make_pattern_image()
 
-    #    def show_masks(self, **kws):
-    #        """ show all masks """
-    #        dv = kws.get("dv", self.dv)
-    #        self.masks = np.array([self.make_mask(i, show=True, dv=dv) for i in range(self.pattern.shape[1])])
-
     def make_pattern_image(self):
         """
         make pattern image
@@ -618,23 +592,6 @@ class Calibrations:
         for o, i in zip(self.orders_bad_shape, self.orders_bad_froms):
             print(o, i)
 
-    # def print_wavelength(self):
-    #     """ Print pandas dataframe to show the nan values in the
-    #     wavelength calibration to confirm the dimentions.
-    #
-    #     Usage:
-    #
-    #     cb.print_wavelength().style.highlight_null(null_color='red')
-    #
-    #     where cb -> Calibrations class
-    #     """
-    #     import pandas as pd
-    #
-    #     np.set_printoptions(precision=2)
-    #     d = pd.DataFrame(self.order_wavel)
-    #     i = 2173
-    #     return d.loc[[0, 1, 26, 27, 28], range(i, i + 12)].round(2)
-
     def calculate_order_borders(self):
         """Calculate mask for the orders from a Integrating Sphere Image
         sphr - EchelleImage('IntegratingSphere.SIF')
@@ -642,7 +599,7 @@ class Calibrations:
 
         def isc(x1, y1, x2, y2):
             """
-            For two neighbor orders with lambda \propto -pix
+            For two neighbor orders with lambda proportional to -pix
             find end index for x1 and start index for x2 so they will
             not intersect
             x1 < ind1 and x2 >= ind2
