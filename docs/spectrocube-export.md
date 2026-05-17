@@ -120,6 +120,99 @@ computes it externally as `trigger_delay + frame * CycleTime`.  Use the
 
 ---
 
+## GUI — Save SpectroCube button
+
+The viewer has a **Save SpectroCube** button in the Controls dock (below
+the existing "Save spec" / "Save lines" checkboxes).
+
+**Workflow:**
+
+1. Open a SIF file with the **Manual SIF load** button or by entering a shot
+   number and clicking **Load selected**.
+2. Wait for the image and spectrum to finish loading.
+3. Select the desired **Spectra units** from the combo-box
+   (`counts`, `wm`, `wmsr`, or `phmsr`).
+4. Click **Save SpectroCube**.
+5. A file-save dialog opens, pre-filled with a name like
+   `193777_spectrocube.nc` in the configured output folder.
+6. Choose or confirm the path and click **Save**.
+
+The status bar shows `SpectroCube saved: /path/to/file.nc` on success, or a
+dialog with an actionable error message on failure (including instructions if
+the `spectrocube` package is not installed).
+
+!!! note "spectrocube is optional"
+    If `spectrocube` is not installed, a dialog explains what to do rather
+    than crashing.  See [Local development installation](#local-development-installation).
+
+---
+
+## CLI — `echelle-spectrocube`
+
+After installation the `echelle-spectrocube` command is available on the PATH.
+
+### Single-file export
+
+```bash
+echelle-spectrocube shot_193777_Echelle.SIF --units wm -o output/shot_193777.nc
+```
+
+### Batch folder export
+
+```bash
+# Export all .SIF files in a folder, save .nc files alongside them
+echelle-spectrocube /data/shots/ --units wm
+
+# Save to a separate output directory
+echelle-spectrocube /data/shots/ --units wmsr -o /data/nc/
+
+# Preview what would happen (no files written)
+echelle-spectrocube /data/shots/ --dry-run --verbose
+```
+
+### Full option reference
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `INPUT` | *(required)* | `.sif` file or folder |
+| `--units` | `counts` | `counts`, `wm`, `wmsr`, or `phmsr` |
+| `-o / --output` | same dir as INPUT | Output file (single) or directory (batch) |
+| `--camera` | `CMOS` | Which bundled calibration to use: `CMOS` or `CCD` |
+| `--calibration-dir` | bundled resources | Path to calibration files folder |
+| `--instrument-id` | `echelle` | Stored in SpectroCube metadata |
+| `--pattern` | `*.SIF` | Glob for batch discovery (also tries `*.sif` as fallback) |
+| `--overwrite` | *(skip existing)* | Replace existing output files |
+| `--dry-run` | — | Print plan without writing |
+| `--verbose` | — | Per-file progress output |
+
+### Output filename convention
+
+For each input file `shot_042_Echelle.SIF` the output is named
+`shot_042_Echelle_spectrocube.nc` in the output directory.
+
+### Calibration limitation
+
+!!! warning "Calibration files required"
+    The CLI uses the same Echelle order-pattern, wavelength calibration, and
+    integrating-sphere files as the GUI.  These files must be present in the
+    installed package under `resources/calibration_files/` (or supplied via
+    `--calibration-dir`).
+
+    For batch conversion the calibration is loaded **once** and reused for all
+    files, so the cost is equivalent to opening the GUI once.
+
+    If the `.sif` sphere files are not bundled with your installation (they are
+    large binaries), point to a local copy:
+
+    ```bash
+    echelle-spectrocube /data/shots/ --calibration-dir /lab/calibration_files/
+    ```
+
+    The same `--camera` flag selects either the CCD or CMOS calibration file
+    set (matching the radio button in the GUI).
+
+---
+
 ## Local development installation
 
 Both packages use a `src/` layout and are installed as editable packages.

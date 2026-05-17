@@ -147,6 +147,13 @@ class Ui_MainWindow(object):
         self.w3.addWidget(self.progress_bands, 9, 0, 1, 2)
         self.w3.addWidget(self.coursor_bw, 10, 0, 1, 2)
 
+        self.btn_save_cube = QtWidgets.QPushButton("Save SpectroCube")
+        self.btn_save_cube.setToolTip(
+            "Save current spectrum as a SpectroCube NetCDF (.nc) file\n"
+            "(uses the currently selected units)"
+        )
+        self.w3.addWidget(self.btn_save_cube, 11, 0, 1, 2)
+
         self.controls_open = [
             self.btn_open,
             self.shot_number,

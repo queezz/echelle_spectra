@@ -101,6 +101,7 @@ class EchelleSpectraGUI(QMainWindow, window_layout.Ui_MainWindow):
         self.show_btn.clicked.connect(self.load_shot_number)
         self.start_register.clicked.connect(self.start_loop)
         self.abort_register.clicked.connect(self.abort_loop)
+        self.btn_save_cube.clicked.connect(self.save_spectrocube)
 
     def update_paths(self):
         """Set-up file paths for calibration, data folder, output folder etc."""
@@ -574,6 +575,62 @@ class EchelleSpectraGUI(QMainWindow, window_layout.Ui_MainWindow):
             comments="",
             fmt=["%.5f"] + ["%.6e"] * len(names),
         )
+
+    def save_spectrocube(self):
+        """Save the currently loaded spectrum as a SpectroCube NetCDF (.nc) file.
+
+        Uses the units currently selected in the units combo-box.
+        Calls export_spectrocube() — no conversion logic is duplicated here.
+        """
+        if not hasattr(self, "spectra") or self.spectra is None:
+            self.statusBar().showMessage("No spectrum available to export.")
+            return
+
+        from .tools.spectrocube_export import export_spectrocube
+
+        units = str(self.spec_units.currentText())
+        shot = self.shot_number.value()
+        default_name = f"{shot}_spectrocube.nc"
+
+        path, _ = QtWidgets.QFileDialog.getSaveFileName(
+            self,
+            "Save SpectroCube",
+            str(self.output_path / default_name),
+            "SpectroCube NetCDF (*.nc);;All files (*)",
+        )
+        if not path:
+            return
+
+        self.statusBar().showMessage(f"Saving SpectroCube: {path} …")
+        try:
+            export_spectrocube(
+                self.spectra,
+                path,
+                units=units,
+                instrument_id="echelle",
+                shot_number=str(shot),
+            )
+            self.statusBar().showMessage(f"SpectroCube saved: {path}")
+        except ImportError as exc:
+            self.statusBar().showMessage(
+                "SpectroCube export requires the 'spectrocube' package — see status bar."
+            )
+            QtWidgets.QMessageBox.warning(
+                self,
+                "SpectroCube not installed",
+                "SpectroCube export requires the optional 'spectrocube' package.\n\n"
+                "Install it with:\n    pip install spectrocube\n\n"
+                "Or for local development:\n"
+                "    pip install -e /path/to/2026-spectrocube\n\n"
+                f"Details: {exc}",
+            )
+        except Exception as exc:
+            self.statusBar().showMessage(f"SpectroCube export failed: {exc}")
+            QtWidgets.QMessageBox.critical(
+                self,
+                "Export failed",
+                f"SpectroCube export failed:\n{exc}",
+            )
 
     # ===========================================================================
     #                   Display Plots and info
