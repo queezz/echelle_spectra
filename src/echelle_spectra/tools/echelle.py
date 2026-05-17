@@ -755,14 +755,23 @@ class Spectrum:
                     if not any(f > np.mean(f) + (np.std(f) * 5))
                 ]
             )
-            # identify the longest consecutive chain of frames, and use that as list of background frame indices
-            self.info["BackgroundFrames"] = max(
-                np.split(b_fms, np.where(np.diff(b_fms) != 1)[0] + 1), key=len
-            ).tolist()
-            # average over all selected background frames, subtract this average background frame from all other frames
-            subtract = np.sum(
-                image.spectra[self.info["BackgroundFrames"]], axis=0
-            ) / len(self.info["BackgroundFrames"])
+            if len(b_fms) == 0:
+                # No frame qualifies as a dark/background frame; skip subtraction.
+                print(
+                    "No dark/background frame found; skipping dark subtraction."
+                )
+                self.info["BackgroundFrames"] = []
+                subtract = np.zeros(image.spectra.shape[1:])
+            else:
+                # identify the longest consecutive chain of frames, and use that as list of background frame indices
+                self.info["BackgroundFrames"] = max(
+                    np.split(b_fms, np.where(np.diff(b_fms) != 1)[0] + 1), key=len
+                ).tolist()
+                n_bg = len(self.info["BackgroundFrames"])
+                # average over all selected background frames, subtract from all frames
+                subtract = (
+                    np.sum(image.spectra[self.info["BackgroundFrames"]], axis=0) / n_bg
+                )
             self.counts = image.spectra - subtract
         else:
             self.info["BackgroundFrames"] = []
