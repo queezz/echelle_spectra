@@ -6,6 +6,8 @@ repo_name: queezz/echelle_spectra
 
 theme:
   name: material
+  logo: assets/echelle.png
+  favicon: assets/echelle.png
   icon:
     repo: fontawesome/brands/github
   features:
@@ -77,9 +79,9 @@ nav:
       - Band data: band-data.md
   - Usage:
       - Basic usage: usage.md
-      - Exporting to SpectroCube:
-          - Guide: spectrocube-export.md
-          - API reference: spectrocube-export-api.md
+      - Exporting to SpectroCube: spectrocube-export.md
+  - API:
+      - SpectroCube export: spectrocube-export-api.md
   - Development:
       - Developer notes: development.md
   - Archaeology & Refactor:
