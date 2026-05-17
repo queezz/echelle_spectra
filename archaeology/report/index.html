@@ -1,0 +1,3831 @@
+<!DOCTYPE html><html lang="en" class="no-js"><head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+      
+      
+      
+        <link rel="prev" href="../../development/">
+      
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>Repository archaeology report - Echelle Spectra</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="">
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&amp;display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../styles/brand.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  <link href="../../assets/stylesheets/glightbox.min.css" rel="stylesheet"><script src="../../assets/javascripts/glightbox.min.js"></script><style id="glightbox-style">
+            html.glightbox-open { overflow: initial; height: 100%; }
+            .gslide-title { margin-top: 0px; user-select: text; }
+            .gslide-desc { color: #666; user-select: text; }
+            .gslide-image img { background: white; }
+            .gscrollbar-fixer { padding-right: 15px; }
+            .gdesc-inner { font-size: 0.75rem; }
+            body[data-md-color-scheme="slate"] .gdesc-inner { background: var(--md-default-bg-color); }
+            body[data-md-color-scheme="slate"] .gslide-title { color: var(--md-default-fg-color); }
+            body[data-md-color-scheme="slate"] .gslide-desc { color: var(--md-default-fg-color); }
+        </style></head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="echelle-dark" data-md-color-primary="custom" data-md-color-accent="cyan">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#echelle-spectra-repository-archaeology-report" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="Echelle Spectra" class="md-header__button md-logo" aria-label="Echelle Spectra" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"></path></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"></path></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Echelle Spectra
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Repository archaeology report
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="echelle-dark" data-md-color-primary="custom" data-md-color-accent="cyan" aria-label="Switch to light mode" type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_1" hidden="">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 7a5 5 0 0 1 5 5 5 5 0 0 1-5 5 5 5 0 0 1-5-5 5 5 0 0 1 5-5m0 2a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3m0-7 2.39 3.42C13.65 5.15 12.84 5 12 5s-1.65.15-2.39.42zM3.34 7l4.16-.35A7.2 7.2 0 0 0 5.94 8.5c-.44.74-.69 1.5-.83 2.29zm.02 10 1.76-3.77a7.131 7.131 0 0 0 2.38 4.14zM20.65 7l-1.77 3.79a7.02 7.02 0 0 0-2.38-4.15zm-.01 10-4.14.36c.59-.51 1.12-1.14 1.54-1.86.42-.73.69-1.5.83-2.29zM12 22l-2.41-3.44c.74.27 1.55.44 2.41.44.82 0 1.63-.17 2.37-.44z"></path></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="cyan" aria-label="Switch to dark mode" type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_0" hidden="">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m17.75 4.09-2.53 1.94.91 3.06-2.63-1.81-2.63 1.81.91-3.06-2.53-1.94L12.44 4l1.06-3 1.06 3zm3.5 6.91-1.64 1.25.59 1.98-1.7-1.17-1.7 1.17.59-1.98L15.75 11l2.06-.05L18.5 9l.69 1.95zm-2.28 4.95c.83-.08 1.72 1.1 1.19 1.85-.32.45-.66.87-1.08 1.27C15.17 23 8.84 23 4.94 19.07c-3.91-3.9-3.91-10.24 0-14.14.4-.4.82-.76 1.27-1.08.75-.53 1.93.36 1.85 1.19-.27 2.86.69 5.83 2.89 8.02a9.96 9.96 0 0 0 8.02 2.89m-1.64 2.02a12.08 12.08 0 0 1-7.8-3.47c-2.17-2.19-3.33-5-3.49-7.82-2.81 3.14-2.7 7.96.31 10.98 3.02 3.01 7.84 3.12 10.98.31"></path></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"></path></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required="">
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"></path></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"></path></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"></path></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix="">
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/queezz/echelle_spectra" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"></path></svg>
+  </div>
+  <div class="md-source__repository">
+    queezz/echelle_spectra
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../.." class="md-tabs__link">
+          
+  
+  
+  Home
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../usage/" class="md-tabs__link">
+          
+  
+  
+  Usage
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../development/" class="md-tabs__link">
+          
+  
+  
+  Development
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="./" class="md-tabs__link">
+          
+  
+  
+  Archaeology &amp; Refactor
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation">
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="Echelle Spectra" class="md-nav__button md-logo" aria-label="Echelle Spectra" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"></path></svg>
+
+    </a>
+    Echelle Spectra
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/queezz/echelle_spectra" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"></path></svg>
+  </div>
+  <div class="md-source__repository">
+    queezz/echelle_spectra
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix="">
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_1">
+        
+          
+          <label class="md-nav__link" for="__nav_1" id="__nav_1_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_1_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_1">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Home
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix="">
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../band-data/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Band data
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2">
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Usage
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Usage
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix="">
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../usage/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Basic usage
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3">
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Development
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Development
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix="">
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../development/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Developer notes
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" checked="">
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Archaeology &amp; Refactor
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Archaeology &amp; Refactor
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix="">
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Repository archaeology report
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Repository archaeology report
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix="">
+      
+        <li class="md-nav__item">
+  <a href="#table-of-contents" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Table of Contents
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#1-repository-map" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Repository Map
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="1. Repository Map">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#file-size-notes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        File Size Notes
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-architecture-overview" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Architecture Overview
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="2. Architecture Overview">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#class-hierarchy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Class Hierarchy
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#data-flow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Data Flow
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-core-module-analysis" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Core Module Analysis
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="3. Core Module Analysis">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#toolsechellepy-900-lines-the-core-module" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        tools/echelle.py (900 lines) — THE core module
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#toolsemissionbandspy-369-lines" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        tools/emissionbands.py (369 lines)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#toolsemissiondatapy-387-lines" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        tools/emissiondata.py (387 lines)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#toolsconfig_loaderpy-24-lines" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        tools/config_loader.py (24 lines)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#echelle_spectra_guipy-912-lines" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        echelle_spectra_gui.py (912 lines)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#resourceswindow_layoutpy-546-lines" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        resources/window_layout.py (546 lines)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-calibration-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Calibration Model
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="4. Calibration Model">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#41-order-pattern" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.1 Order Pattern
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#42-wavelength-calibration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.2 Wavelength Calibration
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#43-order-border-calculation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.3 Order Border Calculation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#44-absolute-calibration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.4 Absolute Calibration
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#45-spectrometer-configurations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.5 Spectrometer Configurations
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-workflow-map" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. Workflow Map
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="5. Workflow Map">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#workflow-1-full-calibration-one-time-per-detector-config" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Workflow 1: Full Calibration (one-time per detector config)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#workflow-2-gui-data-processing-routine" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Workflow 2: GUI Data Processing (routine)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#workflow-3-batch-processing-routine" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Workflow 3: Batch Processing (routine)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#workflow-4-notebook-based-analysis-exploratory" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Workflow 4: Notebook-Based Analysis (exploratory)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-gui-analysis" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. GUI Analysis
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="6. GUI Analysis">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#gui-data-coupling" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GUI → Data Coupling
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#threading-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Threading Model
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#7-example-classification" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7. Example Classification
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="7. Example Classification">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#essential-workflow-examples-preserve-and-document" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Essential Workflow Examples (preserve and document)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#exploratory-experimental-preserve-but-flag-as-experimental" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Exploratory / Experimental (preserve but flag as experimental)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#likely-obsolete-duplicate-candidates-for-cleanup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Likely Obsolete / Duplicate (candidates for cleanup)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#data-files-in-examples-review" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Data Files in Examples (review)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#8-new-spectrometer-initialization" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8. New Spectrometer Initialization
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#9-where-manual-recalibration-happens" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9. Where Manual Recalibration Happens
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="9. Where Manual Recalibration Happens">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#pattern-recalibration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Pattern Recalibration
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#wavelength-recalibration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Wavelength Recalibration
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#the-manual-bottleneck" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The Manual Bottleneck
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#10-session-alignment-proposal" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10. Session Alignment Proposal
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="10. Session Alignment Proposal">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#conceptual-framework" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Conceptual Framework
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#where-alignment-logic-should-live" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Where Alignment Logic Should Live
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#existing-abstractions-to-reuse" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Existing Abstractions to Reuse
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#proposed-minimal-implementation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Proposed Minimal Implementation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#reference-lines-for-h-lamp-alignment" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reference Lines for H Lamp Alignment
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#integration-strategy-minimal-disruption" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Integration Strategy (Minimal Disruption)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#11-god-objects-and-oversized-files" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11. God Objects and Oversized Files
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="11. God Objects and Oversized Files">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#calibrations-class-390-lines-moderate" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Calibrations class (~390 lines, moderate)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#echellespectragui-class-760-lines-the-real-god-object" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        EchelleSpectraGUI class (~760 lines) — the real god object
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#window_layoutpy-546-lines-ui_mainwindow-generated-style-but-hand-written" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        window_layout.py (546 lines, Ui_MainWindow) — generated-style but hand-written
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#echellepy-900-lines-well-structured-but-monolithic" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        echelle.py (900 lines) — well-structured but monolithic
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#12-duplicated-and-dead-code" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        12. Duplicated and Dead Code
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="12. Duplicated and Dead Code">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#duplicated" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Duplicated
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#dead-obsolete-code" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Dead / Obsolete Code
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#import-system-issues" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Import System Issues
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#13-proposed-mkdocs-structure" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        13. Proposed MkDocs Structure
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="13. Proposed MkDocs Structure">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#key-documentation-priorities-ordered" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Key Documentation Priorities (ordered)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#14-safe-incremental-improvements" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        14. Safe Incremental Improvements
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="14. Safe Incremental Improvements">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#priority-1-low-risk-high-value" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Priority 1: Low-Risk, High-Value
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#priority-2-moderate-effort-high-value" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Priority 2: Moderate Effort, High Value
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#priority-3-larger-but-safe" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Priority 3: Larger but Safe
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#15-minimal-risk-modernization-plan" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        15. Minimal-Risk Modernization Plan
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="15. Minimal-Risk Modernization Plan">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#phase-1-cleanup-no-behavior-changes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Phase 1: Cleanup (no behavior changes)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#phase-2-documentation-no-code-changes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Phase 2: Documentation (no code changes)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#phase-3-spectrometer-config-externalization" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Phase 3: Spectrometer Config Externalization
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#phase-4-session-alignment" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Phase 4: Session Alignment
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#phase-5-optional-improvements" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Phase 5: Optional Improvements
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#appendix-key-code-entry-points" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Appendix: Key Code Entry Points
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc">
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix="">
+      
+        <li class="md-nav__item">
+  <a href="#table-of-contents" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Table of Contents
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#1-repository-map" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Repository Map
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="1. Repository Map">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#file-size-notes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        File Size Notes
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-architecture-overview" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Architecture Overview
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="2. Architecture Overview">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#class-hierarchy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Class Hierarchy
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#data-flow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Data Flow
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-core-module-analysis" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Core Module Analysis
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="3. Core Module Analysis">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#toolsechellepy-900-lines-the-core-module" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        tools/echelle.py (900 lines) — THE core module
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#toolsemissionbandspy-369-lines" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        tools/emissionbands.py (369 lines)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#toolsemissiondatapy-387-lines" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        tools/emissiondata.py (387 lines)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#toolsconfig_loaderpy-24-lines" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        tools/config_loader.py (24 lines)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#echelle_spectra_guipy-912-lines" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        echelle_spectra_gui.py (912 lines)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#resourceswindow_layoutpy-546-lines" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        resources/window_layout.py (546 lines)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-calibration-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Calibration Model
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="4. Calibration Model">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#41-order-pattern" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.1 Order Pattern
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#42-wavelength-calibration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.2 Wavelength Calibration
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#43-order-border-calculation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.3 Order Border Calculation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#44-absolute-calibration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.4 Absolute Calibration
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#45-spectrometer-configurations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.5 Spectrometer Configurations
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-workflow-map" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. Workflow Map
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="5. Workflow Map">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#workflow-1-full-calibration-one-time-per-detector-config" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Workflow 1: Full Calibration (one-time per detector config)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#workflow-2-gui-data-processing-routine" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Workflow 2: GUI Data Processing (routine)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#workflow-3-batch-processing-routine" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Workflow 3: Batch Processing (routine)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#workflow-4-notebook-based-analysis-exploratory" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Workflow 4: Notebook-Based Analysis (exploratory)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-gui-analysis" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. GUI Analysis
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="6. GUI Analysis">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#gui-data-coupling" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GUI → Data Coupling
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#threading-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Threading Model
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#7-example-classification" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7. Example Classification
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="7. Example Classification">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#essential-workflow-examples-preserve-and-document" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Essential Workflow Examples (preserve and document)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#exploratory-experimental-preserve-but-flag-as-experimental" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Exploratory / Experimental (preserve but flag as experimental)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#likely-obsolete-duplicate-candidates-for-cleanup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Likely Obsolete / Duplicate (candidates for cleanup)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#data-files-in-examples-review" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Data Files in Examples (review)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#8-new-spectrometer-initialization" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8. New Spectrometer Initialization
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#9-where-manual-recalibration-happens" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9. Where Manual Recalibration Happens
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="9. Where Manual Recalibration Happens">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#pattern-recalibration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Pattern Recalibration
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#wavelength-recalibration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Wavelength Recalibration
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#the-manual-bottleneck" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The Manual Bottleneck
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#10-session-alignment-proposal" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10. Session Alignment Proposal
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="10. Session Alignment Proposal">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#conceptual-framework" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Conceptual Framework
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#where-alignment-logic-should-live" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Where Alignment Logic Should Live
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#existing-abstractions-to-reuse" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Existing Abstractions to Reuse
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#proposed-minimal-implementation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Proposed Minimal Implementation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#reference-lines-for-h-lamp-alignment" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reference Lines for H Lamp Alignment
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#integration-strategy-minimal-disruption" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Integration Strategy (Minimal Disruption)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#11-god-objects-and-oversized-files" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11. God Objects and Oversized Files
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="11. God Objects and Oversized Files">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#calibrations-class-390-lines-moderate" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Calibrations class (~390 lines, moderate)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#echellespectragui-class-760-lines-the-real-god-object" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        EchelleSpectraGUI class (~760 lines) — the real god object
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#window_layoutpy-546-lines-ui_mainwindow-generated-style-but-hand-written" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        window_layout.py (546 lines, Ui_MainWindow) — generated-style but hand-written
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#echellepy-900-lines-well-structured-but-monolithic" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        echelle.py (900 lines) — well-structured but monolithic
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#12-duplicated-and-dead-code" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        12. Duplicated and Dead Code
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="12. Duplicated and Dead Code">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#duplicated" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Duplicated
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#dead-obsolete-code" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Dead / Obsolete Code
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#import-system-issues" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Import System Issues
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#13-proposed-mkdocs-structure" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        13. Proposed MkDocs Structure
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="13. Proposed MkDocs Structure">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#key-documentation-priorities-ordered" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Key Documentation Priorities (ordered)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#14-safe-incremental-improvements" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        14. Safe Incremental Improvements
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="14. Safe Incremental Improvements">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#priority-1-low-risk-high-value" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Priority 1: Low-Risk, High-Value
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#priority-2-moderate-effort-high-value" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Priority 2: Moderate Effort, High Value
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#priority-3-larger-but-safe" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Priority 3: Larger but Safe
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#15-minimal-risk-modernization-plan" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        15. Minimal-Risk Modernization Plan
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="15. Minimal-Risk Modernization Plan">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#phase-1-cleanup-no-behavior-changes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Phase 1: Cleanup (no behavior changes)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#phase-2-documentation-no-code-changes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Phase 2: Documentation (no code changes)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#phase-3-spectrometer-config-externalization" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Phase 3: Spectrometer Config Externalization
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#phase-4-session-alignment" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Phase 4: Session Alignment
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#phase-5-optional-improvements" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Phase 5: Optional Improvements
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#appendix-key-code-entry-points" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Appendix: Key Code Entry Points
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="echelle-spectra-repository-archaeology-report">Echelle Spectra — Repository Archaeology Report<a class="headerlink" href="#echelle-spectra-repository-archaeology-report" title="Permanent link">¶</a></h1>
+<p><strong>Date:</strong> 2026-05-15
+<strong>Commit:</strong> <a href="https://github.com/queezz/echelle_spectra/commit/e005e927955472cd684f878c659dfe917b95f223"><code>e005e92</code></a>
+<strong>Scope:</strong> Full codebase analysis, workflow tracing, calibration model documentation</p>
+<hr>
+<h2 id="table-of-contents">Table of Contents<a class="headerlink" href="#table-of-contents" title="Permanent link">¶</a></h2>
+<ol>
+<li><a href="#1-repository-map">Repository Map</a></li>
+<li><a href="#2-architecture-overview">Architecture Overview</a></li>
+<li><a href="#3-core-module-analysis">Core Module Analysis</a></li>
+<li><a href="#4-calibration-model">Calibration Model</a></li>
+<li><a href="#5-workflow-map">Workflow Map</a></li>
+<li><a href="#6-gui-analysis">GUI Analysis</a></li>
+<li><a href="#7-example-classification">Example Classification</a></li>
+<li><a href="#8-new-spectrometer-initialization">New Spectrometer Initialization</a></li>
+<li><a href="#9-where-manual-recalibration-happens">Where Manual Recalibration Happens</a></li>
+<li><a href="#10-session-alignment-proposal">Session Alignment Proposal</a></li>
+<li><a href="#11-god-objects-and-oversized-files">God Objects and Oversized Files</a></li>
+<li><a href="#12-duplicated-and-dead-code">Duplicated and Dead Code</a></li>
+<li><a href="#13-proposed-mkdocs-structure">Proposed MkDocs Structure</a></li>
+<li><a href="#14-safe-incremental-improvements">Safe Incremental Improvements</a></li>
+<li><a href="#15-minimal-risk-modernization-plan">Minimal-Risk Modernization Plan</a></li>
+</ol>
+<hr>
+<h2 id="1-repository-map">1. Repository Map<a class="headerlink" href="#1-repository-map" title="Permanent link">¶</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>echelle_spectra/
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>├── pyproject.toml              # Package config (setuptools, v0.0.2)
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>├── requirements.txt            # Flat deps (slightly out of sync with pyproject.toml)
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>├── MANIFEST.in                 # Package data inclusion rules
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>├── README.md                   # Install + quick start instructions
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>├── LICENSE                     # MIT
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>├── .gitignore
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>│
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>├── images/
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>│   └── gui.png                 # Screenshot for README
+<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>│
+<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>├── examples/                   # Jupyter notebooks + output PDFs + pattern data
+<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>│   ├── 1.1_Cutting_Pattern_Synthetic.ipynb/.pdf
+<a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a>│   ├── 1.2_Cutting_Pattern_Masks.ipynb/.pdf
+<a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a>│   ├── 2.1_Cutting_Pattern_FE.ipynb
+<a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a>│   ├── 2.2_Cutting_Pattern_NihamaPlus.ipynb
+<a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a>│   ├── 3.1_loading_images.ipynb
+<a id="__codelineno-0-18" name="__codelineno-0-18" href="#__codelineno-0-18"></a>│   ├── 3.2_try_load_new_echelle.ipynb
+<a id="__codelineno-0-19" name="__codelineno-0-19" href="#__codelineno-0-19"></a>│   ├── 3.3_Wavelength_Calibration.ipynb
+<a id="__codelineno-0-20" name="__codelineno-0-20" href="#__codelineno-0-20"></a>│   ├── 3.4_Wavelength_echelle_spectra copy.ipynb
+<a id="__codelineno-0-21" name="__codelineno-0-21" href="#__codelineno-0-21"></a>│   ├── 3.5_Load_Black_Echelle.ipynb
+<a id="__codelineno-0-22" name="__codelineno-0-22" href="#__codelineno-0-22"></a>│   ├── 4.1_Load_bkack_echelle copy.ipynb
+<a id="__codelineno-0-23" name="__codelineno-0-23" href="#__codelineno-0-23"></a>│   ├── 4.2_Pattern_LHD.ipynb
+<a id="__codelineno-0-24" name="__codelineno-0-24" href="#__codelineno-0-24"></a>│   ├── 4.3_Wavelength_Calibration_LHD.ipynb
+<a id="__codelineno-0-25" name="__codelineno-0-25" href="#__codelineno-0-25"></a>│   ├── 5.0_Bands.ipynb
+<a id="__codelineno-0-26" name="__codelineno-0-26" href="#__codelineno-0-26"></a>│   ├── testtool-CCD.ipynb/.pdf
+<a id="__codelineno-0-27" name="__codelineno-0-27" href="#__codelineno-0-27"></a>│   ├── testtool-CMOS.ipynb/.pdf
+<a id="__codelineno-0-28" name="__codelineno-0-28" href="#__codelineno-0-28"></a>│   ├── pattern.txt                         # CCD pattern (exported)
+<a id="__codelineno-0-29" name="__codelineno-0-29" href="#__codelineno-0-29"></a>│   ├── pattern_CMOS_20240305.txt           # CMOS pattern (exported)
+<a id="__codelineno-0-30" name="__codelineno-0-30" href="#__codelineno-0-30"></a>│   ├── pattern_fujii.txt / pattern_fujii_rot.txt
+<a id="__codelineno-0-31" name="__codelineno-0-31" href="#__codelineno-0-31"></a>│   ├── pattern_image_synthetic.txt         # 100 MB synthetic pattern image
+<a id="__codelineno-0-32" name="__codelineno-0-32" href="#__codelineno-0-32"></a>│   ├── CCD_cut.png / CMOS_cut.png
+<a id="__codelineno-0-33" name="__codelineno-0-33" href="#__codelineno-0-33"></a>│   └── *.pdf                               # Exported figures
+<a id="__codelineno-0-34" name="__codelineno-0-34" href="#__codelineno-0-34"></a>│
+<a id="__codelineno-0-35" name="__codelineno-0-35" href="#__codelineno-0-35"></a>└── src/echelle_spectra/
+<a id="__codelineno-0-36" name="__codelineno-0-36" href="#__codelineno-0-36"></a>    ├── __init__.py             # Package init, sys.path hack, exports
+<a id="__codelineno-0-37" name="__codelineno-0-37" href="#__codelineno-0-37"></a>    ├── __main__.py             # Entry point → gui.start()
+<a id="__codelineno-0-38" name="__codelineno-0-38" href="#__codelineno-0-38"></a>    ├── echelle_spectra_gui.py  # Main GUI application (912 lines)
+<a id="__codelineno-0-39" name="__codelineno-0-39" href="#__codelineno-0-39"></a>    │
+<a id="__codelineno-0-40" name="__codelineno-0-40" href="#__codelineno-0-40"></a>    ├── tools/
+<a id="__codelineno-0-41" name="__codelineno-0-41" href="#__codelineno-0-41"></a>    │   ├── echelle.py          # Core: EchelleImage, Calibrations, Spectrum (900 lines)
+<a id="__codelineno-0-42" name="__codelineno-0-42" href="#__codelineno-0-42"></a>    │   ├── emissionbands.py    # EmissionBand fitting model (369 lines)
+<a id="__codelineno-0-43" name="__codelineno-0-43" href="#__codelineno-0-43"></a>    │   ├── emissiondata.py     # Predefined emission band data (387 lines)
+<a id="__codelineno-0-44" name="__codelineno-0-44" href="#__codelineno-0-44"></a>    │   ├── config_loader.py    # TOML config loader (24 lines)
+<a id="__codelineno-0-45" name="__codelineno-0-45" href="#__codelineno-0-45"></a>    │   └── note.txt            # "Not cleaned up" notice
+<a id="__codelineno-0-46" name="__codelineno-0-46" href="#__codelineno-0-46"></a>    │
+<a id="__codelineno-0-47" name="__codelineno-0-47" href="#__codelineno-0-47"></a>    └── resources/
+<a id="__codelineno-0-48" name="__codelineno-0-48" href="#__codelineno-0-48"></a>        ├── defaults.toml       # Default config (data_path, output_path, diag_name)
+<a id="__codelineno-0-49" name="__codelineno-0-49" href="#__codelineno-0-49"></a>        ├── header_template.txt # Output file header format
+<a id="__codelineno-0-50" name="__codelineno-0-50" href="#__codelineno-0-50"></a>        ├── wavelength_fujii.txt # Partial: fujii wavelength cal (H2 Fulcher lines)
+<a id="__codelineno-0-51" name="__codelineno-0-51" href="#__codelineno-0-51"></a>        ├── window_layout.py    # Qt UI layout definition (546 lines)
+<a id="__codelineno-0-52" name="__codelineno-0-52" href="#__codelineno-0-52"></a>        ├── graphics/
+<a id="__codelineno-0-53" name="__codelineno-0-53" href="#__codelineno-0-53"></a>        │   ├── echelle.png     # App icon
+<a id="__codelineno-0-54" name="__codelineno-0-54" href="#__codelineno-0-54"></a>        │   └── echelle.svg
+<a id="__codelineno-0-55" name="__codelineno-0-55" href="#__codelineno-0-55"></a>        ├── test_data/
+<a id="__codelineno-0-56" name="__codelineno-0-56" href="#__codelineno-0-56"></a>        │   └── CCD_Example.SIF # ~15 MB test image
+<a id="__codelineno-0-57" name="__codelineno-0-57" href="#__codelineno-0-57"></a>        └── calibration_files/
+<a id="__codelineno-0-58" name="__codelineno-0-58" href="#__codelineno-0-58"></a>            ├── pattern.txt                     # CCD order pattern (1024×28)
+<a id="__codelineno-0-59" name="__codelineno-0-59" href="#__codelineno-0-59"></a>            ├── pattern_cmos.txt                # CMOS order pattern (older)
+<a id="__codelineno-0-60" name="__codelineno-0-60" href="#__codelineno-0-60"></a>            ├── pattern_CMOS_20240305.txt        # CMOS order pattern (2560×29, current)
+<a id="__codelineno-0-61" name="__codelineno-0-61" href="#__codelineno-0-61"></a>            ├── Th_wavelength.txt               # CCD wavelength table (28 orders, Th/Ar/Ne)
+<a id="__codelineno-0-62" name="__codelineno-0-62" href="#__codelineno-0-62"></a>            ├── Th_wavelength_CMOS.txt          # CMOS wavelength table (older)
+<a id="__codelineno-0-63" name="__codelineno-0-63" href="#__codelineno-0-63"></a>            ├── Th_wavelength_CMOS_20240305.txt  # CMOS wavelength table (current)
+<a id="__codelineno-0-64" name="__codelineno-0-64" href="#__codelineno-0-64"></a>            ├── Th_wavelength_CMOS_only_Th-Ar.txt # CMOS, Th/Ar subset only
+<a id="__codelineno-0-65" name="__codelineno-0-65" href="#__codelineno-0-65"></a>            ├── wavelength_cmos_2024.txt        # Near-identical to Th_wavelength_CMOS.txt
+<a id="__codelineno-0-66" name="__codelineno-0-66" href="#__codelineno-0-66"></a>            ├── wavelength_fujii.txt            # Fujii spectrometer (H2 Fulcher only)
+<a id="__codelineno-0-67" name="__codelineno-0-67" href="#__codelineno-0-67"></a>            ├── integrating_sphere.txt          # Sphere spectral irradiance table
+<a id="__codelineno-0-68" name="__codelineno-0-68" href="#__codelineno-0-68"></a>            ├── absolute_20170613_b8.sif        # CCD sphere image
+<a id="__codelineno-0-69" name="__codelineno-0-69" href="#__codelineno-0-69"></a>            ├── absolute_20170613_b8_0.2_bkg.sif # CCD sphere background
+<a id="__codelineno-0-70" name="__codelineno-0-70" href="#__codelineno-0-70"></a>            ├── absolute_20170613_b8_0.2_v2.sif  # CCD sphere (v2, used)
+<a id="__codelineno-0-71" name="__codelineno-0-71" href="#__codelineno-0-71"></a>            ├── sphere_CMOS.sif / sphere_CMOS_bkg.sif         # CMOS sphere (older)
+<a id="__codelineno-0-72" name="__codelineno-0-72" href="#__codelineno-0-72"></a>            ├── sphere_cmos_20240305.sif / _bkg.sif            # CMOS sphere (current)
+<a id="__codelineno-0-73" name="__codelineno-0-73" href="#__codelineno-0-73"></a>            └── ThAr_10.0s_16bit.sif / ThAr-0.3s-x3_20240305.sif  # Lamp images
+</code></pre></div>
+<h3 id="file-size-notes">File Size Notes<a class="headerlink" href="#file-size-notes" title="Permanent link">¶</a></h3>
+<table>
+<thead>
+<tr>
+<th>File</th>
+<th>Size</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>pattern_image_synthetic.txt</code></td>
+<td><strong>100 MB</strong></td>
+<td>In <code>examples/</code>; should probably be in <code>.gitignore</code> or LFS</td>
+</tr>
+<tr>
+<td><code>sphere_*.sif</code></td>
+<td>~63 MB each</td>
+<td>4 files, ~252 MB total; necessary calibration data</td>
+</tr>
+<tr>
+<td><code>ThAr*.sif</code></td>
+<td>22–66 MB</td>
+<td>Lamp reference images</td>
+</tr>
+<tr>
+<td><code>CCD_Example.SIF</code></td>
+<td>15 MB</td>
+<td>Test data</td>
+</tr>
+</tbody>
+</table>
+<hr>
+<h2 id="2-architecture-overview">2. Architecture Overview<a class="headerlink" href="#2-architecture-overview" title="Permanent link">¶</a></h2>
+<h3 id="class-hierarchy">Class Hierarchy<a class="headerlink" href="#class-hierarchy" title="Permanent link">¶</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>Calibrations              ← Owns calibration state for one detector config
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>  ├── .pattern            ← Order positions (numpy array from pattern.txt)
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>  ├── .cutting_masks      ← Pixel masks for each diffraction order
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>  ├── .order_wavel        ← Polynomial wavelength solution per order
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>  ├── .order_borders      ← Where adjacent orders overlap/join
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>  ├── .absolute           ← Sensitivity curve from integrating sphere
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>  ├── .sphr → EchelleImage  ← Integrating sphere image
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>  └── .bkgr → EchelleImage  ← Background image
+<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a>
+<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a>EchelleImage              ← Single loaded detector image
+<a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a>  ├── .images             ← Raw pixel data (frames × rows × cols)
+<a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a>  ├── .info               ← Metadata dict (exposure, frames, binning, etc.)
+<a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a>  ├── .clbr → Calibrations  ← Back-reference to calibration
+<a id="__codelineno-1-14" name="__codelineno-1-14" href="#__codelineno-1-14"></a>  ├── .order_spectra      ← Extracted 1D spectra per order
+<a id="__codelineno-1-15" name="__codelineno-1-15" href="#__codelineno-1-15"></a>  └── .spectra            ← Stitched full-range spectrum
+<a id="__codelineno-1-16" name="__codelineno-1-16" href="#__codelineno-1-16"></a>
+<a id="__codelineno-1-17" name="__codelineno-1-17" href="#__codelineno-1-17"></a>Spectrum                  ← Calibrated spectrum with physical units
+<a id="__codelineno-1-18" name="__codelineno-1-18" href="#__codelineno-1-18"></a>  ├── .wavelength         ← Wavelength array
+<a id="__codelineno-1-19" name="__codelineno-1-19" href="#__codelineno-1-19"></a>  ├── .counts             ← Background-subtracted counts
+<a id="__codelineno-1-20" name="__codelineno-1-20" href="#__codelineno-1-20"></a>  ├── .wm / .wmsr / .phmsr  ← Physical unit spectra
+<a id="__codelineno-1-21" name="__codelineno-1-21" href="#__codelineno-1-21"></a>  └── .absolute           ← Sensitivity from calibration
+<a id="__codelineno-1-22" name="__codelineno-1-22" href="#__codelineno-1-22"></a>
+<a id="__codelineno-1-23" name="__codelineno-1-23" href="#__codelineno-1-23"></a>EmissionBand              ← Spectral line/band with lmfit Gaussian model
+<a id="__codelineno-1-24" name="__codelineno-1-24" href="#__codelineno-1-24"></a>  ├── .wavelengths        ← Line center wavelengths (from NIST etc.)
+<a id="__codelineno-1-25" name="__codelineno-1-25" href="#__codelineno-1-25"></a>  ├── .Ak / .stat_weights ← Transition probabilities
+<a id="__codelineno-1-26" name="__codelineno-1-26" href="#__codelineno-1-26"></a>  ├── .model / .pars      ← lmfit composite Gaussian model
+<a id="__codelineno-1-27" name="__codelineno-1-27" href="#__codelineno-1-27"></a>  └── .fitb()             ← Fit to experimental data
+<a id="__codelineno-1-28" name="__codelineno-1-28" href="#__codelineno-1-28"></a>
+<a id="__codelineno-1-29" name="__codelineno-1-29" href="#__codelineno-1-29"></a>EB                        ← Simplified band (bounds + name, no atomic data)
+<a id="__codelineno-1-30" name="__codelineno-1-30" href="#__codelineno-1-30"></a>
+<a id="__codelineno-1-31" name="__codelineno-1-31" href="#__codelineno-1-31"></a>FitResult                 ← Container for fit results across frames
+<a id="__codelineno-1-32" name="__codelineno-1-32" href="#__codelineno-1-32"></a>
+<a id="__codelineno-1-33" name="__codelineno-1-33" href="#__codelineno-1-33"></a>EchelleSpectraGUI         ← PyQt5 main window
+<a id="__codelineno-1-34" name="__codelineno-1-34" href="#__codelineno-1-34"></a>  ├── .cb_CCD / .cb_CMOS  ← Two Calibrations instances
+<a id="__codelineno-1-35" name="__codelineno-1-35" href="#__codelineno-1-35"></a>  ├── .bands / .bandstofit ← Emission band definitions
+<a id="__codelineno-1-36" name="__codelineno-1-36" href="#__codelineno-1-36"></a>  └── Threads: LoadCalibrations, LoadImage, FitLines, SaveSpectra
+</code></pre></div>
+<h3 id="data-flow">Data Flow<a class="headerlink" href="#data-flow" title="Permanent link">¶</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>SIF/TIFF file
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>    │
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>    ▼
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>read_image()  ←────── spec="black" (SIF/Andor) or spec="fujii" (TIFF/Hamamatsu)
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>    │
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>    ▼
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>EchelleImage(fpth, clbr=calibrations)
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>    │
+<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a>    ├── calculate_order_spectra()  ←── uses clbr.cutting_masks
+<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a>    ├── correct_order_shapes()     ←── handles partial orders at sensor edge
+<a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a>    └── calculate_spectra()        ←── uses clbr.order_borders to stitch
+<a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a>    │
+<a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a>    ▼
+<a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a>Spectrum(echelle_image)
+<a id="__codelineno-2-15" name="__codelineno-2-15" href="#__codelineno-2-15"></a>    │
+<a id="__codelineno-2-16" name="__codelineno-2-16" href="#__codelineno-2-16"></a>    ├── Background subtraction (auto-detected from multi-frame images)
+<a id="__codelineno-2-17" name="__codelineno-2-17" href="#__codelineno-2-17"></a>    ├── Wavelength assignment from clbr
+<a id="__codelineno-2-18" name="__codelineno-2-18" href="#__codelineno-2-18"></a>    ├── Absolute calibration (counts → W/m²/nm, W/m²/sr/nm, Nph/m²/sr)
+<a id="__codelineno-2-19" name="__codelineno-2-19" href="#__codelineno-2-19"></a>    └── .save() → text file with header
+</code></pre></div>
+<hr>
+<h2 id="3-core-module-analysis">3. Core Module Analysis<a class="headerlink" href="#3-core-module-analysis" title="Permanent link">¶</a></h2>
+<h3 id="toolsechellepy-900-lines-the-core-module"><code>tools/echelle.py</code> (900 lines) — THE core module<a class="headerlink" href="#toolsechellepy-900-lines-the-core-module" title="Permanent link">¶</a></h3>
+<table>
+<thead>
+<tr>
+<th>Component</th>
+<th>Lines</th>
+<th>Role</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>read_image()</code></td>
+<td>27–81</td>
+<td>Dispatch: SIF→sif_parser, TIFF→PIL, handles binning/crop/transpose</td>
+</tr>
+<tr>
+<td><code>EchelleImage</code></td>
+<td>84–377</td>
+<td>Image container + order extraction + plotting</td>
+</tr>
+<tr>
+<td><code>Calibrations</code></td>
+<td>379–769</td>
+<td><strong>Central calibration class</strong>: pattern loading, mask generation, wavelength calibration, absolute calibration</td>
+</tr>
+<tr>
+<td><code>Spectrum</code></td>
+<td>772–876</td>
+<td>Calibrated spectrum: background subtraction, unit conversion, saving</td>
+</tr>
+<tr>
+<td><code>header_template</code></td>
+<td>878–896</td>
+<td>Output file header string (duplicated with <code>resources/header_template.txt</code>)</td>
+</tr>
+</tbody>
+</table>
+<h3 id="toolsemissionbandspy-369-lines"><code>tools/emissionbands.py</code> (369 lines)<a class="headerlink" href="#toolsemissionbandspy-369-lines" title="Permanent link">¶</a></h3>
+<table>
+<thead>
+<tr>
+<th>Component</th>
+<th>Role</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>baseline_als()</code></td>
+<td>Asymmetric least squares baseline removal</td>
+</tr>
+<tr>
+<td><code>banddata()</code></td>
+<td>Extract wavelength/intensity slice for a band from a Spectrum</td>
+</tr>
+<tr>
+<td><code>EB</code></td>
+<td>Simple band container (bounds + name)</td>
+</tr>
+<tr>
+<td><code>EmissionBand</code></td>
+<td>Full atomic transition data + lmfit Gaussian model builder</td>
+</tr>
+<tr>
+<td><code>FitResult</code></td>
+<td>Multi-frame fit result container with integration</td>
+</tr>
+</tbody>
+</table>
+<h3 id="toolsemissiondatapy-387-lines"><code>tools/emissiondata.py</code> (387 lines)<a class="headerlink" href="#toolsemissiondatapy-387-lines" title="Permanent link">¶</a></h3>
+<p>Pure data file defining all emission bands used in the application:
+- <strong>CIV lines</strong>: c444, c465, c547, c580, c706, c772
+- <strong>CII/CIII</strong>: c515, c464
+- <strong>Xenon</strong>: xe461, xe462, xe467
+- <strong>Helium</strong>: he447, he492, he501, he504, he587, he667, he706, he728
+- <strong>Hydrogen Balmer</strong>: halpha, hbeta, hgamma, hdelta
+- <strong>set_bounds()</strong>: Adjusts wavelength windows for all bands; called at import time</p>
+<h3 id="toolsconfig_loaderpy-24-lines"><code>tools/config_loader.py</code> (24 lines)<a class="headerlink" href="#toolsconfig_loaderpy-24-lines" title="Permanent link">¶</a></h3>
+<p>Loads <code>config.toml</code> from package directory; falls back to <code>defaults.toml</code> on error.</p>
+<h3 id="echelle_spectra_guipy-912-lines"><code>echelle_spectra_gui.py</code> (912 lines)<a class="headerlink" href="#echelle_spectra_guipy-912-lines" title="Permanent link">¶</a></h3>
+<table>
+<thead>
+<tr>
+<th>Section</th>
+<th>Lines</th>
+<th>Role</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>EchelleSpectraGUI.__init__</code></td>
+<td>19–49</td>
+<td>Setup UI, connect signals, load calibrations, define bands</td>
+</tr>
+<tr>
+<td><code>prepare_calibration()</code></td>
+<td>58–93</td>
+<td>Hardcoded CCD/CMOS filename dicts, creates two <code>Calibrations</code></td>
+</tr>
+<tr>
+<td>Loop system</td>
+<td>261–316</td>
+<td>Batch-process shot ranges</td>
+</tr>
+<tr>
+<td>Image loading</td>
+<td>325–444</td>
+<td>File open, thread dispatch, dimension mismatch auto-retry</td>
+</tr>
+<tr>
+<td><code>no_fit_intensities()</code></td>
+<td>456–493</td>
+<td>Non-fit intensity extraction for all bands</td>
+</tr>
+<tr>
+<td><code>fit_lines()</code></td>
+<td>495–535</td>
+<td>Threaded Gaussian fitting</td>
+</tr>
+<tr>
+<td>Display methods</td>
+<td>583–727</td>
+<td>Plot updates for image, spectrum, C/He/H tabs</td>
+</tr>
+<tr>
+<td><code>LoadCalibrationsThread</code></td>
+<td>780–798</td>
+<td>Background calibration loading</td>
+</tr>
+<tr>
+<td><code>LoadImageThread</code></td>
+<td>801–834</td>
+<td>Background image loading + extraction</td>
+</tr>
+<tr>
+<td><code>FitLinesThread</code></td>
+<td>837–873</td>
+<td>Background line fitting</td>
+</tr>
+<tr>
+<td><code>SaveSpectraThread</code></td>
+<td>876–887</td>
+<td>Background spectrum saving</td>
+</tr>
+</tbody>
+</table>
+<h3 id="resourceswindow_layoutpy-546-lines"><code>resources/window_layout.py</code> (546 lines)<a class="headerlink" href="#resourceswindow_layoutpy-546-lines" title="Permanent link">¶</a></h3>
+<p>Hand-coded PyQt5 layout using <code>pyqtgraph.dockarea</code>. Defines all widgets, tabs (Image, CIV, He, H2, CMD), plot areas, and trace configurations. Not auto-generated — purely manual.</p>
+<hr>
+<h2 id="4-calibration-model">4. Calibration Model<a class="headerlink" href="#4-calibration-model" title="Permanent link">¶</a></h2>
+<h3 id="41-order-pattern">4.1 Order Pattern<a class="headerlink" href="#41-order-pattern" title="Permanent link">¶</a></h3>
+<p><strong>What it is:</strong> A 2D integer array mapping pixel columns to the vertical center of each diffraction order on the detector.</p>
+<p><strong>File format:</strong> Space-separated text, no header.</p>
+<table>
+<thead>
+<tr>
+<th>Detector</th>
+<th>File</th>
+<th>Shape</th>
+<th>Orders</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>CCD (Andor, 1024×1024)</td>
+<td><code>pattern.txt</code></td>
+<td>1024 × 28</td>
+<td>28</td>
+</tr>
+<tr>
+<td>CMOS (Andor, 2560×2160)</td>
+<td><code>pattern_CMOS_20240305.txt</code></td>
+<td>2560 × 29</td>
+<td>29</td>
+</tr>
+<tr>
+<td>CMOS (older)</td>
+<td><code>pattern_cmos.txt</code></td>
+<td>2560 × 29</td>
+<td>29</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Interpretation:</strong> Row <code>i</code> = pixel column <code>i</code> in the wavelength direction. Column <code>j</code> = diffraction order <code>j</code>. Value = vertical pixel position of order center at that column.</p>
+<p><strong>How loaded:</strong> <code>Calibrations.load_pattern()</code> → <code>np.loadtxt(pth, dtype='int')</code> → <code>self.pattern</code></p>
+<p><strong>How used:</strong> <code>Calibrations.make_mask(ordind)</code> creates a 2D pixel mask for extracting order <code>ordind</code>, using <code>self.dv</code> (half-width, default 8 pixels → 17 pixel band).</p>
+<p><strong>Key insight:</strong> The pattern is empirically determined, currently by semi-manual procedures in the notebooks (e.g., 2.1, 2.2, 4.2). The pattern is <strong>mostly stable</strong> — it traces the physical optics and does not significantly stretch between sessions.</p>
+<h3 id="42-wavelength-calibration">4.2 Wavelength Calibration<a class="headerlink" href="#42-wavelength-calibration" title="Permanent link">¶</a></h3>
+<p><strong>What it is:</strong> A lookup table of identified lamp spectral lines, with their pixel positions and known wavelengths, per order.</p>
+<p><strong>File format:</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>#order  from    to      center      wavelength  band
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>0       0632    0657    0644.5921   794.81764   ArI
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>0       0670    0695    0681.7851   794.31814   NeI
+</code></pre></div>
+<ul>
+<li><code>order</code>: Diffraction order index</li>
+<li><code>from</code>, <code>to</code>: Pixel range where the line appears</li>
+<li><code>center</code>: Sub-pixel center (from peak detection)</li>
+<li><code>wavelength</code>: Known wavelength in nm</li>
+<li><code>band</code>: Species identifier (ArI, NeI, ThI, HgI, XeI, H2, etc.)</li>
+</ul>
+<p><strong>Calibration files:</strong></p>
+<table>
+<thead>
+<tr>
+<th>File</th>
+<th>Detector</th>
+<th>Date</th>
+<th>Lamps</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>Th_wavelength.txt</code></td>
+<td>CCD</td>
+<td>Original</td>
+<td>ThAr, Ne</td>
+</tr>
+<tr>
+<td><code>Th_wavelength_CMOS.txt</code></td>
+<td>CMOS</td>
+<td>2019-05-29</td>
+<td>ThAr, Ne, Hg, Xe</td>
+</tr>
+<tr>
+<td><code>Th_wavelength_CMOS_20240305.txt</code></td>
+<td>CMOS</td>
+<td>2024-03-05</td>
+<td>ThAr, Ne, Hg, H2</td>
+</tr>
+<tr>
+<td><code>Th_wavelength_CMOS_only_Th-Ar.txt</code></td>
+<td>CMOS</td>
+<td>?</td>
+<td>ThAr only subset</td>
+</tr>
+<tr>
+<td><code>wavelength_cmos_2024.txt</code></td>
+<td>CMOS</td>
+<td>2024-03-14</td>
+<td>ThAr, Ne, Hg, Xe (near-duplicate of <code>Th_wavelength_CMOS.txt</code>)</td>
+</tr>
+<tr>
+<td><code>wavelength_fujii.txt</code> (resources/)</td>
+<td>Fujii</td>
+<td>2022-09-29</td>
+<td>H2 Fulcher lines only (partial, 1 order)</td>
+</tr>
+<tr>
+<td><code>wavelength_fujii.txt</code> (calibration_files/)</td>
+<td>Fujii</td>
+<td>?</td>
+<td>H2 Fulcher d3Pu bands (multiple orders)</td>
+</tr>
+</tbody>
+</table>
+<p><strong>How used:</strong> <code>Calibrations.wavelength_calibration()</code>:
+1. Reads the table, groups lines by order
+2. Fits polynomial (degree 1 if ≤2 lines, degree 2 if ≥3 lines) per order: <code>pixel_center → wavelength</code>
+3. Evaluates polynomial over full pixel range → <code>self.order_wavel[order, pixel]</code>
+4. Handles partial orders (28th CMOS order extends beyond sensor edge) by filling with <code>np.nan</code></p>
+<h3 id="43-order-border-calculation">4.3 Order Border Calculation<a class="headerlink" href="#43-order-border-calculation" title="Permanent link">¶</a></h3>
+<p><strong>What it is:</strong> Determines where to cut and stitch adjacent orders to form a continuous spectrum.</p>
+<p><strong>How it works:</strong> <code>Calibrations.calculate_order_borders()</code>:
+1. Uses the integrating sphere spectrum (flat illumination)
+2. For each pair of adjacent orders, finds the wavelength where their signals cross
+3. Creates boolean masks defining which pixels belong to which order
+4. Result: <code>self.order_borders</code> — boolean array, <code>self.wavelength</code> — continuous wavelength vector</p>
+<h3 id="44-absolute-calibration">4.4 Absolute Calibration<a class="headerlink" href="#44-absolute-calibration" title="Permanent link">¶</a></h3>
+<p><strong>What it is:</strong> Converts detector counts to physical radiometric units.</p>
+<p><strong>Files:</strong>
+- <code>integrating_sphere.txt</code>: Known spectral radiance of the integrating sphere (µm vs mW/cm²·sr·µm)
+- <code>sphere_*.sif</code> / <code>absolute_*.sif</code>: Detector images of the integrating sphere
+- <code>sphere_*_bkg.sif</code> / <code>absolute_*_bkg.sif</code>: Background images</p>
+<p><strong>How it works:</strong> <code>Calibrations.absolute_calibration()</code>:
+1. Interpolates known sphere irradiance at measured wavelengths
+2. Extracts sphere spectrum through same pipeline (order extraction → stitching)
+3. Computes sensitivity: <code>sphere_irradiance / (detector_counts / exposure_time)</code>
+4. Produces three conversion factors:
+   - <code>wmsr</code>: W/(m² sr nm)
+   - <code>wm</code>: W/(m² nm) — assumes 4π steradians
+   - <code>phmsr</code>: photons/(m² sr) — via Planck relation</p>
+<h3 id="45-spectrometer-configurations">4.5 Spectrometer Configurations<a class="headerlink" href="#45-spectrometer-configurations" title="Permanent link">¶</a></h3>
+<table>
+<thead>
+<tr>
+<th>Name</th>
+<th>Detector</th>
+<th>Image Format</th>
+<th>Camera</th>
+<th>Pattern</th>
+<th>Wavelength Range</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>"black"</code></td>
+<td>Andor CCD (1024×1024)</td>
+<td><code>.sif</code> via <code>sif_parser</code></td>
+<td>Andor</td>
+<td>28 orders</td>
+<td>~410–795 nm</td>
+</tr>
+<tr>
+<td><code>"black"</code></td>
+<td>Andor CMOS (2560×2160)</td>
+<td><code>.sif</code> via <code>sif_parser</code></td>
+<td>Andor</td>
+<td>29 orders</td>
+<td>~410–795 nm</td>
+</tr>
+<tr>
+<td><code>"fujii"</code></td>
+<td>Hamamatsu Orca QUEST</td>
+<td><code>.tiff</code> via PIL</td>
+<td>Hamamatsu</td>
+<td>(separate)</td>
+<td>Fulcher band region</td>
+</tr>
+</tbody>
+</table>
+<p>The <code>"black"</code> spectrometer has been upgraded from CCD to CMOS; both calibrations are loaded simultaneously by the GUI and auto-selected based on image dimensions.</p>
+<hr>
+<h2 id="5-workflow-map">5. Workflow Map<a class="headerlink" href="#5-workflow-map" title="Permanent link">¶</a></h2>
+<h3 id="workflow-1-full-calibration-one-time-per-detector-config">Workflow 1: Full Calibration (one-time per detector config)<a class="headerlink" href="#workflow-1-full-calibration-one-time-per-detector-config" title="Permanent link">¶</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>1. Take integrating sphere image + background    → sphere.sif, sphere_bkg.sif
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>2. Take ThAr/Ne/Hg/Xe lamp image                → ThAr.sif
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>3. Determine order pattern                        → pattern.txt
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>     (notebooks 1.x, 2.x, 4.2)
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a>     Method: peak detection along vertical slices of sphere/lamp image
+<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a>4. Identify lamp lines per order                  → Th_wavelength_*.txt
+<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a>     (notebooks 3.3, 4.3)
+<a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a>     Method: manual identification of known lines at pixel positions
+<a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a>5. Record sphere spectral data                    → integrating_sphere.txt
+<a id="__codelineno-4-10" name="__codelineno-4-10" href="#__codelineno-4-10"></a>     (from manufacturer specification)
+<a id="__codelineno-4-11" name="__codelineno-4-11" href="#__codelineno-4-11"></a>6. Bundle into calibration_files/
+</code></pre></div>
+<h3 id="workflow-2-gui-data-processing-routine">Workflow 2: GUI Data Processing (routine)<a class="headerlink" href="#workflow-2-gui-data-processing-routine" title="Permanent link">¶</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>1. Launch GUI                                     → loads both CCD and CMOS calibrations
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>2. Open SIF image (single file or shot number)
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>3. Auto-detect camera from image dimensions
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a>4. Extract order spectra using calibration masks
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a>5. Stitch into continuous spectrum
+<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a>6. Apply absolute calibration
+<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a>7. Display image + spectrum
+<a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a>8. Optionally: fit emission bands (CIV, He, H)
+<a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a>9. Optionally: save spectra and/or intensities
+</code></pre></div>
+<h3 id="workflow-3-batch-processing-routine">Workflow 3: Batch Processing (routine)<a class="headerlink" href="#workflow-3-batch-processing-routine" title="Permanent link">¶</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>1. Set shot number range in GUI
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>2. Click "Start" → loops through all shots
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>3. For each shot: load → extract → calibrate → fit → save
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a>4. Progress bar tracks completion
+</code></pre></div>
+<h3 id="workflow-4-notebook-based-analysis-exploratory">Workflow 4: Notebook-Based Analysis (exploratory)<a class="headerlink" href="#workflow-4-notebook-based-analysis-exploratory" title="Permanent link">¶</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>1. Create Calibrations instance with file paths
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>2. Call clbr.start() → loads everything
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>3. Create EchelleImage with clbr
+<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a>4. Call em.calibrate() → order spectra → full spectrum
+<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a>5. Create Spectrum(em) → physical units
+<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a>6. Analyze emission bands with emissionbands module
+</code></pre></div>
+<hr>
+<h2 id="6-gui-analysis">6. GUI Analysis<a class="headerlink" href="#6-gui-analysis" title="Permanent link">¶</a></h2>
+<p>The GUI (<code>echelle_spectra_gui.py</code> + <code>window_layout.py</code>) is a single-window PyQt5 application with 5 tabs:</p>
+<table>
+<thead>
+<tr>
+<th>Tab</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Image</strong></td>
+<td>2D detector image viewer + spectrum plots + intensity time traces</td>
+</tr>
+<tr>
+<td><strong>CIV</strong></td>
+<td>Carbon ion emission band spectra (8 bands in 4×2 grid)</td>
+</tr>
+<tr>
+<td><strong>He</strong></td>
+<td>Helium emission band spectra (8 bands in 4×2 grid)</td>
+</tr>
+<tr>
+<td><strong>H2</strong></td>
+<td>Hydrogen Balmer + CH band spectra (5 bands)</td>
+</tr>
+<tr>
+<td><strong>CMD</strong></td>
+<td>Text output showing emission band reports</td>
+</tr>
+</tbody>
+</table>
+<h3 id="gui-data-coupling">GUI → Data Coupling<a class="headerlink" href="#gui-data-coupling" title="Permanent link">¶</a></h3>
+<p>The GUI directly creates <code>Calibrations</code>, <code>EchelleImage</code>, <code>Spectrum</code>, and <code>EmissionBand</code> objects. There is <strong>no intermediate API layer</strong> — the GUI is the primary orchestrator.</p>
+<h3 id="threading-model">Threading Model<a class="headerlink" href="#threading-model" title="Permanent link">¶</a></h3>
+<p>4 QThread subclasses handle background work:
+- <code>LoadCalibrationsThread</code> — calls <code>clbr.start()</code>
+- <code>LoadImageThread</code> — loads image, runs extraction pipeline
+- <code>FitLinesThread</code> — runs Gaussian fits across all frames/bands
+- <code>SaveSpectraThread</code> — saves to disk</p>
+<hr>
+<h2 id="7-example-classification">7. Example Classification<a class="headerlink" href="#7-example-classification" title="Permanent link">¶</a></h2>
+<h3 id="essential-workflow-examples-preserve-and-document">Essential Workflow Examples (preserve and document)<a class="headerlink" href="#essential-workflow-examples-preserve-and-document" title="Permanent link">¶</a></h3>
+<table>
+<thead>
+<tr>
+<th>Notebook</th>
+<th>Topic</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>1.1_Cutting_Pattern_Synthetic.ipynb</code></td>
+<td>Pattern generation from synthetic data</td>
+<td><strong>Essential</strong> — demonstrates pattern creation concept</td>
+</tr>
+<tr>
+<td><code>1.2_Cutting_Pattern_Masks.ipynb</code></td>
+<td>Visualizing cutting masks</td>
+<td><strong>Essential</strong> — shows mask validation</td>
+</tr>
+<tr>
+<td><code>2.1_Cutting_Pattern_FE.ipynb</code></td>
+<td>Pattern for real Fe-lamp data</td>
+<td><strong>Essential</strong> — real-world pattern workflow</td>
+</tr>
+<tr>
+<td><code>3.3_Wavelength_Calibration.ipynb</code></td>
+<td>Wavelength calibration procedure</td>
+<td><strong>Essential</strong> — core calibration workflow</td>
+</tr>
+<tr>
+<td><code>4.2_Pattern_LHD.ipynb</code></td>
+<td>Pattern creation for LHD CMOS</td>
+<td><strong>Essential</strong> — latest detector pattern</td>
+</tr>
+<tr>
+<td><code>4.3_Wavelength_Calibration_LHD.ipynb</code></td>
+<td>Wavelength cal for LHD CMOS</td>
+<td><strong>Essential</strong> — latest detector wavelength cal</td>
+</tr>
+<tr>
+<td><code>5.0_Bands.ipynb</code></td>
+<td>Emission band analysis</td>
+<td><strong>Essential</strong> — demonstrates band processing</td>
+</tr>
+</tbody>
+</table>
+<h3 id="exploratory-experimental-preserve-but-flag-as-experimental">Exploratory / Experimental (preserve but flag as experimental)<a class="headerlink" href="#exploratory-experimental-preserve-but-flag-as-experimental" title="Permanent link">¶</a></h3>
+<table>
+<thead>
+<tr>
+<th>Notebook</th>
+<th>Topic</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>2.2_Cutting_Pattern_NihamaPlus.ipynb</code></td>
+<td>Pattern for Nihama+ spectrometer</td>
+<td>Exploratory — different spectrometer</td>
+</tr>
+<tr>
+<td><code>3.1_loading_images.ipynb</code></td>
+<td>Basic image loading</td>
+<td>Exploratory — superseded by GUI</td>
+</tr>
+<tr>
+<td><code>3.2_try_load_new_echelle.ipynb</code></td>
+<td>Testing new echelle loading</td>
+<td>Exploratory</td>
+</tr>
+<tr>
+<td><code>3.5_Load_Black_Echelle.ipynb</code></td>
+<td>Loading black echelle images</td>
+<td>Exploratory</td>
+</tr>
+</tbody>
+</table>
+<h3 id="likely-obsolete-duplicate-candidates-for-cleanup">Likely Obsolete / Duplicate (candidates for cleanup)<a class="headerlink" href="#likely-obsolete-duplicate-candidates-for-cleanup" title="Permanent link">¶</a></h3>
+<table>
+<thead>
+<tr>
+<th>Notebook</th>
+<th>Issue</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>3.4_Wavelength_echelle_spectra copy.ipynb</code></td>
+<td><strong>"copy"</strong> in filename — likely accidental duplicate</td>
+</tr>
+<tr>
+<td><code>4.1_Load_bkack_echelle copy.ipynb</code></td>
+<td><strong>Typo + "copy"</strong> in filename — likely obsolete</td>
+</tr>
+<tr>
+<td><code>testtool-CCD.ipynb</code></td>
+<td>Test tool — may be obsolete with CMOS upgrade</td>
+</tr>
+<tr>
+<td><code>testtool-CMOS.ipynb</code></td>
+<td>Test tool — still useful?</td>
+</tr>
+</tbody>
+</table>
+<h3 id="data-files-in-examples-review">Data Files in Examples (review)<a class="headerlink" href="#data-files-in-examples-review" title="Permanent link">¶</a></h3>
+<table>
+<thead>
+<tr>
+<th>File</th>
+<th>Size</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>pattern_image_synthetic.txt</code></td>
+<td><strong>100 MB</strong></td>
+<td>Should be generated, not stored; add to <code>.gitignore</code> or LFS</td>
+</tr>
+<tr>
+<td><code>pattern.txt</code></td>
+<td>94 KB</td>
+<td>Duplicate of <code>calibration_files/pattern.txt</code></td>
+</tr>
+<tr>
+<td><code>pattern_CMOS_20240305.txt</code></td>
+<td>333 KB</td>
+<td>Duplicate of <code>calibration_files/pattern_CMOS_20240305.txt</code></td>
+</tr>
+<tr>
+<td><code>pattern_fujii.txt</code> / <code>_rot.txt</code></td>
+<td>134 KB each</td>
+<td>Fujii spectrometer patterns, not in calibration_files</td>
+</tr>
+</tbody>
+</table>
+<hr>
+<h2 id="8-new-spectrometer-initialization">8. New Spectrometer Initialization<a class="headerlink" href="#8-new-spectrometer-initialization" title="Permanent link">¶</a></h2>
+<p><strong>Current process</strong> (reconstructed from code + notebooks):</p>
+<ol>
+<li><strong>Physical setup</strong>: Mount spectrometer, connect camera, install lamps</li>
+<li><strong>Take calibration images</strong>:
+   - Integrating sphere image + background (matching exposure)
+   - Lamp image(s): ThAr, Ne, optionally Hg/Xe/H2</li>
+<li><strong>Determine order pattern</strong> (notebook workflow):
+   - Load sphere or lamp image
+   - Detect vertical intensity peaks for each pixel column
+   - Extract and fit peak positions → order centers
+   - Save as <code>pattern_NEWSPEC.txt</code></li>
+<li><strong>Wavelength calibration</strong> (notebook workflow):
+   - Load lamp image
+   - For each order, identify known spectral lines
+   - Record pixel position ↔ wavelength pairs
+   - Save as <code>Th_wavelength_NEWSPEC.txt</code></li>
+<li><strong>Register calibration files</strong>:
+   - Place files in <code>resources/calibration_files/</code>
+   - <strong>Hardcode filename dict</strong> in <code>echelle_spectra_gui.py:prepare_calibration()</code> or construct one manually in notebook</li>
+<li><strong>Optionally</strong>: Hardcode new <code>spec="newname"</code> branch in <code>read_image()</code></li>
+</ol>
+<p><strong>Pain points:</strong>
+- No formal "add a spectrometer" procedure
+- Filename selection is hardcoded in the GUI
+- <code>read_image()</code> requires code changes for new camera formats
+- No validation that calibration files are consistent</p>
+<hr>
+<h2 id="9-where-manual-recalibration-happens">9. Where Manual Recalibration Happens<a class="headerlink" href="#9-where-manual-recalibration-happens" title="Permanent link">¶</a></h2>
+<h3 id="pattern-recalibration">Pattern Recalibration<a class="headerlink" href="#pattern-recalibration" title="Permanent link">¶</a></h3>
+<ul>
+<li><strong>Notebooks 2.1, 2.2, 4.2</strong>: Peak detection along vertical slices</li>
+<li><strong>Fully manual</strong>: User must run notebook, inspect results, iterate</li>
+<li><strong>Output</strong>: New <code>pattern_*.txt</code> file</li>
+</ul>
+<h3 id="wavelength-recalibration">Wavelength Recalibration<a class="headerlink" href="#wavelength-recalibration" title="Permanent link">¶</a></h3>
+<ul>
+<li><strong>Notebooks 3.3, 4.3</strong>: Line identification in lamp spectra</li>
+<li><strong>Fully manual</strong>: User examines each order, finds known lines, records pixel positions</li>
+<li><strong>Output</strong>: New <code>Th_wavelength_*.txt</code> file</li>
+<li><strong>Code path</strong>: <code>Calibrations.wavelength_calibration()</code> reads this file</li>
+</ul>
+<h3 id="the-manual-bottleneck">The Manual Bottleneck<a class="headerlink" href="#the-manual-bottleneck" title="Permanent link">¶</a></h3>
+<p>The wavelength calibration file (<code>Th_wavelength_*.txt</code>) is the critical manually-created artifact:
+- Each entry is a manually identified line: <code>order from to center wavelength species</code>
+- <code>center</code> is determined by peak-finding (semi-automated in notebooks)
+- <code>wavelength</code> is looked up from reference databases (NIST)
+- The matching of peak-to-species is done by the human operator</p>
+<p>Evidence of recalibration sessions:
+- <code>Th_wavelength.txt</code> → original CCD
+- <code>Th_wavelength_CMOS.txt</code> → first CMOS (2019-05-29)
+- <code>Th_wavelength_CMOS_20240305.txt</code> → latest CMOS (2024-03-05)
+- Comments in files like <code># OK</code>, <code># ok</code>, <code># ?</code>, <code># not clear</code> show manual inspection</p>
+<hr>
+<h2 id="10-session-alignment-proposal">10. Session Alignment Proposal<a class="headerlink" href="#10-session-alignment-proposal" title="Permanent link">¶</a></h2>
+<h3 id="conceptual-framework">Conceptual Framework<a class="headerlink" href="#conceptual-framework" title="Permanent link">¶</a></h3>
+<p>The order pattern is physically stable (optics don't move). What drifts between sessions is:
+- Small global pixel shifts (thermal expansion, camera remounting)
+- Small wavelength shifts (same physical cause)</p>
+<p><strong>Key insight</strong>: A few known strong lines (e.g., Balmer series from an H lamp) can constrain a global shift model, avoiding full recalibration.</p>
+<h3 id="where-alignment-logic-should-live">Where Alignment Logic Should Live<a class="headerlink" href="#where-alignment-logic-should-live" title="Permanent link">¶</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>tools/echelle.py
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>  └── Calibrations
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>       ├── .start()           ← existing: full calibration from files
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a>       ├── .start_cut()       ← existing: pattern-only calibration
+<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a>       │
+<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a>       ├── .align_session()   ← NEW: session alignment entry point
+<a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a>       │     1. Load a session lamp image (H lamp or similar)
+<a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a>       │     2. Extract order spectra using existing pattern
+<a id="__codelineno-8-9" name="__codelineno-8-9" href="#__codelineno-8-9"></a>       │     3. Find known lines (Balmer: Hα, Hβ, Hγ, Hδ)
+<a id="__codelineno-8-10" name="__codelineno-8-10" href="#__codelineno-8-10"></a>       │     4. Measure pixel positions of found lines
+<a id="__codelineno-8-11" name="__codelineno-8-11" href="#__codelineno-8-11"></a>       │     5. Compare to expected positions from current wavelength table
+<a id="__codelineno-8-12" name="__codelineno-8-12" href="#__codelineno-8-12"></a>       │     6. Solve for global shift (dx pixels, or Δλ per order)
+<a id="__codelineno-8-13" name="__codelineno-8-13" href="#__codelineno-8-13"></a>       │     7. Update self.order_wavel with corrections
+<a id="__codelineno-8-14" name="__codelineno-8-14" href="#__codelineno-8-14"></a>       │     8. Recompute order_borders and wavelength
+<a id="__codelineno-8-15" name="__codelineno-8-15" href="#__codelineno-8-15"></a>       │
+<a id="__codelineno-8-16" name="__codelineno-8-16" href="#__codelineno-8-16"></a>       └── .save_alignment()  ← NEW: persist alignment corrections
+</code></pre></div>
+<h3 id="existing-abstractions-to-reuse">Existing Abstractions to Reuse<a class="headerlink" href="#existing-abstractions-to-reuse" title="Permanent link">¶</a></h3>
+<ol>
+<li><strong><code>Calibrations.wavelength_calibration()</code></strong> — already does polynomial fitting per order; extend it to accept correction offsets</li>
+<li><strong><code>emissionbands.banddata()</code></strong> — already extracts spectral windows around known lines; reuse for alignment line detection</li>
+<li><strong><code>EmissionBand.fitb()</code></strong> — already fits Gaussians to known lines; reuse to measure center positions</li>
+<li><strong><code>Calibrations.calculate_order_borders()</code></strong> — needs to be re-run after alignment</li>
+</ol>
+<h3 id="proposed-minimal-implementation">Proposed Minimal Implementation<a class="headerlink" href="#proposed-minimal-implementation" title="Permanent link">¶</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="c1"># In Calibrations class:</span>
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>
+<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="k">def</span><span class="w"> </span><span class="nf">align_session</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">lamp_image_path</span><span class="p">,</span> <span class="n">reference_lines</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">spec</span><span class="o">=</span><span class="s2">"black"</span><span class="p">):</span>
+<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="w">    </span><span class="sd">"""Align wavelength calibration using known spectral lines.</span>
+<a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a>
+<a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a><span class="sd">    Parameters</span>
+<a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a><span class="sd">    ----------</span>
+<a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a><span class="sd">    lamp_image_path : str</span>
+<a id="__codelineno-9-9" name="__codelineno-9-9" href="#__codelineno-9-9"></a><span class="sd">        Path to a lamp image (e.g., H lamp with Balmer lines)</span>
+<a id="__codelineno-9-10" name="__codelineno-9-10" href="#__codelineno-9-10"></a><span class="sd">    reference_lines : list of dict</span>
+<a id="__codelineno-9-11" name="__codelineno-9-11" href="#__codelineno-9-11"></a><span class="sd">        Known lines: [{"order": 23, "wavelength": 656.279, "name": "H-alpha"}, ...]</span>
+<a id="__codelineno-9-12" name="__codelineno-9-12" href="#__codelineno-9-12"></a><span class="sd">    """</span>
+<a id="__codelineno-9-13" name="__codelineno-9-13" href="#__codelineno-9-13"></a>    <span class="c1"># 1. Load lamp image using existing pipeline</span>
+<a id="__codelineno-9-14" name="__codelineno-9-14" href="#__codelineno-9-14"></a>    <span class="n">lamp</span> <span class="o">=</span> <span class="n">EchelleImage</span><span class="p">(</span><span class="n">lamp_image_path</span><span class="p">,</span> <span class="n">clbr</span><span class="o">=</span><span class="bp">self</span><span class="p">,</span> <span class="n">spec</span><span class="o">=</span><span class="n">spec</span><span class="p">)</span>
+<a id="__codelineno-9-15" name="__codelineno-9-15" href="#__codelineno-9-15"></a>    <span class="n">lamp</span><span class="o">.</span><span class="n">calculate_order_spectra</span><span class="p">()</span>
+<a id="__codelineno-9-16" name="__codelineno-9-16" href="#__codelineno-9-16"></a>    <span class="n">lamp</span><span class="o">.</span><span class="n">correct_order_shapes</span><span class="p">()</span>
+<a id="__codelineno-9-17" name="__codelineno-9-17" href="#__codelineno-9-17"></a>
+<a id="__codelineno-9-18" name="__codelineno-9-18" href="#__codelineno-9-18"></a>    <span class="c1"># 2. For each reference line, find its actual pixel position</span>
+<a id="__codelineno-9-19" name="__codelineno-9-19" href="#__codelineno-9-19"></a>    <span class="n">shifts</span> <span class="o">=</span> <span class="p">[]</span>
+<a id="__codelineno-9-20" name="__codelineno-9-20" href="#__codelineno-9-20"></a>    <span class="k">for</span> <span class="n">ref</span> <span class="ow">in</span> <span class="n">reference_lines</span><span class="p">:</span>
+<a id="__codelineno-9-21" name="__codelineno-9-21" href="#__codelineno-9-21"></a>        <span class="n">order</span> <span class="o">=</span> <span class="n">ref</span><span class="p">[</span><span class="s2">"order"</span><span class="p">]</span>
+<a id="__codelineno-9-22" name="__codelineno-9-22" href="#__codelineno-9-22"></a>        <span class="n">expected_wl</span> <span class="o">=</span> <span class="n">ref</span><span class="p">[</span><span class="s2">"wavelength"</span><span class="p">]</span>
+<a id="__codelineno-9-23" name="__codelineno-9-23" href="#__codelineno-9-23"></a>        <span class="c1"># Find expected pixel from current calibration</span>
+<a id="__codelineno-9-24" name="__codelineno-9-24" href="#__codelineno-9-24"></a>        <span class="n">expected_pixel</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">interp</span><span class="p">(</span><span class="n">expected_wl</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">order_wavel</span><span class="p">[</span><span class="n">order</span><span class="p">],</span> <span class="n">np</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">DIMW</span><span class="p">))</span>
+<a id="__codelineno-9-25" name="__codelineno-9-25" href="#__codelineno-9-25"></a>        <span class="c1"># Find actual peak near expected position</span>
+<a id="__codelineno-9-26" name="__codelineno-9-26" href="#__codelineno-9-26"></a>        <span class="n">actual_pixel</span> <span class="o">=</span> <span class="n">find_peak_near</span><span class="p">(</span><span class="n">lamp</span><span class="o">.</span><span class="n">order_spectra</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="n">order</span><span class="p">],</span> <span class="nb">int</span><span class="p">(</span><span class="n">expected_pixel</span><span class="p">))</span>
+<a id="__codelineno-9-27" name="__codelineno-9-27" href="#__codelineno-9-27"></a>        <span class="n">shifts</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">actual_pixel</span> <span class="o">-</span> <span class="n">expected_pixel</span><span class="p">)</span>
+<a id="__codelineno-9-28" name="__codelineno-9-28" href="#__codelineno-9-28"></a>
+<a id="__codelineno-9-29" name="__codelineno-9-29" href="#__codelineno-9-29"></a>    <span class="c1"># 3. Solve global shift (median, or per-order polynomial)</span>
+<a id="__codelineno-9-30" name="__codelineno-9-30" href="#__codelineno-9-30"></a>    <span class="n">global_shift</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">median</span><span class="p">(</span><span class="n">shifts</span><span class="p">)</span>
+<a id="__codelineno-9-31" name="__codelineno-9-31" href="#__codelineno-9-31"></a>
+<a id="__codelineno-9-32" name="__codelineno-9-32" href="#__codelineno-9-32"></a>    <span class="c1"># 4. Apply shift to wavelength solution</span>
+<a id="__codelineno-9-33" name="__codelineno-9-33" href="#__codelineno-9-33"></a>    <span class="n">x_shifted</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">DIMW</span><span class="p">)</span> <span class="o">-</span> <span class="n">global_shift</span>
+<a id="__codelineno-9-34" name="__codelineno-9-34" href="#__codelineno-9-34"></a>    <span class="k">for</span> <span class="n">o</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">order_wavel</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">]):</span>
+<a id="__codelineno-9-35" name="__codelineno-9-35" href="#__codelineno-9-35"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">order_wavel</span><span class="p">[</span><span class="n">o</span><span class="p">]</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">interp</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">DIMW</span><span class="p">),</span> <span class="n">x_shifted</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">order_wavel</span><span class="p">[</span><span class="n">o</span><span class="p">])</span>
+<a id="__codelineno-9-36" name="__codelineno-9-36" href="#__codelineno-9-36"></a>
+<a id="__codelineno-9-37" name="__codelineno-9-37" href="#__codelineno-9-37"></a>    <span class="c1"># 5. Recompute downstream</span>
+<a id="__codelineno-9-38" name="__codelineno-9-38" href="#__codelineno-9-38"></a>    <span class="bp">self</span><span class="o">.</span><span class="n">calculate_order_borders</span><span class="p">()</span>
+<a id="__codelineno-9-39" name="__codelineno-9-39" href="#__codelineno-9-39"></a>    <span class="bp">self</span><span class="o">.</span><span class="n">absolute_calibration</span><span class="p">()</span>
+</code></pre></div>
+<h3 id="reference-lines-for-h-lamp-alignment">Reference Lines for H Lamp Alignment<a class="headerlink" href="#reference-lines-for-h-lamp-alignment" title="Permanent link">¶</a></h3>
+<p>Using Balmer lines already defined in <code>emissiondata.py</code>:</p>
+<table>
+<thead>
+<tr>
+<th>Line</th>
+<th>Wavelength (nm)</th>
+<th>Approx. Order (CMOS)</th>
+<th>Strength</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Hα</td>
+<td>656.279</td>
+<td>~6–7</td>
+<td>Very strong</td>
+</tr>
+<tr>
+<td>Hβ</td>
+<td>486.135</td>
+<td>~17–18</td>
+<td>Strong</td>
+</tr>
+<tr>
+<td>Hγ</td>
+<td>434.047</td>
+<td>~24–25</td>
+<td>Moderate</td>
+</tr>
+<tr>
+<td>Hδ</td>
+<td>410.173</td>
+<td>~27</td>
+<td>Weaker</td>
+</tr>
+</tbody>
+</table>
+<p>These span the full wavelength/order range and provide excellent constraints for a global shift or low-order polynomial correction.</p>
+<h3 id="integration-strategy-minimal-disruption">Integration Strategy (Minimal Disruption)<a class="headerlink" href="#integration-strategy-minimal-disruption" title="Permanent link">¶</a></h3>
+<ol>
+<li><strong>Phase 1</strong>: Add <code>align_session()</code> method to <code>Calibrations</code> in <code>echelle.py</code>. No GUI changes needed — usable from notebooks first.</li>
+<li><strong>Phase 2</strong>: Add "Align" button to GUI that takes a lamp image path and runs alignment.</li>
+<li><strong>Phase 3</strong>: Save alignment corrections to a session file alongside the base calibration.</li>
+</ol>
+<hr>
+<h2 id="11-god-objects-and-oversized-files">11. God Objects and Oversized Files<a class="headerlink" href="#11-god-objects-and-oversized-files" title="Permanent link">¶</a></h2>
+<h3 id="calibrations-class-390-lines-moderate"><code>Calibrations</code> class (~390 lines, moderate)<a class="headerlink" href="#calibrations-class-390-lines-moderate" title="Permanent link">¶</a></h3>
+<p><strong>Not a god object yet</strong>, but trending toward one. It handles:
+- Pattern loading and mask generation
+- Wavelength calibration (polynomial fitting)
+- Order border calculation
+- Absolute calibration
+- Integrating sphere image management</p>
+<p><strong>Recommendation</strong>: Keep together for now. The responsibilities are naturally coupled. If/when alignment is added, consider extracting a <code>WavelengthCalibration</code> helper class.</p>
+<h3 id="echellespectragui-class-760-lines-the-real-god-object"><code>EchelleSpectraGUI</code> class (~760 lines) — <strong>the real god object</strong><a class="headerlink" href="#echellespectragui-class-760-lines-the-real-god-object" title="Permanent link">¶</a></h3>
+<p>This class handles:
+- UI initialization and signal connection
+- Calibration setup
+- Emission band setup
+- Shot loop management
+- Image loading orchestration
+- Spectrum display
+- Emission band display (3 separate tabs)
+- Intensity display
+- Fit orchestration
+- Data saving
+- Drag-and-drop</p>
+<p><strong>Recommendation</strong>: Consider extracting:
+- A <code>ShotProcessor</code> class that handles the load→extract→fit→save pipeline
+- Band display logic could be templated (C/He/H tabs are near-identical)</p>
+<h3 id="window_layoutpy-546-lines-ui_mainwindow-generated-style-but-hand-written"><code>window_layout.py</code> (546 lines, <code>Ui_MainWindow</code>) — <strong>generated-style but hand-written</strong><a class="headerlink" href="#window_layoutpy-546-lines-ui_mainwindow-generated-style-but-hand-written" title="Permanent link">¶</a></h3>
+<p>Huge procedural <code>setupUi()</code> method. This is typical for Qt UI code, but:
+- Could be partially replaced by <code>.ui</code> file from Qt Designer
+- Band plot creation (<code>create_plots()</code>) already shows good factoring</p>
+<h3 id="echellepy-900-lines-well-structured-but-monolithic"><code>echelle.py</code> (900 lines) — <strong>well-structured but monolithic</strong><a class="headerlink" href="#echellepy-900-lines-well-structured-but-monolithic" title="Permanent link">¶</a></h3>
+<p>Contains 3 major classes + 1 function + header template. Natural file; the concern is <strong>growth</strong> as features are added.</p>
+<p><strong>Recommendation</strong>: When adding alignment logic, consider splitting into:
+- <code>echelle_image.py</code> — <code>read_image()</code> + <code>EchelleImage</code>
+- <code>calibrations.py</code> — <code>Calibrations</code>
+- <code>spectrum.py</code> — <code>Spectrum</code>
+- Keep the old <code>echelle.py</code> as a re-export shim for backwards compatibility</p>
+<hr>
+<h2 id="12-duplicated-and-dead-code">12. Duplicated and Dead Code<a class="headerlink" href="#12-duplicated-and-dead-code" title="Permanent link">¶</a></h2>
+<h3 id="duplicated">Duplicated<a class="headerlink" href="#duplicated" title="Permanent link">¶</a></h3>
+<table>
+<thead>
+<tr>
+<th>What</th>
+<th>Where</th>
+<th>Issue</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Header template</td>
+<td><code>echelle.py:878</code> AND <code>resources/header_template.txt</code></td>
+<td>Two different templates! The one in <code>echelle.py</code> is simpler (used by <code>Spectrum.save()</code>); the one in <code>header_template.txt</code> is more detailed (used by GUI's <code>save_intensities()</code>)</td>
+</tr>
+<tr>
+<td>Calibration filenames</td>
+<td><code>echelle.py:Calibrations.filenames</code> default AND <code>gui.py:prepare_calibration()</code></td>
+<td>GUI always overrides the defaults; defaults point to CCD files</td>
+</tr>
+<tr>
+<td>Pattern files</td>
+<td><code>examples/pattern.txt</code> AND <code>calibration_files/pattern.txt</code></td>
+<td>94 KB duplicate</td>
+</tr>
+<tr>
+<td>Pattern files</td>
+<td><code>examples/pattern_CMOS_20240305.txt</code> AND <code>calibration_files/pattern_CMOS_20240305.txt</code></td>
+<td>333 KB duplicate</td>
+</tr>
+<tr>
+<td>Wavelength files</td>
+<td><code>Th_wavelength_CMOS.txt</code> ≈ <code>wavelength_cmos_2024.txt</code></td>
+<td>Near-identical content, different names</td>
+</tr>
+<tr>
+<td><code>wavelength_fujii.txt</code></td>
+<td><code>resources/wavelength_fujii.txt</code> (1 line) AND <code>calibration_files/wavelength_fujii.txt</code> (full)</td>
+<td>Different content! Root-level one has only 1 order</td>
+</tr>
+</tbody>
+</table>
+<h3 id="dead-obsolete-code">Dead / Obsolete Code<a class="headerlink" href="#dead-obsolete-code" title="Permanent link">¶</a></h3>
+<table>
+<thead>
+<tr>
+<th>What</th>
+<th>Where</th>
+<th>Issue</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>DIMW = 1024</code> / <code>DIMO = 1024</code></td>
+<td><code>echelle.py:13–14</code></td>
+<td>Module-level constants, <strong>never used</strong> — dimensions come from sphere image</td>
+</tr>
+<tr>
+<td>Commented-out <code>read_image</code> method</td>
+<td><code>echelle.py:120–126</code></td>
+<td>Dead code with TODO: Remove</td>
+</tr>
+<tr>
+<td><code>show_masks</code> method</td>
+<td><code>echelle.py:544–547</code></td>
+<td>Commented out entirely</td>
+</tr>
+<tr>
+<td><code>print_wavelength</code> method</td>
+<td><code>echelle.py:621–636</code></td>
+<td>Commented out entirely</td>
+</tr>
+<tr>
+<td><code>__init__.py</code> sys.path hack</td>
+<td><code>__init__.py:5–6</code></td>
+<td>Appends package dir to sys.path — fragile, may cause import shadowing</td>
+</tr>
+<tr>
+<td>Old imports in <code>__init__.py</code></td>
+<td>Lines 9–13</td>
+<td>Uses bare <code>import echelle_spectra_gui as gui</code> relying on sys.path hack</td>
+</tr>
+</tbody>
+</table>
+<h3 id="import-system-issues">Import System Issues<a class="headerlink" href="#import-system-issues" title="Permanent link">¶</a></h3>
+<p>The <code>__init__.py</code> uses a <code>sys.path</code> hack to enable bare imports like <code>import tools.echelle</code>. This works but is fragile and non-standard. The GUI uses the same pattern:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">tools.echelle</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">ech</span>          <span class="c1"># not: from echelle_spectra.tools import echelle</span>
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">__init__</span><span class="w"> </span><span class="kn">import</span> <span class="n">__version__</span>     <span class="c1"># not: from echelle_spectra import __version__</span>
+</code></pre></div>
+<p>This means the package cannot be imported normally (e.g., <code>from echelle_spectra.tools import echelle</code> would fail from outside the package directory).</p>
+<hr>
+<h2 id="13-proposed-mkdocs-structure">13. Proposed MkDocs Structure<a class="headerlink" href="#13-proposed-mkdocs-structure" title="Permanent link">¶</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="c1"># mkdocs.yml</span>
+<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="nt">site_name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Echelle Spectra</span>
+<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a><span class="nt">theme</span><span class="p">:</span>
+<a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">material</span>
+<a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a><span class="w">  </span><span class="nt">palette</span><span class="p">:</span>
+<a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a><span class="w">    </span><span class="nt">scheme</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">slate</span>
+<a id="__codelineno-11-7" name="__codelineno-11-7" href="#__codelineno-11-7"></a>
+<a id="__codelineno-11-8" name="__codelineno-11-8" href="#__codelineno-11-8"></a><span class="nt">nav</span><span class="p">:</span>
+<a id="__codelineno-11-9" name="__codelineno-11-9" href="#__codelineno-11-9"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">Home</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">index.md</span>
+<a id="__codelineno-11-10" name="__codelineno-11-10" href="#__codelineno-11-10"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">Getting Started</span><span class="p">:</span>
+<a id="__codelineno-11-11" name="__codelineno-11-11" href="#__codelineno-11-11"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">Installation</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">getting-started/installation.md</span>
+<a id="__codelineno-11-12" name="__codelineno-11-12" href="#__codelineno-11-12"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">Quick Start (GUI)</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">getting-started/gui-quickstart.md</span>
+<a id="__codelineno-11-13" name="__codelineno-11-13" href="#__codelineno-11-13"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">Quick Start (Python)</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">getting-started/python-quickstart.md</span>
+<a id="__codelineno-11-14" name="__codelineno-11-14" href="#__codelineno-11-14"></a>
+<a id="__codelineno-11-15" name="__codelineno-11-15" href="#__codelineno-11-15"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">Concepts</span><span class="p">:</span>
+<a id="__codelineno-11-16" name="__codelineno-11-16" href="#__codelineno-11-16"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">Echelle Spectrometer Overview</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">concepts/echelle-overview.md</span>
+<a id="__codelineno-11-17" name="__codelineno-11-17" href="#__codelineno-11-17"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">Order Pattern</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">concepts/order-pattern.md</span>
+<a id="__codelineno-11-18" name="__codelineno-11-18" href="#__codelineno-11-18"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">Wavelength Calibration</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">concepts/wavelength-calibration.md</span>
+<a id="__codelineno-11-19" name="__codelineno-11-19" href="#__codelineno-11-19"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">Absolute Calibration</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">concepts/absolute-calibration.md</span>
+<a id="__codelineno-11-20" name="__codelineno-11-20" href="#__codelineno-11-20"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">Emission Bands</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">concepts/emission-bands.md</span>
+<a id="__codelineno-11-21" name="__codelineno-11-21" href="#__codelineno-11-21"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">Spectrometer Configurations</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">concepts/spectrometers.md</span>
+<a id="__codelineno-11-22" name="__codelineno-11-22" href="#__codelineno-11-22"></a>
+<a id="__codelineno-11-23" name="__codelineno-11-23" href="#__codelineno-11-23"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">Workflows</span><span class="p">:</span>
+<a id="__codelineno-11-24" name="__codelineno-11-24" href="#__codelineno-11-24"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">Full Calibration Workflow</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">workflows/full-calibration.md</span>
+<a id="__codelineno-11-25" name="__codelineno-11-25" href="#__codelineno-11-25"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">Adding a New Spectrometer</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">workflows/new-spectrometer.md</span>
+<a id="__codelineno-11-26" name="__codelineno-11-26" href="#__codelineno-11-26"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">Session Alignment</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">workflows/session-alignment.md</span>
+<a id="__codelineno-11-27" name="__codelineno-11-27" href="#__codelineno-11-27"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">Batch Processing</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">workflows/batch-processing.md</span>
+<a id="__codelineno-11-28" name="__codelineno-11-28" href="#__codelineno-11-28"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">Emission Band Fitting</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">workflows/band-fitting.md</span>
+<a id="__codelineno-11-29" name="__codelineno-11-29" href="#__codelineno-11-29"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">Saving and Exporting Data</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">workflows/data-export.md</span>
+<a id="__codelineno-11-30" name="__codelineno-11-30" href="#__codelineno-11-30"></a>
+<a id="__codelineno-11-31" name="__codelineno-11-31" href="#__codelineno-11-31"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">Calibration Reference</span><span class="p">:</span>
+<a id="__codelineno-11-32" name="__codelineno-11-32" href="#__codelineno-11-32"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">Calibration Files</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">reference/calibration-files.md</span>
+<a id="__codelineno-11-33" name="__codelineno-11-33" href="#__codelineno-11-33"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">Pattern File Format</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">reference/pattern-format.md</span>
+<a id="__codelineno-11-34" name="__codelineno-11-34" href="#__codelineno-11-34"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">Wavelength Table Format</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">reference/wavelength-format.md</span>
+<a id="__codelineno-11-35" name="__codelineno-11-35" href="#__codelineno-11-35"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">Integrating Sphere Data</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">reference/sphere-data.md</span>
+<a id="__codelineno-11-36" name="__codelineno-11-36" href="#__codelineno-11-36"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">Detector Configurations</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">reference/detectors.md</span>
+<a id="__codelineno-11-37" name="__codelineno-11-37" href="#__codelineno-11-37"></a>
+<a id="__codelineno-11-38" name="__codelineno-11-38" href="#__codelineno-11-38"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">API Reference</span><span class="p">:</span>
+<a id="__codelineno-11-39" name="__codelineno-11-39" href="#__codelineno-11-39"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">echelle (core)</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">api/echelle.md</span>
+<a id="__codelineno-11-40" name="__codelineno-11-40" href="#__codelineno-11-40"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">emissionbands</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">api/emissionbands.md</span>
+<a id="__codelineno-11-41" name="__codelineno-11-41" href="#__codelineno-11-41"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">emissiondata</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">api/emissiondata.md</span>
+<a id="__codelineno-11-42" name="__codelineno-11-42" href="#__codelineno-11-42"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">GUI</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">api/gui.md</span>
+<a id="__codelineno-11-43" name="__codelineno-11-43" href="#__codelineno-11-43"></a>
+<a id="__codelineno-11-44" name="__codelineno-11-44" href="#__codelineno-11-44"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">Examples</span><span class="p">:</span>
+<a id="__codelineno-11-45" name="__codelineno-11-45" href="#__codelineno-11-45"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">Pattern Creation</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">examples/pattern-creation.md</span>
+<a id="__codelineno-11-46" name="__codelineno-11-46" href="#__codelineno-11-46"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">Wavelength Calibration</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">examples/wavelength-calibration.md</span>
+<a id="__codelineno-11-47" name="__codelineno-11-47" href="#__codelineno-11-47"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">Image Processing</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">examples/image-processing.md</span>
+<a id="__codelineno-11-48" name="__codelineno-11-48" href="#__codelineno-11-48"></a>
+<a id="__codelineno-11-49" name="__codelineno-11-49" href="#__codelineno-11-49"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">Development</span><span class="p">:</span>
+<a id="__codelineno-11-50" name="__codelineno-11-50" href="#__codelineno-11-50"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">Architecture</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">dev/architecture.md</span>
+<a id="__codelineno-11-51" name="__codelineno-11-51" href="#__codelineno-11-51"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">Contributing</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">dev/contributing.md</span>
+<a id="__codelineno-11-52" name="__codelineno-11-52" href="#__codelineno-11-52"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">Changelog</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">dev/changelog.md</span>
+<a id="__codelineno-11-53" name="__codelineno-11-53" href="#__codelineno-11-53"></a>
+<a id="__codelineno-11-54" name="__codelineno-11-54" href="#__codelineno-11-54"></a><span class="nt">plugins</span><span class="p">:</span>
+<a id="__codelineno-11-55" name="__codelineno-11-55" href="#__codelineno-11-55"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">search</span>
+<a id="__codelineno-11-56" name="__codelineno-11-56" href="#__codelineno-11-56"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">mkdocstrings</span><span class="p">:</span>
+<a id="__codelineno-11-57" name="__codelineno-11-57" href="#__codelineno-11-57"></a><span class="w">      </span><span class="nt">handlers</span><span class="p">:</span>
+<a id="__codelineno-11-58" name="__codelineno-11-58" href="#__codelineno-11-58"></a><span class="w">        </span><span class="nt">python</span><span class="p">:</span>
+<a id="__codelineno-11-59" name="__codelineno-11-59" href="#__codelineno-11-59"></a><span class="w">          </span><span class="nt">paths</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">src</span><span class="p p-Indicator">]</span>
+</code></pre></div>
+<h3 id="key-documentation-priorities-ordered">Key Documentation Priorities (ordered)<a class="headerlink" href="#key-documentation-priorities-ordered" title="Permanent link">¶</a></h3>
+<ol>
+<li><strong>Workflow: Full Calibration</strong> — The most critical undocumented knowledge. Currently lives only in notebooks and the author's memory.</li>
+<li><strong>Concepts: Order Pattern</strong> — What a pattern file means, how it's created, why it's stable.</li>
+<li><strong>Concepts: Wavelength Calibration</strong> — The manual line identification process, the polynomial model, the file format.</li>
+<li><strong>Workflow: Adding a New Spectrometer</strong> — Step-by-step guide from hardware to working calibration.</li>
+<li><strong>Workflow: Session Alignment</strong> — Future workflow, document the concept now.</li>
+<li><strong>Calibration Reference</strong> — Formal description of every file in <code>calibration_files/</code>.</li>
+</ol>
+<hr>
+<h2 id="14-safe-incremental-improvements">14. Safe Incremental Improvements<a class="headerlink" href="#14-safe-incremental-improvements" title="Permanent link">¶</a></h2>
+<h3 id="priority-1-low-risk-high-value">Priority 1: Low-Risk, High-Value<a class="headerlink" href="#priority-1-low-risk-high-value" title="Permanent link">¶</a></h3>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Improvement</th>
+<th>Risk</th>
+<th>Impact</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td><strong>Fix imports</strong>: Replace <code>sys.path</code> hack with proper relative imports</td>
+<td>Low</td>
+<td>Fixes packaging; allows normal <code>from echelle_spectra.tools import echelle</code></td>
+</tr>
+<tr>
+<td>2</td>
+<td><strong>Remove dead code</strong>: Delete commented-out methods, unused constants <code>DIMW</code>/<code>DIMO</code></td>
+<td>None</td>
+<td>Cleaner codebase</td>
+</tr>
+<tr>
+<td>3</td>
+<td><strong>Consolidate duplicate header templates</strong></td>
+<td>Low</td>
+<td>Single source of truth</td>
+</tr>
+<tr>
+<td>4</td>
+<td><strong>Add <code>.gitignore</code> entry for <code>pattern_image_synthetic.txt</code></strong></td>
+<td>None</td>
+<td>-100 MB from repo</td>
+</tr>
+<tr>
+<td>5</td>
+<td><strong>Remove duplicate pattern files from <code>examples/</code></strong></td>
+<td>Low</td>
+<td>Use symlinks or document the path to originals</td>
+</tr>
+<tr>
+<td>6</td>
+<td><strong>Rename misspelled notebooks</strong></td>
+<td>None</td>
+<td><code>4.1_Load_bkack_echelle copy.ipynb</code> → archive or rename</td>
+</tr>
+<tr>
+<td>7</td>
+<td><strong>Clarify duplicate wavelength files</strong></td>
+<td>Low</td>
+<td>Delete <code>wavelength_cmos_2024.txt</code> if truly a duplicate</td>
+</tr>
+</tbody>
+</table>
+<h3 id="priority-2-moderate-effort-high-value">Priority 2: Moderate Effort, High Value<a class="headerlink" href="#priority-2-moderate-effort-high-value" title="Permanent link">¶</a></h3>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Improvement</th>
+<th>Risk</th>
+<th>Impact</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>8</td>
+<td><strong>Extract spectrometer config into data files</strong></td>
+<td>Medium</td>
+<td>Replace hardcoded filename dicts with TOML/JSON per spectrometer</td>
+</tr>
+<tr>
+<td>9</td>
+<td><strong>Add <code>read_image()</code> dispatcher registry</strong></td>
+<td>Low</td>
+<td>Make it extensible without code changes</td>
+</tr>
+<tr>
+<td>10</td>
+<td><strong>Create <code>mkdocs.yml</code> skeleton</strong></td>
+<td>Low</td>
+<td>Start docs migration</td>
+</tr>
+<tr>
+<td>11</td>
+<td><strong>Write calibration workflow documentation</strong></td>
+<td>None</td>
+<td>Capture implicit knowledge</td>
+</tr>
+<tr>
+<td>12</td>
+<td><strong>Add type hints to core classes</strong></td>
+<td>Low</td>
+<td>Better IDE support and documentation</td>
+</tr>
+</tbody>
+</table>
+<h3 id="priority-3-larger-but-safe">Priority 3: Larger but Safe<a class="headerlink" href="#priority-3-larger-but-safe" title="Permanent link">¶</a></h3>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Improvement</th>
+<th>Risk</th>
+<th>Impact</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>13</td>
+<td><strong>Split <code>echelle.py</code></strong> into <code>echelle_image.py</code>, <code>calibrations.py</code>, <code>spectrum.py</code></td>
+<td>Medium</td>
+<td>Cleaner imports, easier maintenance; keep re-export shim</td>
+</tr>
+<tr>
+<td>14</td>
+<td><strong>Implement <code>align_session()</code></strong></td>
+<td>Medium</td>
+<td>Key workflow improvement</td>
+</tr>
+<tr>
+<td>15</td>
+<td><strong>Extract shot processing from GUI</strong> into reusable class</td>
+<td>Medium</td>
+<td>Enables headless batch processing</td>
+</tr>
+</tbody>
+</table>
+<hr>
+<h2 id="15-minimal-risk-modernization-plan">15. Minimal-Risk Modernization Plan<a class="headerlink" href="#15-minimal-risk-modernization-plan" title="Permanent link">¶</a></h2>
+<h3 id="phase-1-cleanup-no-behavior-changes">Phase 1: Cleanup (no behavior changes)<a class="headerlink" href="#phase-1-cleanup-no-behavior-changes" title="Permanent link">¶</a></h3>
+<ol>
+<li>Fix <code>__init__.py</code> imports to use proper relative imports</li>
+<li>Fix <code>echelle_spectra_gui.py</code> and <code>__main__.py</code> imports</li>
+<li>Remove dead/commented-out code in <code>echelle.py</code></li>
+<li>Remove duplicate files (patterns in examples, near-duplicate wavelength files)</li>
+<li>Add <code>pattern_image_synthetic.txt</code> to <code>.gitignore</code></li>
+<li>Clean up example naming (remove "copy" duplicates)</li>
+</ol>
+<h3 id="phase-2-documentation-no-code-changes">Phase 2: Documentation (no code changes)<a class="headerlink" href="#phase-2-documentation-no-code-changes" title="Permanent link">¶</a></h3>
+<ol>
+<li>Create <code>mkdocs.yml</code> with proposed structure</li>
+<li>Write "Order Pattern" concept page</li>
+<li>Write "Wavelength Calibration" concept page</li>
+<li>Write "Full Calibration Workflow" page (from notebooks)</li>
+<li>Write "Calibration Files Reference" page</li>
+<li>Add docstrings to undocumented methods</li>
+</ol>
+<h3 id="phase-3-spectrometer-config-externalization">Phase 3: Spectrometer Config Externalization<a class="headerlink" href="#phase-3-spectrometer-config-externalization" title="Permanent link">¶</a></h3>
+<ol>
+<li>Create <code>spectrometers/</code> directory with TOML files per config:
+   <div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="c1"># spectrometers/black_ccd.toml</span>
+<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="n">name</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"CCD"</span>
+<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a><span class="n">camera</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"Andor CCD"</span>
+<a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a><span class="n">image_format</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"sif"</span>
+<a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a><span class="n">pattern</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"pattern.txt"</span>
+<a id="__codelineno-12-6" name="__codelineno-12-6" href="#__codelineno-12-6"></a><span class="n">wavelength</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"Th_wavelength.txt"</span>
+<a id="__codelineno-12-7" name="__codelineno-12-7" href="#__codelineno-12-7"></a><span class="n">sphere</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"absolute_20170613_b8_0.2_v2.sif"</span>
+<a id="__codelineno-12-8" name="__codelineno-12-8" href="#__codelineno-12-8"></a><span class="n">background</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"absolute_20170613_b8_0.2_bkg.sif"</span>
+<a id="__codelineno-12-9" name="__codelineno-12-9" href="#__codelineno-12-9"></a><span class="n">integral</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"integrating_sphere.txt"</span>
+<a id="__codelineno-12-10" name="__codelineno-12-10" href="#__codelineno-12-10"></a><span class="n">dv</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">8</span>
+</code></pre></div></li>
+<li>Update <code>Calibrations.__init__()</code> to optionally load from TOML</li>
+<li>Update GUI to discover spectrometer configs</li>
+</ol>
+<h3 id="phase-4-session-alignment">Phase 4: Session Alignment<a class="headerlink" href="#phase-4-session-alignment" title="Permanent link">¶</a></h3>
+<ol>
+<li>Add <code>align_session()</code> to <code>Calibrations</code></li>
+<li>Test in notebooks with H lamp images</li>
+<li>Add GUI button for alignment</li>
+<li>Document the alignment workflow</li>
+</ol>
+<h3 id="phase-5-optional-improvements">Phase 5: Optional Improvements<a class="headerlink" href="#phase-5-optional-improvements" title="Permanent link">¶</a></h3>
+<ol>
+<li>Split <code>echelle.py</code> into separate files</li>
+<li>Extract shot processing from GUI</li>
+<li>Add proper logging (replace <code>print()</code> statements)</li>
+<li>Add basic tests for calibration pipeline</li>
+<li>Consider <code>pandas</code> for wavelength tables (currently raw <code>np.loadtxt</code>)</li>
+</ol>
+<hr>
+<h2 id="appendix-key-code-entry-points">Appendix: Key Code Entry Points<a class="headerlink" href="#appendix-key-code-entry-points" title="Permanent link">¶</a></h2>
+<table>
+<thead>
+<tr>
+<th>Use Case</th>
+<th>Entry Point</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Launch GUI</td>
+<td><code>python -m echelle_spectra</code> or <code>echelle_spectra</code> CLI</td>
+</tr>
+<tr>
+<td>Programmatic calibration</td>
+<td><code>from echelle_spectra.tools import echelle; clbr = echelle.Calibrations(folder, filenames); clbr.start()</code></td>
+</tr>
+<tr>
+<td>Load image</td>
+<td><code>em = echelle.EchelleImage(path, clbr=clbr); em.calibrate()</code></td>
+</tr>
+<tr>
+<td>Get spectrum</td>
+<td><code>s = echelle.Spectrum(em)</code></td>
+</tr>
+<tr>
+<td>Emission band fit</td>
+<td><code>from echelle_spectra.tools import emissiondata as ebd; ebd.halpha.fitb(frame, spectrum)</code></td>
+</tr>
+<tr>
+<td>Config defaults</td>
+<td><code>resources/defaults.toml</code></td>
+</tr>
+<tr>
+<td>Add spectrometer</td>
+<td>Manually create pattern + wavelength files, hardcode filenames in GUI</td>
+</tr>
+</tbody>
+</table>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden="">
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"></path></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.instant", "navigation.tracking", "navigation.tabs", "navigation.top", "content.code.copy", "content.image.zoom"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  
+<script id="init-glightbox">const lightbox = GLightbox({"touchNavigation": true, "loop": false, "zoomable": true, "draggable": true, "openEffect": "zoom", "closeEffect": "zoom", "slideEffect": "slide"});
+document$.subscribe(()=>{ lightbox.reload(); });
+</script></body></html>
