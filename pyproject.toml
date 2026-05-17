@@ -63,6 +63,11 @@ dev = [
   "PyQt5-stubs",
   "build",
   "twine",
+  "pytest>=7.0",
+]
+# SpectroCube neutral calibrated-spectrum container (optional export target)
+spectrocube = [
+  "spectrocube>=0.1.0",
 ]
 
 [tool.black]
@@ -89,6 +94,10 @@ where = ["src"]
   "resources/calibration_files/*",
   "resources/test_data/*",
 ]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-v"
 
 # Optional: if/when you switch to setuptools_scm for auto-versioning:
 # [tool.setuptools_scm]

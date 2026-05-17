@@ -70,6 +70,7 @@ nav:
       - Band data: band-data.md
   - Usage:
       - Basic usage: usage.md
+      - Exporting to SpectroCube: spectrocube-export.md
   - Development:
       - Developer notes: development.md
   - Archaeology & Refactor:
