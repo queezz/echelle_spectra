@@ -1,0 +1,189 @@
+/* =========================================================
+   Custom dark scheme: echelle-dark
+   ========================================================= */
+
+[data-md-color-scheme="echelle-dark"] {
+
+  color-scheme: dark;
+
+  /* ===== Brand — blue/cyan optical theme ===== */
+
+  --md-primary-fg-color:        #0e7ec4;
+  --md-primary-fg-color--light: #3fa8e8;
+  --md-primary-fg-color--dark:  #095e96;
+  --md-typeset-a-color:         #7dd4f8;
+
+  /* ===== Backgrounds ===== */
+
+  --md-default-bg-color: #0d1117;
+  --md-code-bg-color:    #1a1f27;
+
+  /* ===== Text ===== */
+
+  --md-default-fg-color:           rgba(220,240,255,.92);
+  --md-default-fg-color--light:    rgba(220,240,255,.70);
+  --md-default-fg-color--lighter:  rgba(220,240,255,.50);
+  --md-default-fg-color--lightest: rgba(220,240,255,.30);
+  --md-typeset-color: var(--md-default-fg-color);
+
+  /* ===== Code ===== */
+
+  --md-code-fg-color: rgba(220,240,255,.95);
+
+  --md-code-hl-operator-color:    #d0e8f0;
+  --md-code-hl-keyword-color:     #56b6d4;
+  --md-code-hl-string-color:      #9de0c8;
+  --md-code-hl-number-color:      #f2b56b;
+  --md-code-hl-name-color:        #7acfe4;
+  --md-code-hl-attr-color:        #9df0e8;
+  --md-code-hl-builtin-color:     #a8d8f0;
+  --md-code-hl-variable-color:    #7dd4f8;
+  --md-code-hl-comment-color:     rgba(160,200,230,.65);
+  --md-code-hl-punctuation-color: rgba(220,240,255,.75);
+  --md-code-selection-bg-color:   rgba(0,0,0,.35);
+
+  /* ===== Misc ===== */
+
+  --md-shadow-z1:       0 2px 4px rgba(0,0,0,.5);
+  --md-accent-fg-color: #00e5ff;
+
+}
+
+
+/* =========================================================
+   Layout elements
+   ========================================================= */
+
+[data-md-color-scheme="echelle-dark"] .md-header,
+[data-md-color-scheme="echelle-dark"] .md-tabs {
+  background-color: var(--md-primary-fg-color);
+}
+
+[data-md-color-scheme="echelle-dark"] .md-search__form {
+  background-color: rgba(255,255,255,.06);
+}
+
+
+/* =========================================================
+   Code
+   ========================================================= */
+
+/* inline code */
+[data-md-color-scheme="echelle-dark"] .md-typeset code {
+  background-color: rgba(255,255,255,.08);
+  color: var(--md-code-fg-color);
+}
+
+/* fenced / block code */
+[data-md-color-scheme="echelle-dark"] .md-typeset pre > code {
+  background-color: var(--md-code-bg-color);
+  color: var(--md-code-fg-color);
+}
+
+/* punctuation + operators */
+[data-md-color-scheme="echelle-dark"] .md-typeset pre .p,
+[data-md-color-scheme="echelle-dark"] .md-typeset pre .o {
+  color: var(--md-code-hl-punctuation-color);
+}
+
+/* shell builtins */
+[data-md-color-scheme="echelle-dark"] .md-typeset pre .nb {
+  color: var(--md-code-hl-builtin-color);
+}
+
+
+/* =========================================================
+   Blockquotes
+   ========================================================= */
+
+[data-md-color-scheme="echelle-dark"] .md-typeset blockquote {
+  background-color: #1a2535;
+  border-left: .25rem solid #3fa8e8;
+  color: var(--md-default-fg-color);
+  padding: .8em 1em .8em 1.2em;
+  border-radius: 6px;
+}
+
+
+/* =========================================================
+   Keyboard keys
+   ========================================================= */
+
+[data-md-color-scheme="echelle-dark"] .md-typeset kbd {
+  background: rgba(255,255,255,.08);
+  color: var(--md-default-fg-color);
+  border: 1px solid rgba(255,255,255,.20);
+  border-bottom-width: 2px;
+  border-radius: .35rem;
+  padding: .1em .45em;
+  font-size: .85em;
+  font-weight: 600;
+  box-shadow: inset 0 -2px 0 rgba(0,0,0,.35);
+}
+
+[data-md-color-scheme="echelle-dark"] .md-typeset kbd + kbd {
+  margin-left: .15rem;
+}
+
+[data-md-color-scheme="echelle-dark"] .md-typeset kbd + kbd::before {
+  content: " + ";
+  color: var(--md-default-fg-color--light);
+}
+
+
+/* =========================================================
+   Admonitions
+   ========================================================= */
+
+[data-md-color-scheme="echelle-dark"] .md-typeset .admonition,
+[data-md-color-scheme="echelle-dark"] .md-typeset details {
+  background-color: rgba(255,255,255,.04);
+  color: var(--md-default-fg-color);
+  border: 1px solid rgba(255,255,255,.12);
+}
+
+[data-md-color-scheme="echelle-dark"] .md-typeset .admonition-title {
+  background-color: rgba(255,255,255,.06);
+}
+
+[data-md-color-scheme="echelle-dark"] .md-typeset .admonition.info    { border-color: #56b6d4; }
+[data-md-color-scheme="echelle-dark"] .md-typeset .admonition.warning { border-color: #f2b56b; }
+[data-md-color-scheme="echelle-dark"] .md-typeset .admonition.tip     { border-color: #00e5ff; }
+[data-md-color-scheme="echelle-dark"] .md-typeset .admonition.note    { border-color: #7dd4f8; }
+
+
+/* =========================================================
+   Tables
+   ========================================================= */
+
+[data-md-color-scheme="echelle-dark"] .md-typeset table {
+  background-color: rgba(255,255,255,.03);
+  border: 1px solid rgba(255,255,255,.12);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+[data-md-color-scheme="echelle-dark"] .md-typeset thead {
+  background-color: rgba(255,255,255,.05);
+}
+
+[data-md-color-scheme="echelle-dark"] .md-typeset tbody tr {
+  border-top: 1px solid rgba(255,255,255,.06);
+}
+
+[data-md-color-scheme="echelle-dark"] .md-typeset td,
+[data-md-color-scheme="echelle-dark"] .md-typeset th {
+  border: none;
+}
+
+[data-md-color-scheme="echelle-dark"] .md-typeset tbody tr:nth-child(even) {
+  background-color: rgba(255,255,255,.02);
+}
+
+[data-md-color-scheme="echelle-dark"] .md-typeset tbody tr:hover {
+  background: linear-gradient(
+    to right,
+    rgba(255,255,255,.06),
+    rgba(255,255,255,.03)
+  );
+}
