@@ -1,6 +1,7 @@
 # Echelle Spectra — Repository Archaeology Report
 
 **Date:** 2026-05-15
+**Commit:** [`e005e92`](https://github.com/queezz/echelle_spectra/commit/e005e927955472cd684f878c659dfe917b95f223)
 **Scope:** Full codebase analysis, workflow tracing, calibration model documentation
 
 ---
