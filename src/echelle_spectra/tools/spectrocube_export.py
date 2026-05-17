@@ -57,6 +57,113 @@ _UNIT_INFO: dict[str, dict[str, str]] = {
 
 _DEFAULT_INSTRUMENT_ID = "echelle"
 
+# Fraction of axis points allowed to be non-monotonic before we refuse to
+# co-sort and instead raise an error.  Echelle order stitching typically
+# produces a handful of seam reversals, well below 1% of the axis.
+_MAX_NONMONOTONIC_FRACTION = 0.02
+
+# Absolute floor: always allow up to this many reversals regardless of axis
+# size.  An echelle spectrum has ~30 orders so well under this in practice.
+_MAX_NONMONOTONIC_ABSOLUTE = 50
+
+
+# ---------------------------------------------------------------------------
+# Wavelength-axis normalization
+# ---------------------------------------------------------------------------
+
+
+def _normalize_wavelength_axis(
+    wavelength: np.ndarray,
+    intensity_2d: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Return ``(wavelength, intensity_2d)`` with a strictly increasing wavelength axis.
+
+    SpectroCube requires a strictly monotonically increasing wavelength
+    coordinate.  ``Spectrum.wavelength`` from ``echelle_spectra`` may be:
+
+    * Strictly increasing — pass through unchanged.
+    * Strictly decreasing — reverse both arrays (cheap, exact mapping).
+    * Globally increasing/decreasing with a small number of local seam
+      reversals at order boundaries.  In this case the paired
+      ``(wavelength, intensity)`` data is co-sorted by wavelength.  This is
+      safe because each wavelength stays paired with its own intensity slice.
+    * Genuinely scrambled — :exc:`ValueError`.
+
+    Duplicate wavelength values are also rejected with a clear error.
+
+    Parameters
+    ----------
+    wavelength : np.ndarray
+        1-D wavelength axis (nm).
+    intensity_2d : np.ndarray
+        2-D ``(frame, wavelength)`` intensity array.  The wavelength axis is
+        the **last** dimension.
+
+    Returns
+    -------
+    (np.ndarray, np.ndarray)
+        Normalized wavelength and intensity arrays.
+
+    Raises
+    ------
+    ValueError
+        If the axis cannot be cleanly converted to strictly increasing.
+    """
+    if wavelength.ndim != 1:
+        raise ValueError(f"wavelength must be 1-D, got ndim={wavelength.ndim}")
+    if intensity_2d.shape[-1] != wavelength.size:
+        raise ValueError(
+            f"intensity last axis ({intensity_2d.shape[-1]}) does not match "
+            f"wavelength size ({wavelength.size})"
+        )
+
+    dw = np.diff(wavelength)
+    n_neg = int(np.sum(dw < 0))
+    n_pos = int(np.sum(dw > 0))
+    n_zero = int(np.sum(dw == 0))
+    n_total = dw.size
+
+    # Strictly increasing — nothing to do.
+    if n_neg == 0 and n_zero == 0:
+        return wavelength, intensity_2d
+
+    # Strictly decreasing — exact reversal preserves pixel mapping.
+    if n_pos == 0 and n_zero == 0:
+        return wavelength[::-1].copy(), intensity_2d[..., ::-1].copy()
+
+    # Mostly increasing (or decreasing) with a few seam reversals — co-sort.
+    # We require: a clear majority direction, and the number of "wrong-way"
+    # steps is small (either <= _MAX_NONMONOTONIC_FRACTION of the axis, or
+    # <= _MAX_NONMONOTONIC_ABSOLUTE in absolute count — whichever is more
+    # permissive, so tiny test arrays and real ~3000-point axes both work).
+    minor = min(n_pos, n_neg)
+    if (
+        minor <= _MAX_NONMONOTONIC_ABSOLUTE
+        or minor / max(n_total, 1) <= _MAX_NONMONOTONIC_FRACTION
+    ):
+        order = np.argsort(wavelength, kind="stable")
+        wl_sorted = wavelength[order]
+        intensity_sorted = intensity_2d[..., order]
+
+        # Reject duplicates: SpectroCube needs *strictly* increasing.
+        if np.any(np.diff(wl_sorted) == 0):
+            dup_count = int(np.sum(np.diff(wl_sorted) == 0))
+            raise ValueError(
+                f"Wavelength axis contains {dup_count} duplicate value(s); "
+                "cannot export to SpectroCube which requires a strictly "
+                "increasing wavelength coordinate."
+            )
+        return wl_sorted, intensity_sorted
+
+    # Too many reversals — refuse to guess at the right ordering.
+    raise ValueError(
+        "Spectrum wavelength axis is not monotonic and has too many "
+        f"reversals ({minor}/{n_total} = {minor / n_total:.1%}) to safely "
+        "co-sort. Check the calibration order-stitching result.\n"
+        f"  wavelength[:5] = {wavelength[:5]}\n"
+        f"  wavelength[-5:] = {wavelength[-5:]}"
+    )
+
 
 # ---------------------------------------------------------------------------
 # Public API
@@ -118,7 +225,9 @@ def to_spectrocube(
     ImportError
         If the ``spectrocube`` package is not installed.
     ValueError
-        If *units* is not one of the recognised keys.
+        If *units* is not one of the recognised keys, or if the wavelength
+        axis is non-monotonic (neither purely increasing nor purely
+        decreasing).
 
     Examples
     --------
@@ -144,7 +253,6 @@ def to_spectrocube(
     unit_meta = _UNIT_INFO[units]
 
     # --- wavelength ---
-    # Spectrum.wavelength is already NaN-stripped and flipped to ascending order.
     wavelength = np.asarray(spectrum.wavelength, dtype=float)
 
     # --- intensity ---
@@ -153,6 +261,8 @@ def to_spectrocube(
     )
     if intensity_2d.ndim == 1:
         intensity_2d = intensity_2d[np.newaxis, :]
+
+    wavelength, intensity_2d = _normalize_wavelength_axis(wavelength, intensity_2d)
 
     n_frames = intensity_2d.shape[0]
     if squeeze_single_frame and n_frames == 1:
