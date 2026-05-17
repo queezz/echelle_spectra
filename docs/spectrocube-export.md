@@ -171,6 +171,5 @@ Using the project venvs (if you already use `~/.venvs/echelle-spectra`):
 
 ## API reference
 
-::: echelle_spectra.tools.spectrocube_export.to_spectrocube
-
-::: echelle_spectra.tools.spectrocube_export.export_spectrocube
+Full parameter lists and return types:
+[SpectroCube export API reference](spectrocube-export-api.md).

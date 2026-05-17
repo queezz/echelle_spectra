@@ -32,6 +32,13 @@ theme:
 plugins:
   - search
   - glightbox
+  - mkdocstrings:
+      handlers:
+        python:
+          paths: [src]
+          options:
+            show_source: false
+            docstring_style: numpy
 
 markdown_extensions:
   - admonition
@@ -70,7 +77,9 @@ nav:
       - Band data: band-data.md
   - Usage:
       - Basic usage: usage.md
-      - Exporting to SpectroCube: spectrocube-export.md
+      - Exporting to SpectroCube:
+          - Guide: spectrocube-export.md
+          - API reference: spectrocube-export-api.md
   - Development:
       - Developer notes: development.md
   - Archaeology & Refactor:
