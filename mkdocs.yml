@@ -79,9 +79,11 @@ nav:
       - Band data: band-data.md
   - Usage:
       - Basic usage: usage.md
+      - Pattern extraction: pattern-extraction.md
       - Calibration alignment: calibration-alignment.md
       - Exporting to SpectroCube: spectrocube-export.md
   - API:
+      - Pattern extraction: pattern-extraction-api.md
       - SpectroCube export: spectrocube-export-api.md
   - Development:
       - Developer notes: development.md

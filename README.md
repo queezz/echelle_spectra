@@ -95,5 +95,6 @@ Windows PowerShell:
 ### Install
 
 ```bash
-pip install -e .
+pip install -e ".[dev]"
+python -m ipykernel install --user --name echelle-spectra --display-name "echelle-spectra"
 ```

@@ -553,8 +553,8 @@ def rank_candidate_lines(
         key=lambda item: (
             item.fit_candidate,
             not item.is_saturated,
-            np.nan_to_num(item.snr, nan=-np.inf),
             np.nan_to_num(item.prominence, nan=-np.inf),
+            np.nan_to_num(item.snr, nan=-np.inf),
         ),
         reverse=True,
     )

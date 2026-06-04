@@ -60,7 +60,10 @@ echelle-spectrocube = "echelle_spectra.spectrocube_cli:main"
 dev = [
   "black>=24.3.0",
   "ruff>=0.5.0",
-  "jupyter",
+  "ipykernel>=6.29",
+  "ipywidgets>=8.1",
+  "jupyterlab>=4.0",
+  "notebook>=7.0",
   "PyQt5-stubs",
   "build",
   "twine",
