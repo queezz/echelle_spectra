@@ -11,6 +11,7 @@ from echelle_spectra.tools.pattern_extraction import (
     extract_order_pattern,
     sample_columns,
     subtract_background,
+    trial_order_pattern_extraction,
 )
 
 
@@ -104,3 +105,24 @@ def test_extract_order_pattern_rejects_wrong_order_count():
         assert "expected 6 orders" in str(exc)
     else:
         raise AssertionError("expected ValueError")
+
+
+def test_trial_order_pattern_extraction_ranks_successful_fit_first():
+    image, _truth = _synthetic_order_image()
+    config = _config()
+
+    trials = trial_order_pattern_extraction(
+        image,
+        config=config,
+        threshold_values=[0.99, config.peak_threshold],
+        column_start_values=[50],
+        column_step_px=35,
+        sample_count=5,
+    )
+
+    assert trials[0].success
+    assert trials[0].threshold == config.peak_threshold
+    assert trials[0].result is not None
+    assert not trials[-1].success
+    assert trials[-1].error
+    assert trials[-1].peak_counts.size == 5

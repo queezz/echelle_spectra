@@ -19,6 +19,7 @@ from echelle_spectra.tools.pattern_extraction import (
     PatternExtractionConfig,
     extract_order_pattern,
     subtract_background,
+    trial_order_pattern_extraction,
 )
 
 cb = Calibrations(folder=str(CALIB_DIR), filenames=files_cmos)
@@ -41,6 +42,23 @@ np.savetxt(CALIB_DIR / "pattern_CMOS_NEWDATE.txt", result.pattern, fmt="%d")
 The fitted pattern should still be overlaid on the sphere frame before saving.
 The automation validates peak counts and array shape, but it does not replace
 the physical sanity check against the detector image.
+
+If a fixed setting misses or adds an order in one sampled column, scan a small
+grid of thresholds and column starts first:
+
+```python
+trials = trial_order_pattern_extraction(
+    image,
+    config=config,
+    threshold_values=[0.10, 0.11, 0.12, 0.13, 0.14, 0.15],
+    column_start_values=[530, 680, 750],
+)
+best = next(trial for trial in trials if trial.success)
+result = best.result
+```
+
+Failed trials keep their peak counts, which makes it clear which sampled
+columns need manual inspection.
 
 ## Notebook Migration
 

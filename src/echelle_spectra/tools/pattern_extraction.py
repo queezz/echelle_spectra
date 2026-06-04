@@ -7,7 +7,7 @@ or a future CLI can choose how to load SIF/TIFF/FITS data.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import List, Optional, Sequence
 
 import numpy as np
@@ -22,6 +22,7 @@ __all__ = [
     "PatternExtractionConfig",
     "PatternColumnDetection",
     "PatternExtractionResult",
+    "PatternExtractionTrial",
     "average_detector_frames",
     "subtract_background",
     "sample_columns",
@@ -30,6 +31,7 @@ __all__ = [
     "detect_order_peaks",
     "fit_order_traces",
     "extract_order_pattern",
+    "trial_order_pattern_extraction",
 ]
 
 
@@ -76,6 +78,44 @@ class PatternExtractionResult:
     def n_orders(self) -> int:
         """Number of fitted diffraction orders."""
         return int(self.pattern.shape[1])
+
+
+@dataclass(frozen=True)
+class PatternExtractionTrial:
+    """One attempted extraction setting and its diagnostics."""
+
+    threshold: float
+    columns_px: np.ndarray
+    detections: List[PatternColumnDetection]
+    result: Optional[PatternExtractionResult] = None
+    error: str = ""
+
+    @property
+    def peak_counts(self) -> np.ndarray:
+        """Detected peak count per sampled column."""
+        return np.array([d.n_peaks for d in self.detections], dtype=int)
+
+    @property
+    def success(self) -> bool:
+        """Return True when this trial produced a fitted pattern."""
+        return self.result is not None
+
+    @property
+    def expected_count_matches(self) -> int:
+        """Number of sampled columns matching the expected order count."""
+        if self.result is not None:
+            expected = self.result.n_orders
+        else:
+            expected = int(np.median(self.peak_counts)) if self.peak_counts.size else 0
+        return int(np.count_nonzero(self.peak_counts == expected))
+
+    @property
+    def peak_count_spread(self) -> int:
+        """Peak count range across sampled columns."""
+        counts = self.peak_counts
+        if counts.size == 0:
+            return 0
+        return int(counts.max() - counts.min())
 
 
 def average_detector_frames(images: np.ndarray) -> np.ndarray:
@@ -262,3 +302,68 @@ def extract_order_pattern(
 
     detections = detect_order_peaks(arr, columns, config=config)
     return fit_order_traces(detections, arr.shape[1], config=config)
+
+
+def trial_order_pattern_extraction(
+    image: np.ndarray,
+    config: PatternExtractionConfig = PatternExtractionConfig(),
+    threshold_values: Sequence[float] = (0.10, 0.11, 0.12, 0.13, 0.14),
+    column_start_values: Optional[Sequence[int]] = None,
+    column_step_px: Optional[int] = None,
+    sample_count: Optional[int] = None,
+) -> List[PatternExtractionTrial]:
+    """Try several threshold/column settings and return ranked diagnostics.
+
+    Successful fits are ranked first. Failed trials are still useful because
+    their per-column peak counts identify where detection missed or added an
+    order.
+    """
+    arr = np.asarray(image, dtype=float)
+    if arr.ndim != 2:
+        raise ValueError(f"image must be 2D, got shape {arr.shape}")
+
+    step = config.sample_step_px if column_step_px is None else int(column_step_px)
+    count = config.sample_count if sample_count is None else int(sample_count)
+    if column_start_values is None:
+        centered = sample_columns(arr.shape[1], step_size=step, num_steps=count)
+        starts = [int(centered[0]), int(centered[0] + step), int(centered[0] + 2 * step)]
+    else:
+        starts = [int(start) for start in column_start_values]
+
+    trials: List[PatternExtractionTrial] = []
+    for start in starts:
+        columns = np.arange(start, start + count * step, step, dtype=int)
+        if np.any(columns < 0) or np.any(columns >= arr.shape[1]):
+            continue
+
+        for threshold in threshold_values:
+            trial_config = replace(config, peak_threshold=float(threshold))
+            detections = detect_order_peaks(arr, columns, config=trial_config)
+            result: Optional[PatternExtractionResult] = None
+            error = ""
+            try:
+                result = fit_order_traces(detections, arr.shape[1], config=trial_config)
+            except ValueError as exc:
+                error = str(exc)
+
+            trials.append(
+                PatternExtractionTrial(
+                    threshold=float(threshold),
+                    columns_px=columns,
+                    detections=detections,
+                    result=result,
+                    error=error,
+                )
+            )
+
+    return sorted(
+        trials,
+        key=lambda trial: (
+            trial.success,
+            trial.expected_count_matches,
+            -trial.peak_count_spread,
+            -abs(trial.threshold - config.peak_threshold),
+            -int(trial.columns_px[0]) if trial.columns_px.size else 0,
+        ),
+        reverse=True,
+    )
