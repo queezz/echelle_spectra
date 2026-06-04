@@ -65,6 +65,17 @@ The packaged pattern extraction workflow can also be run without a notebook:
 echelle-pattern sphere.sif sphere-bg.sif --prior-pattern pattern_CMOS_20240305.txt
 ```
 
+The packaged wavelength alignment workflow can also be run headlessly:
+
+```bash
+echelle-align \
+  local/20250926_calib/Ne-0.02s-x3-bright-lines.sif \
+  local/20250926_calib/Ne-0.02s-x3-bright-lines_bg.sif \
+  local/20250926_calib/sphere-0.1s-x3.sif \
+  local/20250926_calib/sphere-0.1s-x3-bg.sif \
+  --pattern pattern_CMOS_20250926.txt
+```
+
 ---
 
 ## GUI

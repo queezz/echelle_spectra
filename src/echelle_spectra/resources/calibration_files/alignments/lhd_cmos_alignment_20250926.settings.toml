@@ -1,0 +1,21 @@
+# Echelle calibration alignment settings
+instrument_id = "lhd_cmos"
+created_at = "2026-06-04"
+alignment_dataset_id = "20250926"
+alignment_source_dir = "local/20250926_calib"
+alignment_lamp = "Ne"
+signal_file = "Ne-0.02s-x3-bright-lines.sif"
+background_file = "Ne-0.02s-x3-bright-lines_bg.sif"
+base_wavelength_file = "Th_wavelength_CMOS_20240305.txt"
+base_pattern_file = "pattern_CMOS_20250926.txt"
+sphere_file = "sphere-0.1s-x3.sif"
+sphere_background_file = "sphere-0.1s-x3-bg.sif"
+output_wavelength_file = "Th_wavelength_CMOS_20240305_aligned_to_20250926.txt"
+n_lines = 37
+rms_px = 0.6730228189
+notes = "Rigid detector correction from Neon lamp using accepted 20250926 CMOS order pattern."
+
+[transform]
+dx_px = -14.1037201006
+dy_px = 0.359315594141
+theta_rad = -0.000281627056329

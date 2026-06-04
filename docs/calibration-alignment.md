@@ -168,6 +168,43 @@ needs the correction.
 
 ---
 
+## CLI Workflow
+
+Use `echelle-align` when the inputs and thresholds are known and the task is to
+reproduce the alignment without Jupyter. Without `--save`, the command prints
+diagnostics and does not write artifacts:
+
+```bash
+echelle-align \
+  local/20250926_calib/Ne-0.02s-x3-bright-lines.sif \
+  local/20250926_calib/Ne-0.02s-x3-bright-lines_bg.sif \
+  local/20250926_calib/sphere-0.1s-x3.sif \
+  local/20250926_calib/sphere-0.1s-x3-bg.sif \
+  --pattern pattern_CMOS_20250926.txt
+```
+
+To write the reviewed settings and adjusted wavelength table:
+
+```bash
+echelle-align \
+  local/20250926_calib/Ne-0.02s-x3-bright-lines.sif \
+  local/20250926_calib/Ne-0.02s-x3-bright-lines_bg.sif \
+  local/20250926_calib/sphere-0.1s-x3.sif \
+  local/20250926_calib/sphere-0.1s-x3-bg.sif \
+  --pattern pattern_CMOS_20250926.txt \
+  --save
+```
+
+The default output paths are:
+
+- `src/echelle_spectra/resources/calibration_files/alignments/lhd_cmos_alignment_20250926.settings.toml`
+- `src/echelle_spectra/resources/calibration_files/alignments/Th_wavelength_CMOS_20240305_aligned_to_20250926.txt`
+
+The notebook remains useful for plotting candidate windows and inspecting failed
+fits, but the CLI is the preferred reproducible workflow once settings are known.
+
+---
+
 ## Validation
 
 Recommended checks:

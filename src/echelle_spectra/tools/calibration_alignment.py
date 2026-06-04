@@ -32,6 +32,8 @@ __all__ = [
     "LineCentroidFit",
     "RigidTransform",
     "AlignmentSettings",
+    "AlignmentRunConfig",
+    "AlignmentRunResult",
     "load_wavelength_table",
     "select_candidate_lines",
     "measure_line_window_stats",
@@ -45,6 +47,7 @@ __all__ = [
     "write_wavelength_table",
     "save_alignment_settings",
     "load_alignment_settings",
+    "run_calibration_alignment",
 ]
 
 
@@ -169,6 +172,63 @@ class AlignmentSettings:
     sphere_background_file: str = ""
     output_wavelength_file: str = ""
     notes: str = ""
+
+
+@dataclass(frozen=True)
+class AlignmentRunConfig:
+    """Inputs and thresholds for one headless calibration-alignment run."""
+
+    calibration_dir: Path
+    signal_file: Path
+    background_file: Path
+    sphere_file: Path
+    sphere_background_file: Path
+    base_wavelength_file: str = "Th_wavelength_CMOS_20240305.txt"
+    base_pattern_file: str = "pattern_CMOS_20250926.txt"
+    integral_file: str = "integrating_sphere.txt"
+    instrument_id: str = "lhd_cmos"
+    alignment_dataset_id: str = "20250926"
+    alignment_source_dir: str = "local/20250926_calib"
+    alignment_lamp: str = "Ne"
+    created_at: str = "2026-06-04"
+    output_wavelength_file: str = "Th_wavelength_CMOS_20240305_aligned_to_20250926.txt"
+    window_radius_px: int = 18
+    min_snr: float = 5.0
+    saturation_level: float = 0.98 * 65535
+    x_radius_px: int = 18
+    y_radius_px: int = 4
+    species: Tuple[str, ...] = ("NeI",)
+    require_ok: bool = True
+    min_width_px: float = 4.0
+    max_width_px: float = 40.0
+    notes: str = "Rigid detector correction from Neon lamp using accepted CMOS order pattern."
+
+
+@dataclass(frozen=True)
+class AlignmentRunResult:
+    """Summary and outputs from one headless calibration-alignment run."""
+
+    settings: AlignmentSettings
+    adjusted_rows: List[CalibrationTableLine]
+    rows: List[CalibrationTableLine]
+    candidates: List[CalibrationTableLine]
+    fits: List[LineCentroidFit]
+    good_fits: List[LineCentroidFit]
+    residual_xy: np.ndarray
+    residual_px: np.ndarray
+    expected_xy: np.ndarray
+    measured_xy: np.ndarray
+    predicted_xy: np.ndarray
+    detector_saturation: List[DetectorWindowSaturation]
+    ranked_stats: List[LineWindowStats]
+
+    @property
+    def centroid_dx_px(self) -> np.ndarray:
+        """Return measured-minus-expected centroid shifts for good fits."""
+        return np.asarray(
+            [fit.center_pixel - fit.line.center_pixel for fit in self.good_fits],
+            dtype=float,
+        )
 
 
 def load_wavelength_table(path: str | Path) -> List[CalibrationTableLine]:
@@ -845,4 +905,136 @@ def load_alignment_settings(path: str | Path) -> AlignmentSettings:
             dy_px=float(transform_data["dy_px"]),
             theta_rad=float(transform_data["theta_rad"]),
         ),
+    )
+
+
+def _line_identity(line: CalibrationTableLine) -> Tuple[int, float, float]:
+    return (line.order_idx, line.center_pixel, line.wavelength_nm)
+
+
+def run_calibration_alignment(config: AlignmentRunConfig) -> AlignmentRunResult:
+    """Run the headless Neon wavelength-alignment workflow.
+
+    This packages the current notebook path into a reusable function:
+
+    1. Load calibrations with the selected wavelength table and order pattern.
+    2. Extract signal/background order spectra.
+    3. Rank curated candidate rows and reject raw-detector saturated windows.
+    4. Fit single-Gaussian centroids and a rigid detector transform.
+    5. Build adjusted wavelength rows and an :class:`AlignmentSettings` summary.
+
+    The function does not write files. Use :func:`save_alignment_settings` and
+    :func:`write_wavelength_table` after reviewing the returned residuals.
+    """
+    from .echelle import Calibrations, EchelleImage
+
+    calibration_dir = Path(config.calibration_dir)
+    files_cmos = {
+        "orders": config.base_pattern_file,
+        "wavelength": config.base_wavelength_file,
+        "sphr": str(config.sphere_file),
+        "bkgr": str(config.sphere_background_file),
+        "integral": config.integral_file,
+    }
+    calibration = Calibrations(folder=str(calibration_dir), filenames=files_cmos)
+    calibration.start()
+
+    signal = EchelleImage(str(config.signal_file), clbr=calibration)
+    signal.calculate_order_spectra()
+    signal.correct_order_shapes()
+
+    background = EchelleImage(str(config.background_file), clbr=calibration)
+    background.calculate_order_spectra()
+    background.correct_order_shapes()
+
+    order_spectra = (
+        np.asarray(signal.order_spectra[0], dtype=float)
+        - np.asarray(background.order_spectra[0], dtype=float)
+    )
+
+    rows = load_wavelength_table(calibration_dir / config.base_wavelength_file)
+    candidates = select_candidate_lines(
+        rows,
+        species=config.species,
+        require_ok=config.require_ok,
+        min_width_px=config.min_width_px,
+        max_width_px=config.max_width_px,
+    )
+    ranked_stats = rank_candidate_lines(
+        order_spectra,
+        candidates,
+        window_radius_px=config.window_radius_px,
+        saturation_level=None,
+        min_snr=config.min_snr,
+    )
+    detector_saturation = measure_detector_window_saturation(
+        signal.images,
+        calibration.pattern,
+        candidates,
+        x_radius_px=config.x_radius_px,
+        y_radius_px=config.y_radius_px,
+        saturation_level=config.saturation_level,
+    )
+    saturation_by_key = {_line_identity(stat.line): stat for stat in detector_saturation}
+
+    fit_candidates = [stat.line for stat in ranked_stats]
+    fits = measure_line_centroids(
+        order_spectra,
+        fit_candidates,
+        window_radius_px=config.window_radius_px,
+        saturation_level=None,
+        min_snr=config.min_snr,
+    )
+    good_fits = [
+        fit
+        for fit in fits
+        if fit.success and not saturation_by_key[_line_identity(fit.line)].is_saturated
+    ]
+    if len(good_fits) < 2:
+        raise ValueError(
+            f"Need at least two successful non-saturated fits, got {len(good_fits)}"
+        )
+
+    good_lines = [fit.line for fit in good_fits]
+    measured_centers = [fit.center_pixel for fit in good_fits]
+    expected_xy = detector_points_from_lines(good_lines, calibration.pattern)
+    measured_xy = detector_points_from_lines(good_lines, calibration.pattern, measured_centers)
+    transform, rms_px = fit_rigid_transform(expected_xy, measured_xy)
+    predicted_xy = transform.apply(expected_xy)
+    residual_xy = predicted_xy - measured_xy
+    residual_px = np.sqrt(np.sum(residual_xy**2, axis=1))
+    adjusted_rows = apply_rigid_correction_to_lines(rows, calibration.pattern, transform)
+
+    settings = AlignmentSettings(
+        instrument_id=config.instrument_id,
+        created_at=config.created_at,
+        alignment_dataset_id=config.alignment_dataset_id,
+        alignment_source_dir=config.alignment_source_dir,
+        alignment_lamp=config.alignment_lamp,
+        signal_file=Path(config.signal_file).name,
+        background_file=Path(config.background_file).name,
+        base_wavelength_file=config.base_wavelength_file,
+        base_pattern_file=config.base_pattern_file,
+        sphere_file=Path(config.sphere_file).name,
+        sphere_background_file=Path(config.sphere_background_file).name,
+        output_wavelength_file=config.output_wavelength_file,
+        transform=transform,
+        n_lines=len(good_fits),
+        rms_px=rms_px,
+        notes=config.notes,
+    )
+    return AlignmentRunResult(
+        settings=settings,
+        adjusted_rows=adjusted_rows,
+        rows=rows,
+        candidates=candidates,
+        fits=fits,
+        good_fits=good_fits,
+        residual_xy=residual_xy,
+        residual_px=residual_px,
+        expected_xy=expected_xy,
+        measured_xy=measured_xy,
+        predicted_xy=predicted_xy,
+        detector_saturation=detector_saturation,
+        ranked_stats=ranked_stats,
     )

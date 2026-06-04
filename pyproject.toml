@@ -54,6 +54,7 @@ Homepage = "https://github.com/queezz/echelle_spectra"
 [project.scripts]
 echelle_spectra = "echelle_spectra.echelle_spectra_gui:start"
 echelle-pattern = "echelle_spectra.pattern_cli:main"
+echelle-align = "echelle_spectra.alignment_cli:main"
 echelle-spectrocube = "echelle_spectra.spectrocube_cli:main"
 
 [project.optional-dependencies]
