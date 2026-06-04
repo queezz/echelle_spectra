@@ -7,7 +7,7 @@ name = "echelle_spectra"
 version = "0.0.2"                       # Consider setuptools_scm later for auto-versioning
 description = "Graphical tool for the extraction and analysis of calibrated spectra from 2D Echelle spectrometer images"
 readme = "README.md"
-requires-python = ">=3.8"
+requires-python = ">=3.9"
 license = { file = "LICENSE" }
 authors = [
   { name = "Kuzmin Arseniy Aleksandrovich", email = "arseniy.a.kuzmin@gmail.com" },
@@ -40,7 +40,6 @@ classifiers = [
   "Operating System :: OS Independent",
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3 :: Only",
-  "Programming Language :: Python :: 3.8",
   "Programming Language :: Python :: 3.9",
   "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
@@ -54,6 +53,7 @@ Homepage = "https://github.com/queezz/echelle_spectra"
 
 [project.scripts]
 echelle_spectra = "echelle_spectra.echelle_spectra_gui:start"
+echelle-pattern = "echelle_spectra.pattern_cli:main"
 echelle-spectrocube = "echelle_spectra.spectrocube_cli:main"
 
 [project.optional-dependencies]
@@ -86,11 +86,11 @@ spectrocube = [
 
 [tool.black]
 line-length = 100
-target-version = ["py38", "py39", "py310", "py311", "py312"]
+target-version = ["py39", "py310", "py311", "py312"]
 
 [tool.ruff]
 line-length = 100
-target-version = "py38"
+target-version = "py39"
 lint.select = ["E", "F", "W", "I"]  # basic cleanups + import sort
 
 [tool.setuptools]

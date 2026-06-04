@@ -78,6 +78,29 @@ result = extract_order_pattern_near_prior(
 This is not a full trace-tracking algorithm, but it is useful when the new
 geometry is mostly a shifted version of the previous calibration.
 
+## CLI Workflow
+
+Use `echelle-pattern` when the notebook settings are known and the task is just
+to run the calibration workflow. Without `--output`, the command prints
+diagnostics and does not write a pattern file:
+
+```bash
+echelle-pattern \
+  local/20250926_calib/sphere-0.1s-x3.sif \
+  local/20250926_calib/sphere-0.1s-x3-bg.sif \
+  --prior-pattern src/echelle_spectra/resources/calibration_files/pattern_CMOS_20240305.txt
+```
+
+To save after checking the printed trial table and delta summary:
+
+```bash
+echelle-pattern \
+  local/20250926_calib/sphere-0.1s-x3.sif \
+  local/20250926_calib/sphere-0.1s-x3-bg.sif \
+  --prior-pattern src/echelle_spectra/resources/calibration_files/pattern_CMOS_20240305.txt \
+  --output local/20250926_calib/pattern_CMOS_20250926.txt
+```
+
 ## Notebook Migration
 
 The notebook can now focus on review controls and plotting:

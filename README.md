@@ -59,6 +59,12 @@ examples/workflows/black_cmos/
 
 For daily use, only `04_extract_spectrum.ipynb` is needed. Historical notebooks are in `examples/obsolete/`.
 
+The packaged pattern extraction workflow can also be run without a notebook:
+
+```bash
+echelle-pattern sphere.sif sphere-bg.sif --prior-pattern pattern_CMOS_20240305.txt
+```
+
 ---
 
 ## GUI
