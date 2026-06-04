@@ -6,10 +6,10 @@
       
       
       
-        <link rel="prev" href="../band-data/">
+        <link rel="prev" href="../usage/">
       
       
-        <link rel="next" href="../calibration-alignment/">
+        <link rel="next" href="../spectrocube-export/">
       
       
         
@@ -20,7 +20,7 @@
     
     
       
-        <title>Basic usage - Echelle Spectra</title>
+        <title>Calibration alignment - Echelle Spectra</title>
       
     
     
@@ -85,7 +85,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#basic-usage" class="md-skip">
+        <a href="#calibration-alignment" class="md-skip">
           Skip to content
         </a>
       
@@ -118,7 +118,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Basic usage
+              Calibration alignment
             
           </span>
         </div>
@@ -253,7 +253,7 @@
     
     
       <li class="md-tabs__item md-tabs__item--active">
-        <a href="./" class="md-tabs__link">
+        <a href="../usage/" class="md-tabs__link">
           
   
   
@@ -541,6 +541,34 @@
                 
   
   
+  
+  
+    <li class="md-nav__item">
+      <a href="../usage/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Basic usage
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
     
   
   
@@ -560,7 +588,7 @@
   <span class="md-ellipsis">
     
   
-    Basic usage
+    Calibration alignment
   
 
     
@@ -578,7 +606,7 @@
   <span class="md-ellipsis">
     
   
-    Basic usage
+    Calibration alignment
   
 
     
@@ -604,10 +632,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix="">
       
         <li class="md-nav__item">
-  <a href="#intended-workflow" class="md-nav__link">
+  <a href="#goal" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Intended workflow
+        Goal
       
     </span>
   </a>
@@ -615,10 +643,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#gui" class="md-nav__link">
+  <a href="#candidate-lines" class="md-nav__link">
     <span class="md-ellipsis">
       
-        GUI
+        Candidate lines
       
     </span>
   </a>
@@ -626,10 +654,43 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#notebooks" class="md-nav__link">
+  <a href="#fit-centroids" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Notebooks
+        Fit centroids
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#fit-the-rigid-correction" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fit the rigid correction
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#write-an-adjusted-lookup-table" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Write an adjusted lookup table
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#validation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Validation
       
     </span>
   </a>
@@ -640,34 +701,6 @@
   
 </nav>
       
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../calibration-alignment/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Calibration alignment
-  
-
-    
-  </span>
-  
-  
-
-      </a>
     </li>
   
 
@@ -990,10 +1023,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix="">
       
         <li class="md-nav__item">
-  <a href="#intended-workflow" class="md-nav__link">
+  <a href="#goal" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Intended workflow
+        Goal
       
     </span>
   </a>
@@ -1001,10 +1034,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#gui" class="md-nav__link">
+  <a href="#candidate-lines" class="md-nav__link">
     <span class="md-ellipsis">
       
-        GUI
+        Candidate lines
       
     </span>
   </a>
@@ -1012,10 +1045,43 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#notebooks" class="md-nav__link">
+  <a href="#fit-centroids" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Notebooks
+        Fit centroids
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#fit-the-rigid-correction" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fit the rigid correction
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#write-an-adjusted-lookup-table" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Write an adjusted lookup table
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#validation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Validation
       
     </span>
   </a>
@@ -1042,56 +1108,156 @@
   
 
 
-<h1 id="basic-usage">Basic Usage<a class="headerlink" href="#basic-usage" title="Permanent link">¶</a></h1>
-<div class="admonition note">
-<p class="admonition-title">Note</p>
-<p>Detailed usage examples and API reference will be added in a future documentation pass. For now, see the example notebooks in <code>examples/workflows/black_cmos/</code>.</p>
-</div>
+<h1 id="calibration-alignment">Calibration Alignment<a class="headerlink" href="#calibration-alignment" title="Permanent link">¶</a></h1>
+<p>This page describes the headless v1 workflow for correcting an existing wavelength
+lookup table after a small detector or optics shift.  It is intended for notebooks and
+future CLI work, not the GUI.</p>
 <hr>
-<h2 id="intended-workflow">Intended workflow<a class="headerlink" href="#intended-workflow" title="Permanent link">¶</a></h2>
-<p>The general processing pipeline for an echelle spectrum is:</p>
+<h2 id="goal">Goal<a class="headerlink" href="#goal" title="Permanent link">¶</a></h2>
+<p>The baseline CMOS calibration table (<code>Th_wavelength_CMOS_20240305.txt</code>) is preserved as
+historical truth.  A session alignment measures where strong lamp lines actually appear
+in a new lamp frame, fits a rigid detector correction, and writes a separate settings
+file or adjusted lookup table.</p>
+<p>The v1 correction model is deliberately small:</p>
+<ul>
+<li>translation in detector x/y</li>
+<li>small rotation</li>
+<li>no stretch, shear, or warp</li>
+</ul>
+<hr>
+<h2 id="candidate-lines">Candidate lines<a class="headerlink" href="#candidate-lines" title="Permanent link">¶</a></h2>
+<p>Use the curated local wavelength table first.  The default helper selection keeps
+active <code>NeI</code> rows marked <code>ok</code>/<code>OK</code> in the inline comments and rejects very narrow or
+very broad manual pixel intervals.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">pathlib</span><span class="w"> </span><span class="kn">import</span> <span class="n">Path</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="kn">from</span><span class="w"> </span><span class="nn">echelle_spectra.tools.calibration_alignment</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>    <span class="n">load_wavelength_table</span><span class="p">,</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>    <span class="n">select_candidate_lines</span><span class="p">,</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="p">)</span>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="n">cal_dir</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="s2">"src/echelle_spectra/resources/calibration_files"</span><span class="p">)</span>
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="n">table_path</span> <span class="o">=</span> <span class="n">cal_dir</span> <span class="o">/</span> <span class="s2">"Th_wavelength_CMOS_20240305.txt"</span>
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>
+<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a><span class="n">rows</span> <span class="o">=</span> <span class="n">load_wavelength_table</span><span class="p">(</span><span class="n">table_path</span><span class="p">)</span>
+<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a><span class="n">candidates</span> <span class="o">=</span> <span class="n">select_candidate_lines</span><span class="p">(</span><span class="n">rows</span><span class="p">)</span>
+</code></pre></div>
+<p>NIST matching is intentionally not part of v1.  The local curated table is reproducible
+and keeps the manual comments that already flag doubtful lines.</p>
+<hr>
+<h2 id="fit-centroids">Fit centroids<a class="headerlink" href="#fit-centroids" title="Permanent link">¶</a></h2>
+<p>After loading a lamp frame with the existing <code>Calibrations</code> and <code>EchelleImage</code> path,
+rank candidate windows, check saturation on raw 2D detector pixels, and then fit
+single-Gaussian centroids in the extracted order spectra:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">echelle_spectra.tools.calibration_alignment</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>    <span class="n">measure_detector_window_saturation</span><span class="p">,</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>    <span class="n">measure_line_centroids</span><span class="p">,</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>    <span class="n">rank_candidate_lines</span><span class="p">,</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="p">)</span>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="n">ranked</span> <span class="o">=</span> <span class="n">rank_candidate_lines</span><span class="p">(</span>
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>    <span class="n">lamp_image</span><span class="o">.</span><span class="n">order_spectra</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">-</span> <span class="n">lamp_background</span><span class="o">.</span><span class="n">order_spectra</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span>
+<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a>    <span class="n">candidates</span><span class="p">,</span>
+<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a>    <span class="n">min_snr</span><span class="o">=</span><span class="mf">5.0</span><span class="p">,</span>
+<a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a><span class="p">)</span>
+<a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a><span class="n">saturation</span> <span class="o">=</span> <span class="n">measure_detector_window_saturation</span><span class="p">(</span>
+<a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a>    <span class="n">lamp_image</span><span class="o">.</span><span class="n">images</span><span class="p">,</span>
+<a id="__codelineno-1-14" name="__codelineno-1-14" href="#__codelineno-1-14"></a>    <span class="n">calibration</span><span class="o">.</span><span class="n">pattern</span><span class="p">,</span>
+<a id="__codelineno-1-15" name="__codelineno-1-15" href="#__codelineno-1-15"></a>    <span class="n">candidates</span><span class="p">,</span>
+<a id="__codelineno-1-16" name="__codelineno-1-16" href="#__codelineno-1-16"></a>    <span class="n">saturation_level</span><span class="o">=</span><span class="mf">0.98</span> <span class="o">*</span> <span class="mi">65535</span><span class="p">,</span>
+<a id="__codelineno-1-17" name="__codelineno-1-17" href="#__codelineno-1-17"></a><span class="p">)</span>
+<a id="__codelineno-1-18" name="__codelineno-1-18" href="#__codelineno-1-18"></a>
+<a id="__codelineno-1-19" name="__codelineno-1-19" href="#__codelineno-1-19"></a><span class="n">fits</span> <span class="o">=</span> <span class="n">measure_line_centroids</span><span class="p">(</span>
+<a id="__codelineno-1-20" name="__codelineno-1-20" href="#__codelineno-1-20"></a>    <span class="n">lamp_image</span><span class="o">.</span><span class="n">order_spectra</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">-</span> <span class="n">lamp_background</span><span class="o">.</span><span class="n">order_spectra</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span>
+<a id="__codelineno-1-21" name="__codelineno-1-21" href="#__codelineno-1-21"></a>    <span class="p">[</span><span class="n">stat</span><span class="o">.</span><span class="n">line</span> <span class="k">for</span> <span class="n">stat</span> <span class="ow">in</span> <span class="n">ranked</span><span class="p">],</span>
+<a id="__codelineno-1-22" name="__codelineno-1-22" href="#__codelineno-1-22"></a>    <span class="n">min_snr</span><span class="o">=</span><span class="mf">5.0</span><span class="p">,</span>
+<a id="__codelineno-1-23" name="__codelineno-1-23" href="#__codelineno-1-23"></a><span class="p">)</span>
+<a id="__codelineno-1-24" name="__codelineno-1-24" href="#__codelineno-1-24"></a>
+<a id="__codelineno-1-25" name="__codelineno-1-25" href="#__codelineno-1-25"></a><span class="n">good</span> <span class="o">=</span> <span class="p">[</span><span class="n">fit</span> <span class="k">for</span> <span class="n">fit</span> <span class="ow">in</span> <span class="n">fits</span> <span class="k">if</span> <span class="n">fit</span><span class="o">.</span><span class="n">success</span><span class="p">]</span>
+</code></pre></div>
+<p>Rejected rows keep a short <code>reason</code>, for example <code>saturated</code>, <code>low snr</code>, or
+<code>sigma out of range</code>.</p>
+<hr>
+<h2 id="fit-the-rigid-correction">Fit the rigid correction<a class="headerlink" href="#fit-the-rigid-correction" title="Permanent link">¶</a></h2>
+<p>Use the order pattern to convert lookup rows and measured centroids into detector
+points, then fit translation plus rotation:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="kn">from</span><span class="w"> </span><span class="nn">echelle_spectra.tools.calibration_alignment</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>    <span class="n">AlignmentSettings</span><span class="p">,</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>    <span class="n">detector_points_from_lines</span><span class="p">,</span>
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>    <span class="n">fit_rigid_transform</span><span class="p">,</span>
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>    <span class="n">save_alignment_settings</span><span class="p">,</span>
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="p">)</span>
+<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a>
+<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="n">lines</span> <span class="o">=</span> <span class="p">[</span><span class="n">fit</span><span class="o">.</span><span class="n">line</span> <span class="k">for</span> <span class="n">fit</span> <span class="ow">in</span> <span class="n">good</span><span class="p">]</span>
+<a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a><span class="n">measured_centers</span> <span class="o">=</span> <span class="p">[</span><span class="n">fit</span><span class="o">.</span><span class="n">center_pixel</span> <span class="k">for</span> <span class="n">fit</span> <span class="ow">in</span> <span class="n">good</span><span class="p">]</span>
+<a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a>
+<a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a><span class="n">expected_xy</span> <span class="o">=</span> <span class="n">detector_points_from_lines</span><span class="p">(</span><span class="n">lines</span><span class="p">,</span> <span class="n">calibration</span><span class="o">.</span><span class="n">pattern</span><span class="p">)</span>
+<a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a><span class="n">measured_xy</span> <span class="o">=</span> <span class="n">detector_points_from_lines</span><span class="p">(</span><span class="n">lines</span><span class="p">,</span> <span class="n">calibration</span><span class="o">.</span><span class="n">pattern</span><span class="p">,</span> <span class="n">measured_centers</span><span class="p">)</span>
+<a id="__codelineno-2-15" name="__codelineno-2-15" href="#__codelineno-2-15"></a>
+<a id="__codelineno-2-16" name="__codelineno-2-16" href="#__codelineno-2-16"></a><span class="n">transform</span><span class="p">,</span> <span class="n">rms_px</span> <span class="o">=</span> <span class="n">fit_rigid_transform</span><span class="p">(</span><span class="n">expected_xy</span><span class="p">,</span> <span class="n">measured_xy</span><span class="p">)</span>
+<a id="__codelineno-2-17" name="__codelineno-2-17" href="#__codelineno-2-17"></a>
+<a id="__codelineno-2-18" name="__codelineno-2-18" href="#__codelineno-2-18"></a><span class="n">settings</span> <span class="o">=</span> <span class="n">AlignmentSettings</span><span class="p">(</span>
+<a id="__codelineno-2-19" name="__codelineno-2-19" href="#__codelineno-2-19"></a>    <span class="n">instrument_id</span><span class="o">=</span><span class="s2">"lhd_cmos"</span><span class="p">,</span>
+<a id="__codelineno-2-20" name="__codelineno-2-20" href="#__codelineno-2-20"></a>    <span class="n">created_at</span><span class="o">=</span><span class="s2">"2026-06-04"</span><span class="p">,</span>
+<a id="__codelineno-2-21" name="__codelineno-2-21" href="#__codelineno-2-21"></a>    <span class="n">alignment_dataset_id</span><span class="o">=</span><span class="s2">"20250926"</span><span class="p">,</span>
+<a id="__codelineno-2-22" name="__codelineno-2-22" href="#__codelineno-2-22"></a>    <span class="n">alignment_source_dir</span><span class="o">=</span><span class="s2">"local/20250926_calib"</span><span class="p">,</span>
+<a id="__codelineno-2-23" name="__codelineno-2-23" href="#__codelineno-2-23"></a>    <span class="n">alignment_lamp</span><span class="o">=</span><span class="s2">"Ne"</span><span class="p">,</span>
+<a id="__codelineno-2-24" name="__codelineno-2-24" href="#__codelineno-2-24"></a>    <span class="n">signal_file</span><span class="o">=</span><span class="s2">"Ne-0.02s-x3-bright-lines.sif"</span><span class="p">,</span>
+<a id="__codelineno-2-25" name="__codelineno-2-25" href="#__codelineno-2-25"></a>    <span class="n">background_file</span><span class="o">=</span><span class="s2">"Ne-0.02s-x3-bright-lines_bg.sif"</span><span class="p">,</span>
+<a id="__codelineno-2-26" name="__codelineno-2-26" href="#__codelineno-2-26"></a>    <span class="n">base_wavelength_file</span><span class="o">=</span><span class="s2">"Th_wavelength_CMOS_20240305.txt"</span><span class="p">,</span>
+<a id="__codelineno-2-27" name="__codelineno-2-27" href="#__codelineno-2-27"></a>    <span class="n">base_pattern_file</span><span class="o">=</span><span class="s2">"pattern_CMOS_20240305.txt"</span><span class="p">,</span>
+<a id="__codelineno-2-28" name="__codelineno-2-28" href="#__codelineno-2-28"></a>    <span class="n">sphere_file</span><span class="o">=</span><span class="s2">"sphere-0.1s-x3.sif"</span><span class="p">,</span>
+<a id="__codelineno-2-29" name="__codelineno-2-29" href="#__codelineno-2-29"></a>    <span class="n">sphere_background_file</span><span class="o">=</span><span class="s2">"sphere-0.1s-x3-bg.sif"</span><span class="p">,</span>
+<a id="__codelineno-2-30" name="__codelineno-2-30" href="#__codelineno-2-30"></a>    <span class="n">output_wavelength_file</span><span class="o">=</span><span class="s2">"Th_wavelength_CMOS_20240305_aligned_to_20250926.txt"</span><span class="p">,</span>
+<a id="__codelineno-2-31" name="__codelineno-2-31" href="#__codelineno-2-31"></a>    <span class="n">transform</span><span class="o">=</span><span class="n">transform</span><span class="p">,</span>
+<a id="__codelineno-2-32" name="__codelineno-2-32" href="#__codelineno-2-32"></a>    <span class="n">n_lines</span><span class="o">=</span><span class="nb">len</span><span class="p">(</span><span class="n">lines</span><span class="p">),</span>
+<a id="__codelineno-2-33" name="__codelineno-2-33" href="#__codelineno-2-33"></a>    <span class="n">rms_px</span><span class="o">=</span><span class="n">rms_px</span><span class="p">,</span>
+<a id="__codelineno-2-34" name="__codelineno-2-34" href="#__codelineno-2-34"></a>    <span class="n">notes</span><span class="o">=</span><span class="s2">"Ne I rigid alignment"</span><span class="p">,</span>
+<a id="__codelineno-2-35" name="__codelineno-2-35" href="#__codelineno-2-35"></a><span class="p">)</span>
+<a id="__codelineno-2-36" name="__codelineno-2-36" href="#__codelineno-2-36"></a><span class="n">save_alignment_settings</span><span class="p">(</span>
+<a id="__codelineno-2-37" name="__codelineno-2-37" href="#__codelineno-2-37"></a>    <span class="n">settings</span><span class="p">,</span>
+<a id="__codelineno-2-38" name="__codelineno-2-38" href="#__codelineno-2-38"></a>    <span class="n">cal_dir</span> <span class="o">/</span> <span class="s2">"alignments"</span> <span class="o">/</span> <span class="s2">"lhd_cmos_alignment_20250926.settings.toml"</span><span class="p">,</span>
+<a id="__codelineno-2-39" name="__codelineno-2-39" href="#__codelineno-2-39"></a><span class="p">)</span>
+</code></pre></div>
+<hr>
+<h2 id="write-an-adjusted-lookup-table">Write an adjusted lookup table<a class="headerlink" href="#write-an-adjusted-lookup-table" title="Permanent link">¶</a></h2>
+<p>The original lookup table should not be overwritten.  Generate a new file when the
+correction should be consumed by <code>Calibrations</code> or by <code>echelle_optics</code>:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">echelle_spectra.tools.calibration_alignment</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>    <span class="n">apply_rigid_correction_to_lines</span><span class="p">,</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>    <span class="n">write_wavelength_table</span><span class="p">,</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="p">)</span>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="n">adjusted</span> <span class="o">=</span> <span class="n">apply_rigid_correction_to_lines</span><span class="p">(</span><span class="n">rows</span><span class="p">,</span> <span class="n">calibration</span><span class="o">.</span><span class="n">pattern</span><span class="p">,</span> <span class="n">transform</span><span class="p">)</span>
+<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="n">write_wavelength_table</span><span class="p">(</span>
+<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a>    <span class="n">adjusted</span><span class="p">,</span>
+<a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a>    <span class="n">cal_dir</span> <span class="o">/</span> <span class="s2">"alignments"</span> <span class="o">/</span> <span class="s2">"Th_wavelength_CMOS_20240305_aligned_to_20250926.txt"</span><span class="p">,</span>
+<a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a>    <span class="n">metadata</span><span class="o">=</span><span class="p">[</span>
+<a id="__codelineno-3-11" name="__codelineno-3-11" href="#__codelineno-3-11"></a>        <span class="p">(</span><span class="s2">"Generated"</span><span class="p">,</span> <span class="s2">"2026-06-04"</span><span class="p">),</span>
+<a id="__codelineno-3-12" name="__codelineno-3-12" href="#__codelineno-3-12"></a>        <span class="p">(</span><span class="s2">"Base wavelength file"</span><span class="p">,</span> <span class="s2">"Th_wavelength_CMOS_20240305.txt"</span><span class="p">),</span>
+<a id="__codelineno-3-13" name="__codelineno-3-13" href="#__codelineno-3-13"></a>        <span class="p">(</span><span class="s2">"Base pattern file"</span><span class="p">,</span> <span class="s2">"pattern_CMOS_20240305.txt"</span><span class="p">),</span>
+<a id="__codelineno-3-14" name="__codelineno-3-14" href="#__codelineno-3-14"></a>        <span class="p">(</span><span class="s2">"Alignment dataset"</span><span class="p">,</span> <span class="s2">"20250926"</span><span class="p">),</span>
+<a id="__codelineno-3-15" name="__codelineno-3-15" href="#__codelineno-3-15"></a>        <span class="p">(</span><span class="s2">"Alignment source dir"</span><span class="p">,</span> <span class="s2">"local/20250926_calib"</span><span class="p">),</span>
+<a id="__codelineno-3-16" name="__codelineno-3-16" href="#__codelineno-3-16"></a>        <span class="p">(</span><span class="s2">"Signal"</span><span class="p">,</span> <span class="s2">"Ne-0.02s-x3-bright-lines.sif"</span><span class="p">),</span>
+<a id="__codelineno-3-17" name="__codelineno-3-17" href="#__codelineno-3-17"></a>        <span class="p">(</span><span class="s2">"Background"</span><span class="p">,</span> <span class="s2">"Ne-0.02s-x3-bright-lines_bg.sif"</span><span class="p">),</span>
+<a id="__codelineno-3-18" name="__codelineno-3-18" href="#__codelineno-3-18"></a>        <span class="p">(</span><span class="s2">"Correction model"</span><span class="p">,</span> <span class="s2">"rigid detector transform, dx/dy/theta"</span><span class="p">),</span>
+<a id="__codelineno-3-19" name="__codelineno-3-19" href="#__codelineno-3-19"></a>    <span class="p">],</span>
+<a id="__codelineno-3-20" name="__codelineno-3-20" href="#__codelineno-3-20"></a><span class="p">)</span>
+</code></pre></div>
+<p>Point <code>Calibrations.filenames["wavelength"]</code> at the adjusted table for a session that
+needs the correction.</p>
+<hr>
+<h2 id="validation">Validation<a class="headerlink" href="#validation" title="Permanent link">¶</a></h2>
+<p>Recommended checks:</p>
 <ol>
-<li>
-<p><strong>Load a 2D echelle image</strong><br>
-   Read the raw detector image from file (FITS, TIFF, or camera-native format).</p>
-</li>
-<li>
-<p><strong>Define or load the order pattern</strong><br>
-   Either load a previously saved pattern calibration, or run order detection on a suitable image (flat-field or bright continuum source). This step is only needed when the optical setup changes.</p>
-</li>
-<li>
-<p><strong>Extract order spectra</strong><br>
-   Apply the pattern to slice each diffraction order from the 2D image into a 1D intensity array.</p>
-</li>
-<li>
-<p><strong>Calibrate wavelength</strong><br>
-   Map pixel positions to wavelengths using a calibration solution (polynomial fit derived from known emission lines). Again, this is only redone when the setup changes.</p>
-</li>
-<li>
-<p><strong>Inspect or analyze spectral windows</strong><br>
-   Use the defined wavelength windows (see <a href="../band-data/">Band data</a>) to locate and integrate lines of interest such as H-alpha, He-587, CII-515, etc.</p>
-</li>
+<li>Compare lamp-line residuals before and after correction.</li>
+<li>Check LHD Balmer peaks (<code>H-alpha</code>, <code>H-beta</code>, <code>H-gamma</code>) as rough validation.</li>
+<li>Check identified Fulcher lines for a stricter wavelength residual estimate.</li>
+<li>Report systematic offsets in nm, especially near the previously suspected
+   approximately 0.1 nm error.</li>
 </ol>
-<p>For small detector or optics shifts, use the headless
-<a href="../calibration-alignment/">Calibration alignment</a> workflow to fit a rigid correction
-and write a separate adjusted wavelength table. Do not overwrite the historical
-calibration files.</p>
-<hr>
-<h2 id="gui">GUI<a class="headerlink" href="#gui" title="Permanent link">¶</a></h2>
-<p>Launch the graphical interface with:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>echelle_spectra
-</code></pre></div>
-<p>The GUI wraps the same extraction and calibration pipeline in an interactive window.</p>
-<hr>
-<h2 id="notebooks">Notebooks<a class="headerlink" href="#notebooks" title="Permanent link">¶</a></h2>
-<p>For scripted or batch workflows, see the example notebooks:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>examples/workflows/black_cmos/
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>├── 01_load_image.ipynb
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>├── 02_pattern_calibration.ipynb
-<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>├── 03_wavelength_calibration.ipynb
-<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>├── 04_extract_spectrum.ipynb    ← routine daily use
-<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>└── 05_calibration_alignment.ipynb
-</code></pre></div>
 
 
 
