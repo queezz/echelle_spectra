@@ -6,10 +6,10 @@
       
       
       
-        <link rel="prev" href="../band-data/">
+        <link rel="prev" href="../usage/">
       
       
-        <link rel="next" href="../pattern-extraction/">
+        <link rel="next" href="../calibration-alignment/">
       
       
         
@@ -20,7 +20,7 @@
     
     
       
-        <title>Basic usage - Echelle Spectra</title>
+        <title>Pattern extraction - Echelle Spectra</title>
       
     
     
@@ -85,7 +85,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#basic-usage" class="md-skip">
+        <a href="#pattern-extraction" class="md-skip">
           Skip to content
         </a>
       
@@ -118,7 +118,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Basic usage
+              Pattern extraction
             
           </span>
         </div>
@@ -253,7 +253,7 @@
     
     
       <li class="md-tabs__item md-tabs__item--active">
-        <a href="./" class="md-tabs__link">
+        <a href="../usage/" class="md-tabs__link">
           
   
   
@@ -541,6 +541,34 @@
                 
   
   
+  
+  
+    <li class="md-nav__item">
+      <a href="../usage/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Basic usage
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
     
   
   
@@ -560,7 +588,7 @@
   <span class="md-ellipsis">
     
   
-    Basic usage
+    Pattern extraction
   
 
     
@@ -578,7 +606,7 @@
   <span class="md-ellipsis">
     
   
-    Basic usage
+    Pattern extraction
   
 
     
@@ -604,10 +632,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix="">
       
         <li class="md-nav__item">
-  <a href="#intended-workflow" class="md-nav__link">
+  <a href="#cli-workflow" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Intended workflow
+        CLI Workflow
       
     </span>
   </a>
@@ -615,21 +643,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#gui" class="md-nav__link">
+  <a href="#notebook-migration" class="md-nav__link">
     <span class="md-ellipsis">
       
-        GUI
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#notebooks" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Notebooks
+        Notebook Migration
       
     </span>
   </a>
@@ -640,34 +657,6 @@
   
 </nav>
       
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../pattern-extraction/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Pattern extraction
-  
-
-    
-  </span>
-  
-  
-
-      </a>
     </li>
   
 
@@ -1074,10 +1063,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix="">
       
         <li class="md-nav__item">
-  <a href="#intended-workflow" class="md-nav__link">
+  <a href="#cli-workflow" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Intended workflow
+        CLI Workflow
       
     </span>
   </a>
@@ -1085,21 +1074,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#gui" class="md-nav__link">
+  <a href="#notebook-migration" class="md-nav__link">
     <span class="md-ellipsis">
       
-        GUI
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#notebooks" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Notebooks
+        Notebook Migration
       
     </span>
   </a>
@@ -1126,60 +1104,99 @@
   
 
 
-<h1 id="basic-usage">Basic Usage<a class="headerlink" href="#basic-usage" title="Permanent link">¶</a></h1>
-<div class="admonition note">
-<p class="admonition-title">Note</p>
-<p>Detailed usage examples and API reference will be added in a future documentation pass. For now, see the example notebooks in <code>examples/workflows/black_cmos/</code>.</p>
-</div>
-<hr>
-<h2 id="intended-workflow">Intended workflow<a class="headerlink" href="#intended-workflow" title="Permanent link">¶</a></h2>
-<p>The general processing pipeline for an echelle spectrum is:</p>
+<h1 id="pattern-extraction">Pattern Extraction<a class="headerlink" href="#pattern-extraction" title="Permanent link">¶</a></h1>
+<p>The CMOS order-pattern notebook now has a headless implementation in
+<code>echelle_spectra.tools.pattern_extraction</code>.  The helpers keep the same working
+model as <code>examples/workflows/black_cmos/02_pattern_calibration.ipynb</code>:</p>
 <ol>
-<li>
-<p><strong>Load a 2D echelle image</strong><br>
-   Read the raw detector image from file (FITS, TIFF, or camera-native format).</p>
-</li>
-<li>
-<p><strong>Define or load the order pattern</strong><br>
-   Either load a previously saved pattern calibration, or run order detection on a suitable image (flat-field or bright continuum source). This step is only needed when the optical setup changes.</p>
-</li>
-<li>
-<p><strong>Extract order spectra</strong><br>
-   Apply the pattern to slice each diffraction order from the 2D image into a 1D intensity array.</p>
-</li>
-<li>
-<p><strong>Calibrate wavelength</strong><br>
-   Map pixel positions to wavelengths using a calibration solution (polynomial fit derived from known emission lines). Again, this is only redone when the setup changes.</p>
-</li>
-<li>
-<p><strong>Inspect or analyze spectral windows</strong><br>
-   Use the defined wavelength windows (see <a href="../band-data/">Band data</a>) to locate and integrate lines of interest such as H-alpha, He-587, CII-515, etc.</p>
-</li>
+<li>Average sphere and background frames.</li>
+<li>Subtract the background.</li>
+<li>Sample several detector columns.</li>
+<li>Detect vertical order peaks in each sampled column.</li>
+<li>Fit a smooth polynomial trace for each order.</li>
+<li>Write the resulting <code>(columns, orders)</code> pattern table after visual review.</li>
 </ol>
-<p>For small detector or optics shifts, use the headless
-<a href="../calibration-alignment/">Calibration alignment</a> workflow to fit a rigid correction
-and write a separate adjusted wavelength table. Do not overwrite the historical
-calibration files.</p>
-<p>Before exporting a dataset, run the
-<a href="../line-validation/">Wavelength line validation</a> gate on real plasma lines. Start
-with Balmer lines, then use Fulcher-alpha line positions as supporting checks when
-the features are visible and not dominated by blends.</p>
-<hr>
-<h2 id="gui">GUI<a class="headerlink" href="#gui" title="Permanent link">¶</a></h2>
-<p>Launch the graphical interface with:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>echelle_spectra
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="kn">from</span><span class="w"> </span><span class="nn">echelle_spectra.tools.echelle</span><span class="w"> </span><span class="kn">import</span> <span class="n">Calibrations</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="kn">from</span><span class="w"> </span><span class="nn">echelle_spectra.tools.pattern_extraction</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>    <span class="n">PatternExtractionConfig</span><span class="p">,</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>    <span class="n">extract_order_pattern</span><span class="p">,</span>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>    <span class="n">extract_order_pattern_near_prior</span><span class="p">,</span>
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>    <span class="n">subtract_background</span><span class="p">,</span>
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>    <span class="n">trial_order_pattern_extraction</span><span class="p">,</span>
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="p">)</span>
+<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>
+<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a><span class="n">cb</span> <span class="o">=</span> <span class="n">Calibrations</span><span class="p">(</span><span class="n">folder</span><span class="o">=</span><span class="nb">str</span><span class="p">(</span><span class="n">CALIB_DIR</span><span class="p">),</span> <span class="n">filenames</span><span class="o">=</span><span class="n">files_cmos</span><span class="p">)</span>
+<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a><span class="n">cb</span><span class="o">.</span><span class="n">load_sphere</span><span class="p">()</span>
+<a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a>
+<a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a><span class="n">image</span> <span class="o">=</span> <span class="n">subtract_background</span><span class="p">(</span><span class="n">cb</span><span class="o">.</span><span class="n">sphr</span><span class="o">.</span><span class="n">images</span><span class="p">,</span> <span class="n">cb</span><span class="o">.</span><span class="n">bkgr</span><span class="o">.</span><span class="n">images</span><span class="p">)</span>
+<a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a>
+<a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a><span class="n">config</span> <span class="o">=</span> <span class="n">PatternExtractionConfig</span><span class="p">(</span>
+<a id="__codelineno-0-18" name="__codelineno-0-18" href="#__codelineno-0-18"></a>    <span class="n">expected_orders</span><span class="o">=</span><span class="mi">29</span><span class="p">,</span>
+<a id="__codelineno-0-19" name="__codelineno-0-19" href="#__codelineno-0-19"></a>    <span class="n">sample_step_px</span><span class="o">=</span><span class="mi">150</span><span class="p">,</span>
+<a id="__codelineno-0-20" name="__codelineno-0-20" href="#__codelineno-0-20"></a>    <span class="n">sample_count</span><span class="o">=</span><span class="mi">10</span><span class="p">,</span>
+<a id="__codelineno-0-21" name="__codelineno-0-21" href="#__codelineno-0-21"></a>    <span class="n">peak_threshold</span><span class="o">=</span><span class="mf">0.13</span><span class="p">,</span>
+<a id="__codelineno-0-22" name="__codelineno-0-22" href="#__codelineno-0-22"></a>    <span class="n">peak_min_dist_px</span><span class="o">=</span><span class="mi">50</span><span class="p">,</span>
+<a id="__codelineno-0-23" name="__codelineno-0-23" href="#__codelineno-0-23"></a><span class="p">)</span>
+<a id="__codelineno-0-24" name="__codelineno-0-24" href="#__codelineno-0-24"></a><span class="n">result</span> <span class="o">=</span> <span class="n">extract_order_pattern</span><span class="p">(</span><span class="n">image</span><span class="p">,</span> <span class="n">config</span><span class="o">=</span><span class="n">config</span><span class="p">)</span>
+<a id="__codelineno-0-25" name="__codelineno-0-25" href="#__codelineno-0-25"></a>
+<a id="__codelineno-0-26" name="__codelineno-0-26" href="#__codelineno-0-26"></a><span class="n">np</span><span class="o">.</span><span class="n">savetxt</span><span class="p">(</span><span class="n">CALIB_DIR</span> <span class="o">/</span> <span class="s2">"pattern_CMOS_NEWDATE.txt"</span><span class="p">,</span> <span class="n">result</span><span class="o">.</span><span class="n">pattern</span><span class="p">,</span> <span class="n">fmt</span><span class="o">=</span><span class="s2">"</span><span class="si">%d</span><span class="s2">"</span><span class="p">)</span>
 </code></pre></div>
-<p>The GUI wraps the same extraction and calibration pipeline in an interactive window.</p>
-<hr>
-<h2 id="notebooks">Notebooks<a class="headerlink" href="#notebooks" title="Permanent link">¶</a></h2>
-<p>For scripted or batch workflows, see the example notebooks:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>examples/workflows/black_cmos/
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>├── 01_load_image.ipynb
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>├── 02_pattern_calibration.ipynb
-<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>├── 03_wavelength_calibration.ipynb
-<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>├── 04_extract_spectrum.ipynb    ← routine daily use
-<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>└── 05_calibration_alignment.ipynb
+<p>The fitted pattern should still be overlaid on the sphere frame before saving.
+The automation validates peak counts and array shape, but it does not replace
+the physical sanity check against the detector image.</p>
+<p>If a fixed setting misses or adds an order in one sampled column, scan a small
+grid of thresholds and column starts first:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="n">trials</span> <span class="o">=</span> <span class="n">trial_order_pattern_extraction</span><span class="p">(</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>    <span class="n">image</span><span class="p">,</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>    <span class="n">config</span><span class="o">=</span><span class="n">config</span><span class="p">,</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>    <span class="n">threshold_values</span><span class="o">=</span><span class="p">[</span><span class="mf">0.10</span><span class="p">,</span> <span class="mf">0.11</span><span class="p">,</span> <span class="mf">0.12</span><span class="p">,</span> <span class="mf">0.13</span><span class="p">,</span> <span class="mf">0.14</span><span class="p">,</span> <span class="mf">0.15</span><span class="p">],</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>    <span class="n">column_start_values</span><span class="o">=</span><span class="p">[</span><span class="mi">530</span><span class="p">,</span> <span class="mi">680</span><span class="p">,</span> <span class="mi">750</span><span class="p">],</span>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="p">)</span>
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="n">best</span> <span class="o">=</span> <span class="nb">next</span><span class="p">(</span><span class="n">trial</span> <span class="k">for</span> <span class="n">trial</span> <span class="ow">in</span> <span class="n">trials</span> <span class="k">if</span> <span class="n">trial</span><span class="o">.</span><span class="n">success</span><span class="p">)</span>
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="n">result</span> <span class="o">=</span> <span class="n">best</span><span class="o">.</span><span class="n">result</span>
 </code></pre></div>
+<p>Failed trials keep their peak counts, which makes it clear which sampled
+columns need manual inspection.</p>
+<p>For session-to-session recalibration, an existing pattern can be used as a
+prior. This searches near each reference trace and returns one peak per order:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="n">reference_pattern</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">loadtxt</span><span class="p">(</span><span class="s2">"pattern_CMOS_20240305.txt"</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="nb">int</span><span class="p">)</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="n">result</span> <span class="o">=</span> <span class="n">extract_order_pattern_near_prior</span><span class="p">(</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>    <span class="n">image</span><span class="p">,</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>    <span class="n">reference_pattern</span><span class="p">,</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>    <span class="n">config</span><span class="o">=</span><span class="n">config</span><span class="p">,</span>
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>    <span class="n">columns_px</span><span class="o">=</span><span class="n">best</span><span class="o">.</span><span class="n">columns_px</span><span class="p">,</span>
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>    <span class="n">search_radius_px</span><span class="o">=</span><span class="mi">20</span><span class="p">,</span>
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="p">)</span>
+</code></pre></div>
+<p>This is not a full trace-tracking algorithm, but it is useful when the new
+geometry is mostly a shifted version of the previous calibration.</p>
+<h2 id="cli-workflow">CLI Workflow<a class="headerlink" href="#cli-workflow" title="Permanent link">¶</a></h2>
+<p>Use <code>echelle-pattern</code> when the notebook settings are known and the task is just
+to run the calibration workflow. Without <code>--output</code>, the command prints
+diagnostics and does not write a pattern file:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>echelle-pattern<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="w">  </span>local/20250926_calib/sphere-0.1s-x3.sif<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="w">  </span>local/20250926_calib/sphere-0.1s-x3-bg.sif<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="w">  </span>--prior-pattern<span class="w"> </span>src/echelle_spectra/resources/calibration_files/pattern_CMOS_20240305.txt
+</code></pre></div>
+<p>To save after checking the printed trial table and delta summary:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>echelle-pattern<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="w">  </span>local/20250926_calib/sphere-0.1s-x3.sif<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="w">  </span>local/20250926_calib/sphere-0.1s-x3-bg.sif<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="w">  </span>--prior-pattern<span class="w"> </span>src/echelle_spectra/resources/calibration_files/pattern_CMOS_20240305.txt<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="w">  </span>--output<span class="w"> </span>local/20250926_calib/pattern_CMOS_20250926.txt
+</code></pre></div>
+<h2 id="notebook-migration">Notebook Migration<a class="headerlink" href="#notebook-migration" title="Permanent link">¶</a></h2>
+<p>The notebook can now focus on review controls and plotting:</p>
+<ul>
+<li>Load the calibration files with <code>Calibrations</code>.</li>
+<li>Call <code>subtract_background()</code> and <code>extract_order_pattern()</code>.</li>
+<li>Plot <code>result.detections</code> and <code>result.pattern</code> over the sphere image.</li>
+<li>Save only after all sampled columns detect the expected order count and the
+  traces look physically reasonable.</li>
+</ul>
 
 
 

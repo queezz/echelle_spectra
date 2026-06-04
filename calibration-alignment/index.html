@@ -6,10 +6,10 @@
       
       
       
-        <link rel="prev" href="../usage/">
+        <link rel="prev" href="../pattern-extraction/">
       
       
-        <link rel="next" href="../spectrocube-export/">
+        <link rel="next" href="../line-validation/">
       
       
         
@@ -273,7 +273,7 @@
     
     
       <li class="md-tabs__item">
-        <a href="../spectrocube-export-api/" class="md-tabs__link">
+        <a href="../pattern-extraction-api/" class="md-tabs__link">
           
   
   
@@ -569,6 +569,34 @@
                 
   
   
+  
+  
+    <li class="md-nav__item">
+      <a href="../pattern-extraction/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Pattern extraction
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
     
   
   
@@ -687,6 +715,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#cli-workflow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CLI Workflow
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#validation" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -701,6 +740,34 @@
   
 </nav>
       
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../line-validation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Wavelength line validation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
     </li>
   
 
@@ -790,6 +857,34 @@
 
           </label>
           <ul class="md-nav__list" data-md-scrollfix="">
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../pattern-extraction-api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Pattern extraction
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
             
               
                 
@@ -1078,6 +1173,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#cli-workflow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CLI Workflow
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#validation" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1249,12 +1355,42 @@ correction should be consumed by <code>Calibrations</code> or by <code>echelle_o
 <p>Point <code>Calibrations.filenames["wavelength"]</code> at the adjusted table for a session that
 needs the correction.</p>
 <hr>
+<h2 id="cli-workflow">CLI Workflow<a class="headerlink" href="#cli-workflow" title="Permanent link">¶</a></h2>
+<p>Use <code>echelle-align</code> when the inputs and thresholds are known and the task is to
+reproduce the alignment without Jupyter. Without <code>--save</code>, the command prints
+diagnostics and does not write artifacts:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>echelle-align<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="w">  </span>local/20250926_calib/Ne-0.02s-x3-bright-lines.sif<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="w">  </span>local/20250926_calib/Ne-0.02s-x3-bright-lines_bg.sif<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="w">  </span>local/20250926_calib/sphere-0.1s-x3.sif<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="w">  </span>local/20250926_calib/sphere-0.1s-x3-bg.sif<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="w">  </span>--pattern<span class="w"> </span>pattern_CMOS_20250926.txt
+</code></pre></div>
+<p>To write the reviewed settings and adjusted wavelength table:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>echelle-align<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="w">  </span>local/20250926_calib/Ne-0.02s-x3-bright-lines.sif<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="w">  </span>local/20250926_calib/Ne-0.02s-x3-bright-lines_bg.sif<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="w">  </span>local/20250926_calib/sphere-0.1s-x3.sif<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="w">  </span>local/20250926_calib/sphere-0.1s-x3-bg.sif<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="w">  </span>--pattern<span class="w"> </span>pattern_CMOS_20250926.txt<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="w">  </span>--save
+</code></pre></div>
+<p>The default output paths are:</p>
+<ul>
+<li><code>src/echelle_spectra/resources/calibration_files/alignments/lhd_cmos_alignment_20250926.settings.toml</code></li>
+<li><code>src/echelle_spectra/resources/calibration_files/alignments/Th_wavelength_CMOS_20240305_aligned_to_20250926.txt</code></li>
+</ul>
+<p>The notebook remains useful for plotting candidate windows and inspecting failed
+fits, but the CLI is the preferred reproducible workflow once settings are known.</p>
+<hr>
 <h2 id="validation">Validation<a class="headerlink" href="#validation" title="Permanent link">¶</a></h2>
 <p>Recommended checks:</p>
 <ol>
 <li>Compare lamp-line residuals before and after correction.</li>
-<li>Check LHD Balmer peaks (<code>H-alpha</code>, <code>H-beta</code>, <code>H-gamma</code>) as rough validation.</li>
-<li>Check identified Fulcher lines for a stricter wavelength residual estimate.</li>
+<li>Run the <a href="../line-validation/">Wavelength line validation</a> gate on LHD Balmer
+   peaks (<code>H-alpha</code>, <code>H-beta</code>, <code>H-gamma</code>).</li>
+<li>Check identified Fulcher lines as supporting evidence when blends are
+   understood.</li>
 <li>Report systematic offsets in nm, especially near the previously suspected
    approximately 0.1 nm error.</li>
 </ol>
