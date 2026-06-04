@@ -158,6 +158,16 @@ class AlignmentSettings:
     transform: RigidTransform
     n_lines: int
     rms_px: float
+    created_at: str = ""
+    alignment_dataset_id: str = ""
+    alignment_source_dir: str = ""
+    alignment_lamp: str = ""
+    signal_file: str = ""
+    background_file: str = ""
+    base_pattern_file: str = ""
+    sphere_file: str = ""
+    sphere_background_file: str = ""
+    output_wavelength_file: str = ""
     notes: str = ""
 
 
@@ -756,11 +766,22 @@ def apply_rigid_correction_to_lines(
     return adjusted
 
 
-def write_wavelength_table(lines: Sequence[CalibrationTableLine], path: str | Path) -> None:
+def _toml_quote(value: str) -> str:
+    return value.replace("\\", "\\\\").replace('"', '\\"')
+
+
+def write_wavelength_table(
+    lines: Sequence[CalibrationTableLine],
+    path: str | Path,
+    metadata: Optional[Sequence[Tuple[str, str]]] = None,
+) -> None:
     """Write an adjusted wavelength table without mutating the original file."""
     out = Path(path)
     with out.open("w", newline="\n") as fh:
         fh.write("# Adjusted wavelength calibration lookup table\n")
+        if metadata:
+            for key, value in metadata:
+                fh.write(f"# {key}: {value}\n")
         fh.write("# order from to center wavelength band\n")
         for line in lines:
             comment = f"  # {line.comment}" if line.comment else ""
@@ -777,11 +798,21 @@ def save_alignment_settings(settings: AlignmentSettings, path: str | Path) -> No
     out = Path(path)
     with out.open("w", newline="\n") as fh:
         fh.write("# Echelle calibration alignment settings\n")
-        fh.write(f'instrument_id = "{settings.instrument_id}"\n')
-        fh.write(f'base_wavelength_file = "{settings.base_wavelength_file}"\n')
+        fh.write(f'instrument_id = "{_toml_quote(settings.instrument_id)}"\n')
+        fh.write(f'created_at = "{_toml_quote(settings.created_at)}"\n')
+        fh.write(f'alignment_dataset_id = "{_toml_quote(settings.alignment_dataset_id)}"\n')
+        fh.write(f'alignment_source_dir = "{_toml_quote(settings.alignment_source_dir)}"\n')
+        fh.write(f'alignment_lamp = "{_toml_quote(settings.alignment_lamp)}"\n')
+        fh.write(f'signal_file = "{_toml_quote(settings.signal_file)}"\n')
+        fh.write(f'background_file = "{_toml_quote(settings.background_file)}"\n')
+        fh.write(f'base_wavelength_file = "{_toml_quote(settings.base_wavelength_file)}"\n')
+        fh.write(f'base_pattern_file = "{_toml_quote(settings.base_pattern_file)}"\n')
+        fh.write(f'sphere_file = "{_toml_quote(settings.sphere_file)}"\n')
+        fh.write(f'sphere_background_file = "{_toml_quote(settings.sphere_background_file)}"\n')
+        fh.write(f'output_wavelength_file = "{_toml_quote(settings.output_wavelength_file)}"\n')
         fh.write(f"n_lines = {settings.n_lines:d}\n")
         fh.write(f"rms_px = {settings.rms_px:.10g}\n")
-        fh.write(f'notes = "{settings.notes.replace(chr(34), chr(39))}"\n')
+        fh.write(f'notes = "{_toml_quote(settings.notes)}"\n')
         fh.write("\n[transform]\n")
         fh.write(f"dx_px = {settings.transform.dx_px:.12g}\n")
         fh.write(f"dy_px = {settings.transform.dy_px:.12g}\n")
@@ -798,6 +829,16 @@ def load_alignment_settings(path: str | Path) -> AlignmentSettings:
         base_wavelength_file=str(data["base_wavelength_file"]),
         n_lines=int(data["n_lines"]),
         rms_px=float(data["rms_px"]),
+        created_at=str(data.get("created_at", "")),
+        alignment_dataset_id=str(data.get("alignment_dataset_id", "")),
+        alignment_source_dir=str(data.get("alignment_source_dir", "")),
+        alignment_lamp=str(data.get("alignment_lamp", "")),
+        signal_file=str(data.get("signal_file", "")),
+        background_file=str(data.get("background_file", "")),
+        base_pattern_file=str(data.get("base_pattern_file", "")),
+        sphere_file=str(data.get("sphere_file", "")),
+        sphere_background_file=str(data.get("sphere_background_file", "")),
+        output_wavelength_file=str(data.get("output_wavelength_file", "")),
         notes=str(data.get("notes", "")),
         transform=RigidTransform(
             dx_px=float(transform_data["dx_px"]),

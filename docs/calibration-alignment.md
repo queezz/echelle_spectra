@@ -50,15 +50,31 @@ and keeps the manual comments that already flag doubtful lines.
 ## Fit centroids
 
 After loading a lamp frame with the existing `Calibrations` and `EchelleImage` path,
-fit single-Gaussian centroids in the extracted order spectra:
+rank candidate windows, check saturation on raw 2D detector pixels, and then fit
+single-Gaussian centroids in the extracted order spectra:
 
 ```python
-from echelle_spectra.tools.calibration_alignment import measure_line_centroids
+from echelle_spectra.tools.calibration_alignment import (
+    measure_detector_window_saturation,
+    measure_line_centroids,
+    rank_candidate_lines,
+)
+
+ranked = rank_candidate_lines(
+    lamp_image.order_spectra[0] - lamp_background.order_spectra[0],
+    candidates,
+    min_snr=5.0,
+)
+saturation = measure_detector_window_saturation(
+    lamp_image.images,
+    calibration.pattern,
+    candidates,
+    saturation_level=0.98 * 65535,
+)
 
 fits = measure_line_centroids(
-    lamp_image.order_spectra[0],
-    candidates,
-    saturation_level=60000,
+    lamp_image.order_spectra[0] - lamp_background.order_spectra[0],
+    [stat.line for stat in ranked],
     min_snr=5.0,
 )
 
@@ -95,13 +111,26 @@ transform, rms_px = fit_rigid_transform(expected_xy, measured_xy)
 
 settings = AlignmentSettings(
     instrument_id="lhd_cmos",
+    created_at="2026-06-04",
+    alignment_dataset_id="20250926",
+    alignment_source_dir="local/20250926_calib",
+    alignment_lamp="Ne",
+    signal_file="Ne-0.02s-x3-bright-lines.sif",
+    background_file="Ne-0.02s-x3-bright-lines_bg.sif",
     base_wavelength_file="Th_wavelength_CMOS_20240305.txt",
+    base_pattern_file="pattern_CMOS_20240305.txt",
+    sphere_file="sphere-0.1s-x3.sif",
+    sphere_background_file="sphere-0.1s-x3-bg.sif",
+    output_wavelength_file="Th_wavelength_CMOS_20240305_aligned_to_20250926.txt",
     transform=transform,
     n_lines=len(lines),
     rms_px=rms_px,
     notes="Ne I rigid alignment",
 )
-save_alignment_settings(settings, cal_dir / "lhd_cmos_20240305.settings.toml")
+save_alignment_settings(
+    settings,
+    cal_dir / "alignments" / "lhd_cmos_alignment_20250926.settings.toml",
+)
 ```
 
 ---
@@ -118,7 +147,20 @@ from echelle_spectra.tools.calibration_alignment import (
 )
 
 adjusted = apply_rigid_correction_to_lines(rows, calibration.pattern, transform)
-write_wavelength_table(adjusted, cal_dir / "Th_wavelength_CMOS_20240305_aligned.txt")
+write_wavelength_table(
+    adjusted,
+    cal_dir / "alignments" / "Th_wavelength_CMOS_20240305_aligned_to_20250926.txt",
+    metadata=[
+        ("Generated", "2026-06-04"),
+        ("Base wavelength file", "Th_wavelength_CMOS_20240305.txt"),
+        ("Base pattern file", "pattern_CMOS_20240305.txt"),
+        ("Alignment dataset", "20250926"),
+        ("Alignment source dir", "local/20250926_calib"),
+        ("Signal", "Ne-0.02s-x3-bright-lines.sif"),
+        ("Background", "Ne-0.02s-x3-bright-lines_bg.sif"),
+        ("Correction model", "rigid detector transform, dx/dy/theta"),
+    ],
+)
 ```
 
 Point `Calibrations.filenames["wavelength"]` at the adjusted table for a session that

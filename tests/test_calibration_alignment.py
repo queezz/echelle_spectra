@@ -182,10 +182,20 @@ def test_detector_points_from_pattern():
 
 
 def test_settings_round_trip(tmp_path):
-    p = tmp_path / "lhd_cmos_20240305.settings.toml"
+    p = tmp_path / "lhd_cmos_alignment_20250926.settings.toml"
     settings = AlignmentSettings(
         instrument_id="lhd_cmos",
+        created_at="2026-06-04",
+        alignment_dataset_id="20250926",
+        alignment_source_dir="local/20250926_calib",
+        alignment_lamp="Ne",
+        signal_file="Ne-0.02s-x3-bright-lines.sif",
+        background_file="Ne-0.02s-x3-bright-lines_bg.sif",
         base_wavelength_file="Th_wavelength_CMOS_20240305.txt",
+        base_pattern_file="pattern_CMOS_20240305.txt",
+        sphere_file="sphere-0.1s-x3.sif",
+        sphere_background_file="sphere-0.1s-x3-bg.sif",
+        output_wavelength_file="Th_wavelength_CMOS_20240305_aligned_to_20250926.txt",
         n_lines=12,
         rms_px=0.3,
         notes="unit test",
@@ -198,7 +208,12 @@ def test_settings_round_trip(tmp_path):
 
 def test_write_wavelength_table_round_trip(tmp_path):
     p = tmp_path / "adjusted.txt"
-    write_wavelength_table([_line(order=2, center=123.456)], p)
+    write_wavelength_table(
+        [_line(order=2, center=123.456)],
+        p,
+        metadata=[("Alignment dataset", "20250926")],
+    )
+    assert "# Alignment dataset: 20250926" in p.read_text(encoding="utf-8")
     rows = load_wavelength_table(p)
     assert len(rows) == 1
     assert rows[0].order_idx == 2
