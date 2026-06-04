@@ -18,6 +18,7 @@ from echelle_spectra.tools.echelle import Calibrations
 from echelle_spectra.tools.pattern_extraction import (
     PatternExtractionConfig,
     extract_order_pattern,
+    extract_order_pattern_near_prior,
     subtract_background,
     trial_order_pattern_extraction,
 )
@@ -59,6 +60,23 @@ result = best.result
 
 Failed trials keep their peak counts, which makes it clear which sampled
 columns need manual inspection.
+
+For session-to-session recalibration, an existing pattern can be used as a
+prior. This searches near each reference trace and returns one peak per order:
+
+```python
+reference_pattern = np.loadtxt("pattern_CMOS_20240305.txt", dtype=int)
+result = extract_order_pattern_near_prior(
+    image,
+    reference_pattern,
+    config=config,
+    columns_px=best.columns_px,
+    search_radius_px=20,
+)
+```
+
+This is not a full trace-tracking algorithm, but it is useful when the new
+geometry is mostly a shifted version of the previous calibration.
 
 ## Notebook Migration
 

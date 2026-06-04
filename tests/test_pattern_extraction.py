@@ -8,7 +8,9 @@ from echelle_spectra.tools.pattern_extraction import (
     PatternExtractionConfig,
     average_detector_frames,
     detect_order_peaks_at_column,
+    detect_order_peaks_near_prior_at_column,
     extract_order_pattern,
+    extract_order_pattern_near_prior,
     sample_columns,
     subtract_background,
     trial_order_pattern_extraction,
@@ -126,3 +128,36 @@ def test_trial_order_pattern_extraction_ranks_successful_fit_first():
     assert not trials[-1].success
     assert trials[-1].error
     assert trials[-1].peak_counts.size == 5
+
+
+def test_detect_order_peaks_near_prior_recovers_shifted_traces():
+    image, truth = _synthetic_order_image()
+    prior = np.rint(truth - 3).astype(int)
+    col = 120
+
+    detection = detect_order_peaks_near_prior_at_column(
+        image,
+        prior,
+        col,
+        config=_config(),
+        search_radius_px=8,
+    )
+
+    assert detection.n_peaks == 5
+    np.testing.assert_allclose(detection.row_peaks_px, np.rint(truth[col]), atol=1)
+
+
+def test_extract_order_pattern_near_prior_recovers_synthetic_traces():
+    image, truth = _synthetic_order_image()
+    prior = np.rint(truth - 3).astype(int)
+
+    result = extract_order_pattern_near_prior(
+        image,
+        prior,
+        config=_config(),
+        search_radius_px=8,
+    )
+
+    assert result.pattern.shape == truth.shape
+    assert result.n_orders == 5
+    np.testing.assert_allclose(result.pattern, np.rint(truth), atol=2)

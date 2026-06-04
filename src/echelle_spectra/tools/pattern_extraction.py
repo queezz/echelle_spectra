@@ -28,9 +28,12 @@ __all__ = [
     "sample_columns",
     "amplification_curve",
     "detect_order_peaks_at_column",
+    "detect_order_peaks_near_prior_at_column",
     "detect_order_peaks",
+    "detect_order_peaks_near_prior",
     "fit_order_traces",
     "extract_order_pattern",
+    "extract_order_pattern_near_prior",
     "trial_order_pattern_extraction",
 ]
 
@@ -218,6 +221,64 @@ def detect_order_peaks_at_column(
     return PatternColumnDetection(column_px=col, row_peaks_px=np.asarray(peaks, dtype=int))
 
 
+def detect_order_peaks_near_prior_at_column(
+    image: np.ndarray,
+    prior_pattern: np.ndarray,
+    column_px: int,
+    config: PatternExtractionConfig = PatternExtractionConfig(),
+    search_radius_px: int = 20,
+    amplification: Optional[np.ndarray] = None,
+) -> PatternColumnDetection:
+    """Detect one peak per prior trace near a sampled detector column.
+
+    This is intended for recalibration sessions where an older pattern is
+    already close.  It avoids one-off extra peaks by searching a bounded window
+    around each expected order position.
+    """
+    arr = np.asarray(image, dtype=float)
+    prior = np.asarray(prior_pattern, dtype=float)
+    if arr.ndim != 2:
+        raise ValueError(f"image must be 2D, got shape {arr.shape}")
+    if prior.ndim != 2:
+        raise ValueError(f"prior_pattern must be 2D, got shape {prior.shape}")
+    if prior.shape[0] != arr.shape[1]:
+        raise ValueError(
+            f"prior_pattern first axis must match image columns: {prior.shape[0]} vs {arr.shape[1]}"
+        )
+
+    nrows, ncols = arr.shape
+    col = int(column_px)
+    if not 0 <= col < ncols:
+        raise ValueError(f"column_px must be within [0, {ncols}), got {col}")
+    if search_radius_px < 1:
+        raise ValueError("search_radius_px must be positive")
+
+    amp = amplification
+    if amp is None:
+        amp = amplification_curve(nrows, config.amplification_rate)
+    amp = np.asarray(amp, dtype=float)
+    if amp.shape != (nrows,):
+        raise ValueError(f"amplification must have shape ({nrows},), got {amp.shape}")
+
+    window = _validated_savgol_window(config.smooth_window_px, nrows)
+    smoothed = savgol_filter(arr[:, col], window, config.smooth_polyorder) * amp
+    baseline = peakutils.baseline(smoothed, config.baseline_poly_deg)
+    signal = smoothed - baseline
+
+    peaks = []
+    for expected_y in prior[col, :]:
+        center = int(round(expected_y))
+        lo = max(0, center - int(search_radius_px))
+        hi = min(nrows, center + int(search_radius_px) + 1)
+        if hi <= lo:
+            peaks.append(np.nan)
+            continue
+        local_peak = lo + int(np.argmax(signal[lo:hi]))
+        peaks.append(local_peak)
+
+    return PatternColumnDetection(column_px=col, row_peaks_px=np.asarray(peaks, dtype=int))
+
+
 def detect_order_peaks(
     image: np.ndarray,
     columns_px: Sequence[int],
@@ -231,6 +292,32 @@ def detect_order_peaks(
     amp = amplification_curve(arr.shape[0], config.amplification_rate)
     return [
         detect_order_peaks_at_column(arr, int(column), config=config, amplification=amp)
+        for column in columns_px
+    ]
+
+
+def detect_order_peaks_near_prior(
+    image: np.ndarray,
+    prior_pattern: np.ndarray,
+    columns_px: Sequence[int],
+    config: PatternExtractionConfig = PatternExtractionConfig(),
+    search_radius_px: int = 20,
+) -> List[PatternColumnDetection]:
+    """Detect one peak per prior trace in each requested detector column."""
+    arr = np.asarray(image, dtype=float)
+    if arr.ndim != 2:
+        raise ValueError(f"image must be 2D, got shape {arr.shape}")
+
+    amp = amplification_curve(arr.shape[0], config.amplification_rate)
+    return [
+        detect_order_peaks_near_prior_at_column(
+            arr,
+            prior_pattern,
+            int(column),
+            config=config,
+            search_radius_px=search_radius_px,
+            amplification=amp,
+        )
         for column in columns_px
     ]
 
@@ -301,6 +388,37 @@ def extract_order_pattern(
         columns = np.asarray(columns_px, dtype=int)
 
     detections = detect_order_peaks(arr, columns, config=config)
+    return fit_order_traces(detections, arr.shape[1], config=config)
+
+
+def extract_order_pattern_near_prior(
+    image: np.ndarray,
+    prior_pattern: np.ndarray,
+    config: PatternExtractionConfig = PatternExtractionConfig(),
+    columns_px: Optional[Sequence[int]] = None,
+    search_radius_px: int = 20,
+) -> PatternExtractionResult:
+    """Fit an order pattern by searching near an existing reference pattern."""
+    arr = np.asarray(image, dtype=float)
+    if arr.ndim != 2:
+        raise ValueError(f"image must be 2D, got shape {arr.shape}")
+
+    if columns_px is None:
+        columns = sample_columns(
+            arr.shape[1],
+            step_size=config.sample_step_px,
+            num_steps=config.sample_count,
+        )
+    else:
+        columns = np.asarray(columns_px, dtype=int)
+
+    detections = detect_order_peaks_near_prior(
+        arr,
+        prior_pattern,
+        columns,
+        config=config,
+        search_radius_px=search_radius_px,
+    )
     return fit_order_traces(detections, arr.shape[1], config=config)
 
 
