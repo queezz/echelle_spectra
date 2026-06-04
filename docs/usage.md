@@ -52,5 +52,6 @@ examples/workflows/black_cmos/
 ├── 01_load_image.ipynb
 ├── 02_pattern_calibration.ipynb
 ├── 03_wavelength_calibration.ipynb
-└── 04_extract_spectrum.ipynb    ← routine daily use
+├── 04_extract_spectrum.ipynb    ← routine daily use
+└── 05_calibration_alignment.ipynb
 ```

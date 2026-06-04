@@ -157,6 +157,7 @@ cython_debug/
 /echelle_spectra/
 /src/echelle_spectra/examples/data
 /src/echelle_spectra/examples/out
+/local/
 *pptx
 
 # Large generated files — regenerate with 02_pattern_calibration.ipynb

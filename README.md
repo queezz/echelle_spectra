@@ -52,7 +52,8 @@ examples/workflows/black_cmos/
 ├── 01_load_image.ipynb             — sanity check: load image, verify dimensions
 ├── 02_pattern_calibration.ipynb    — detect orders, fit pattern  (rare: only if optics moved)
 ├── 03_wavelength_calibration.ipynb — manual line ID, polynomial fit  (rare: new setup only)
-└── 04_extract_spectrum.ipynb       — ROUTINE: load → calibrate → extract → save
+├── 04_extract_spectrum.ipynb       — ROUTINE: load → calibrate → extract → save
+└── 05_calibration_alignment.ipynb  — align existing wavelength table with new Ne lamp data
 ```
 
 For daily use, only `04_extract_spectrum.ipynb` is needed. Historical notebooks are in `examples/obsolete/`.

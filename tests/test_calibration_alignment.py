@@ -14,7 +14,10 @@ from echelle_spectra.tools.calibration_alignment import (
     fit_single_gaussian_centroid,
     load_alignment_settings,
     load_wavelength_table,
+    measure_detector_window_saturation,
+    measure_line_window_stats,
     measure_line_centroids,
+    rank_candidate_lines,
     save_alignment_settings,
     select_candidate_lines,
     write_wavelength_table,
@@ -85,6 +88,55 @@ def test_single_gaussian_rejects_saturated_peak():
     )
     assert not ok
     assert reason == "saturated"
+
+
+def test_line_window_stats_report_saturation_fraction():
+    line = _line(center=40)
+    y = np.zeros(100)
+    y[38:42] = 65535
+    stats = measure_line_window_stats(
+        [y],
+        [line],
+        window_radius_px=10,
+        saturation_level=60000,
+    )[0]
+    assert stats.is_saturated
+    assert stats.saturated_pixels == 4
+    assert stats.saturated_fraction > 0
+    assert not stats.fit_candidate
+    assert stats.reason == "saturated"
+
+
+def test_detector_window_saturation_uses_raw_2d_pixels():
+    line = _line(order=0, center=10)
+    images = np.zeros((2, 20, 30))
+    pattern = np.full((30, 1), 8)
+    images[1, 8, 10] = 65535
+    stats = measure_detector_window_saturation(
+        images,
+        pattern,
+        [line],
+        x_radius_px=2,
+        y_radius_px=1,
+        saturation_level=60000,
+    )[0]
+    assert stats.is_saturated
+    assert stats.saturated_pixels == 1
+    assert stats.finite_pixels == 30
+
+
+def test_rank_candidate_lines_prefers_high_snr_unsaturated_windows():
+    strong = _line(center=40)
+    weak = _line(center=70)
+    x = np.arange(120, dtype=float)
+    y = (
+        2.0
+        + 100.0 * np.exp(-0.5 * ((x - 40) / 1.5) ** 2)
+        + 8.0 * np.exp(-0.5 * ((x - 70) / 1.5) ** 2)
+    )
+    ranked = rank_candidate_lines([y], [weak, strong], window_radius_px=10, min_snr=3.0)
+    assert ranked[0].line == strong
+    assert ranked[0].fit_candidate
 
 
 def test_measure_line_centroids_uses_order_index():

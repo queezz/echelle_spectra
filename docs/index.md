@@ -37,6 +37,7 @@ Notebooks for the Andor CMOS (2560×2160) setup are in `examples/workflows/black
 | `02_pattern_calibration.ipynb` | Detect orders, fit pattern | rare — only if optics moved |
 | `03_wavelength_calibration.ipynb` | Manual line ID, polynomial fit | rare — new setup only |
 | `04_extract_spectrum.ipynb` | Load → calibrate → extract → save | **routine** |
+| `05_calibration_alignment.ipynb` | Align existing wavelength table with new Ne lamp data | session recalibration |
 
 For daily use only `04_extract_spectrum.ipynb` is needed.
 

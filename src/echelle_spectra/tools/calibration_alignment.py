@@ -27,11 +27,16 @@ except ModuleNotFoundError:  # pragma: no cover
 
 __all__ = [
     "CalibrationTableLine",
+    "LineWindowStats",
+    "DetectorWindowSaturation",
     "LineCentroidFit",
     "RigidTransform",
     "AlignmentSettings",
     "load_wavelength_table",
     "select_candidate_lines",
+    "measure_line_window_stats",
+    "measure_detector_window_saturation",
+    "rank_candidate_lines",
     "fit_single_gaussian_centroid",
     "measure_line_centroids",
     "fit_rigid_transform",
@@ -62,6 +67,48 @@ class CalibrationTableLine:
 
 
 @dataclass(frozen=True)
+class LineWindowStats:
+    """Pre-fit diagnostics for a candidate calibration-line window."""
+
+    line: CalibrationTableLine
+    peak_pixel: float
+    peak_value: float
+    baseline: float
+    noise: float
+    prominence: float
+    snr: float
+    finite_pixels: int
+    saturated_pixels: int
+    saturated_fraction: float
+    fit_candidate: bool
+    reason: str = ""
+    saturation_level: Optional[float] = None
+
+    @property
+    def is_saturated(self) -> bool:
+        """Return True when at least one finite pixel reached the saturation threshold."""
+        return self.saturated_pixels > 0
+
+
+@dataclass(frozen=True)
+class DetectorWindowSaturation:
+    """Raw-detector saturation diagnostics near one expected line position."""
+
+    line: CalibrationTableLine
+    peak_value: float
+    finite_pixels: int
+    saturated_pixels: int
+    saturated_fraction: float
+    reason: str = ""
+    saturation_level: Optional[float] = None
+
+    @property
+    def is_saturated(self) -> bool:
+        """Return True when at least one detector pixel reached the saturation threshold."""
+        return self.saturated_pixels > 0
+
+
+@dataclass(frozen=True)
 class LineCentroidFit:
     """Measured centroid and quality diagnostics for one calibration line."""
 
@@ -73,6 +120,7 @@ class LineCentroidFit:
     snr: float
     success: bool
     reason: str = ""
+    diagnostics: Optional[LineWindowStats] = None
 
 
 @dataclass(frozen=True)
@@ -170,6 +218,338 @@ def select_candidate_lines(
     return selected
 
 
+def _line_window_bounds(
+    spectrum_size: int,
+    expected_center_px: float,
+    window_radius_px: int,
+) -> Tuple[int, int]:
+    center_i = int(round(expected_center_px))
+    lo = max(0, center_i - int(window_radius_px))
+    hi = min(spectrum_size, center_i + int(window_radius_px) + 1)
+    return lo, hi
+
+
+def _window_noise(y: np.ndarray) -> Tuple[float, float]:
+    edge_n = max(2, min(8, y.size // 5))
+    edge = np.concatenate([y[:edge_n], y[-edge_n:]])
+    edge_baseline = float(np.median(edge))
+    edge_noise = float(np.std(edge - edge_baseline))
+
+    lower_cut = float(np.percentile(y, 60))
+    lower = y[y <= lower_cut]
+    if lower.size >= 4:
+        baseline = float(np.median(lower))
+        noise = float(1.4826 * np.median(np.abs(lower - baseline)))
+        if noise <= 0:
+            noise = float(np.std(lower - baseline))
+    else:
+        baseline = edge_baseline
+        noise = edge_noise
+
+    if noise <= 0:
+        noise = edge_noise
+    if noise <= 0:
+        noise = float(np.std(y - baseline))
+    if noise <= 0:
+        noise = 1.0
+    return baseline, noise
+
+
+def _measure_one_line_window(
+    spectrum: Sequence[float],
+    line: CalibrationTableLine,
+    window_radius_px: int = 25,
+    saturation_level: Optional[float] = None,
+    min_snr: float = 5.0,
+    max_saturated_fraction: float = 0.0,
+) -> LineWindowStats:
+    y_all = np.asarray(spectrum, dtype=float)
+    if y_all.ndim != 1:
+        raise ValueError("spectrum must be one-dimensional")
+    if y_all.size == 0:
+        return LineWindowStats(
+            line,
+            np.nan,
+            np.nan,
+            np.nan,
+            np.nan,
+            np.nan,
+            0.0,
+            0,
+            0,
+            0.0,
+            False,
+            "empty spectrum",
+            saturation_level,
+        )
+
+    lo, hi = _line_window_bounds(y_all.size, line.center_pixel, window_radius_px)
+    if hi - lo < 7:
+        return LineWindowStats(
+            line,
+            np.nan,
+            np.nan,
+            np.nan,
+            np.nan,
+            np.nan,
+            0.0,
+            0,
+            0,
+            0.0,
+            False,
+            "window too small",
+            saturation_level,
+        )
+
+    x = np.arange(lo, hi, dtype=float)
+    y = y_all[lo:hi]
+    finite = np.isfinite(y)
+    finite_count = int(finite.sum())
+    if finite_count < 7:
+        return LineWindowStats(
+            line,
+            np.nan,
+            np.nan,
+            np.nan,
+            np.nan,
+            np.nan,
+            0.0,
+            finite_count,
+            0,
+            0.0,
+            False,
+            "too few finite pixels",
+            saturation_level,
+        )
+
+    x = x[finite]
+    y = y[finite]
+    peak_idx = int(np.argmax(y))
+    peak_pixel = float(x[peak_idx])
+    peak_value = float(y[peak_idx])
+    baseline, noise = _window_noise(y)
+    prominence = peak_value - baseline
+    snr = prominence / noise if noise > 0 else 0.0
+
+    saturated_pixels = 0
+    saturated_fraction = 0.0
+    if saturation_level is not None:
+        saturated_pixels = int(np.count_nonzero(y >= float(saturation_level)))
+        saturated_fraction = saturated_pixels / float(finite_count)
+
+    if saturated_fraction > max_saturated_fraction:
+        reason = "saturated"
+        fit_candidate = False
+    elif prominence <= 0 or snr < min_snr:
+        reason = "low snr"
+        fit_candidate = False
+    else:
+        reason = ""
+        fit_candidate = True
+
+    return LineWindowStats(
+        line,
+        peak_pixel,
+        peak_value,
+        baseline,
+        noise,
+        prominence,
+        snr,
+        finite_count,
+        saturated_pixels,
+        saturated_fraction,
+        fit_candidate,
+        reason,
+        saturation_level,
+    )
+
+
+def measure_line_window_stats(
+    order_spectra: Sequence[Sequence[float]],
+    candidate_lines: Sequence[CalibrationTableLine],
+    window_radius_px: int = 25,
+    saturation_level: Optional[float] = None,
+    min_snr: float = 5.0,
+    max_saturated_fraction: float = 0.0,
+) -> List[LineWindowStats]:
+    """Measure pre-fit line-window diagnostics for candidate rows."""
+    results: List[LineWindowStats] = []
+    for line in candidate_lines:
+        if line.order_idx < 0 or line.order_idx >= len(order_spectra):
+            results.append(
+                LineWindowStats(
+                    line,
+                    np.nan,
+                    np.nan,
+                    np.nan,
+                    np.nan,
+                    np.nan,
+                    0.0,
+                    0,
+                    0,
+                    0.0,
+                    False,
+                    "order missing",
+                    saturation_level,
+                )
+            )
+            continue
+
+        results.append(
+            _measure_one_line_window(
+                order_spectra[line.order_idx],
+                line,
+                window_radius_px=window_radius_px,
+                saturation_level=saturation_level,
+                min_snr=min_snr,
+                max_saturated_fraction=max_saturated_fraction,
+            )
+        )
+    return results
+
+
+def measure_detector_window_saturation(
+    images: np.ndarray,
+    pattern: np.ndarray,
+    candidate_lines: Sequence[CalibrationTableLine],
+    x_radius_px: int = 18,
+    y_radius_px: int = 4,
+    saturation_level: Optional[float] = None,
+) -> List[DetectorWindowSaturation]:
+    """Measure raw-detector saturation near expected calibration-line windows.
+
+    ``images`` may be either ``(rows, cols)`` or ``(frames, rows, cols)``. The
+    extracted 1D order spectra can exceed detector full scale because they are
+    integrated traces, so saturation should be estimated from these raw image
+    pixels whenever possible.
+    """
+    image_stack = np.asarray(images, dtype=float)
+    if image_stack.ndim == 2:
+        image_stack = image_stack[np.newaxis, :, :]
+    if image_stack.ndim != 3:
+        raise ValueError("images must have shape (rows, cols) or (frames, rows, cols)")
+
+    pattern_arr = np.asarray(pattern, dtype=float)
+    if pattern_arr.ndim != 2:
+        raise ValueError("pattern must have shape (cols, orders)")
+
+    _, n_rows, n_cols = image_stack.shape
+    results: List[DetectorWindowSaturation] = []
+    for line in candidate_lines:
+        if line.order_idx < 0 or line.order_idx >= pattern_arr.shape[1]:
+            results.append(
+                DetectorWindowSaturation(
+                    line,
+                    np.nan,
+                    0,
+                    0,
+                    0.0,
+                    "order missing",
+                    saturation_level,
+                )
+            )
+            continue
+
+        lo_x, hi_x = _line_window_bounds(
+            min(n_cols, pattern_arr.shape[0]),
+            line.center_pixel,
+            x_radius_px,
+        )
+        window_chunks = []
+        for x_i in range(lo_x, hi_x):
+            y_i = int(round(pattern_arr[x_i, line.order_idx]))
+            lo_y = max(0, y_i - int(y_radius_px))
+            hi_y = min(n_rows, y_i + int(y_radius_px) + 1)
+            if hi_y > lo_y:
+                window_chunks.append(image_stack[:, lo_y:hi_y, x_i])
+
+        if not window_chunks:
+            results.append(
+                DetectorWindowSaturation(
+                    line,
+                    np.nan,
+                    0,
+                    0,
+                    0.0,
+                    "empty detector window",
+                    saturation_level,
+                )
+            )
+            continue
+
+        values = np.concatenate([chunk.reshape(-1) for chunk in window_chunks])
+        finite = np.isfinite(values)
+        finite_count = int(finite.sum())
+        if finite_count == 0:
+            results.append(
+                DetectorWindowSaturation(
+                    line,
+                    np.nan,
+                    0,
+                    0,
+                    0.0,
+                    "too few finite pixels",
+                    saturation_level,
+                )
+            )
+            continue
+
+        finite_values = values[finite]
+        peak_value = float(np.nanmax(finite_values))
+        saturated_pixels = 0
+        saturated_fraction = 0.0
+        if saturation_level is not None:
+            saturated_pixels = int(np.count_nonzero(finite_values >= float(saturation_level)))
+            saturated_fraction = saturated_pixels / float(finite_count)
+
+        reason = "saturated" if saturated_pixels else ""
+        results.append(
+            DetectorWindowSaturation(
+                line,
+                peak_value,
+                finite_count,
+                saturated_pixels,
+                saturated_fraction,
+                reason,
+                saturation_level,
+            )
+        )
+    return results
+
+
+def rank_candidate_lines(
+    order_spectra: Sequence[Sequence[float]],
+    candidate_lines: Sequence[CalibrationTableLine],
+    window_radius_px: int = 25,
+    saturation_level: Optional[float] = None,
+    min_snr: float = 5.0,
+    max_saturated_fraction: float = 0.0,
+) -> List[LineWindowStats]:
+    """Return candidate rows sorted by pre-fit quality diagnostics.
+
+    Fit candidates are listed first, then saturated or low-SNR windows. Within
+    each group, the strongest estimated SNR and prominence are listed first.
+    """
+    stats = measure_line_window_stats(
+        order_spectra,
+        candidate_lines,
+        window_radius_px=window_radius_px,
+        saturation_level=saturation_level,
+        min_snr=min_snr,
+        max_saturated_fraction=max_saturated_fraction,
+    )
+    return sorted(
+        stats,
+        key=lambda item: (
+            item.fit_candidate,
+            not item.is_saturated,
+            np.nan_to_num(item.snr, nan=-np.inf),
+            np.nan_to_num(item.prominence, nan=-np.inf),
+        ),
+        reverse=True,
+    )
+
+
 def _gaussian_with_linear_baseline(
     x: np.ndarray,
     amplitude: float,
@@ -201,9 +581,7 @@ def fit_single_gaussian_centroid(
     if y_all.size == 0:
         return False, np.nan, np.nan, np.nan, np.nan, 0.0, "empty spectrum"
 
-    center_i = int(round(expected_center_px))
-    lo = max(0, center_i - int(window_radius_px))
-    hi = min(y_all.size, center_i + int(window_radius_px) + 1)
+    lo, hi = _line_window_bounds(y_all.size, expected_center_px, window_radius_px)
     if hi - lo < 7:
         return False, np.nan, np.nan, np.nan, np.nan, 0.0, "window too small"
 
@@ -218,14 +596,7 @@ def fit_single_gaussian_centroid(
     if saturation_level is not None and float(np.nanmax(y)) >= saturation_level:
         return False, float(x[np.nanargmax(y)]), np.nan, np.nan, np.nan, 0.0, "saturated"
 
-    edge_n = max(2, min(8, y.size // 5))
-    edge = np.concatenate([y[:edge_n], y[-edge_n:]])
-    baseline0 = float(np.median(edge))
-    noise = float(np.std(edge - baseline0))
-    if noise <= 0:
-        noise = float(np.std(y - np.median(y)))
-    if noise <= 0:
-        noise = 1.0
+    baseline0, noise = _window_noise(y)
 
     peak_idx = int(np.argmax(y))
     amp0 = float(y[peak_idx] - baseline0)
@@ -268,11 +639,28 @@ def measure_line_centroids(
     **fit_kwargs,
 ) -> List[LineCentroidFit]:
     """Fit centroids for candidate rows against extracted order spectra."""
+    diagnostics = measure_line_window_stats(
+        order_spectra,
+        candidate_lines,
+        window_radius_px=int(fit_kwargs.get("window_radius_px", 25)),
+        saturation_level=fit_kwargs.get("saturation_level"),
+        min_snr=float(fit_kwargs.get("min_snr", 5.0)),
+    )
     results: List[LineCentroidFit] = []
-    for line in candidate_lines:
+    for line, stats in zip(candidate_lines, diagnostics):
         if line.order_idx < 0 or line.order_idx >= len(order_spectra):
             results.append(
-                LineCentroidFit(line, np.nan, np.nan, np.nan, np.nan, 0.0, False, "order missing")
+                LineCentroidFit(
+                    line,
+                    np.nan,
+                    np.nan,
+                    np.nan,
+                    np.nan,
+                    0.0,
+                    False,
+                    "order missing",
+                    stats,
+                )
             )
             continue
 
@@ -281,7 +669,7 @@ def measure_line_centroids(
             expected_center_px=line.center_pixel,
             **fit_kwargs,
         )
-        results.append(LineCentroidFit(line, center, sigma, amp, baseline, snr, ok, reason))
+        results.append(LineCentroidFit(line, center, sigma, amp, baseline, snr, ok, reason, stats))
     return results
 
 
