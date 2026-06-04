@@ -79,6 +79,7 @@ nav:
       - Band data: band-data.md
   - Usage:
       - Basic usage: usage.md
+      - Calibration alignment: calibration-alignment.md
       - Exporting to SpectroCube: spectrocube-export.md
   - API:
       - SpectroCube export: spectrocube-export-api.md

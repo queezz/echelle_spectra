@@ -24,6 +24,11 @@ The general processing pipeline for an echelle spectrum is:
 5. **Inspect or analyze spectral windows**  
    Use the defined wavelength windows (see [Band data](band-data.md)) to locate and integrate lines of interest such as H-alpha, He-587, CII-515, etc.
 
+For small detector or optics shifts, use the headless
+[Calibration alignment](calibration-alignment.md) workflow to fit a rigid correction
+and write a separate adjusted wavelength table. Do not overwrite the historical
+calibration files.
+
 ---
 
 ## GUI
