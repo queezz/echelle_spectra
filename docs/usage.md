@@ -29,6 +29,11 @@ For small detector or optics shifts, use the headless
 and write a separate adjusted wavelength table. Do not overwrite the historical
 calibration files.
 
+Before exporting a dataset, run the
+[Wavelength line validation](line-validation.md) gate on real plasma lines. Start
+with Balmer lines, then use Fulcher-alpha line positions as supporting checks when
+the features are visible and not dominated by blends.
+
 ---
 
 ## GUI

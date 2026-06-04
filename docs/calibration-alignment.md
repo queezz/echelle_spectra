@@ -210,7 +210,9 @@ fits, but the CLI is the preferred reproducible workflow once settings are known
 Recommended checks:
 
 1. Compare lamp-line residuals before and after correction.
-2. Check LHD Balmer peaks (`H-alpha`, `H-beta`, `H-gamma`) as rough validation.
-3. Check identified Fulcher lines for a stricter wavelength residual estimate.
+2. Run the [Wavelength line validation](line-validation.md) gate on LHD Balmer
+   peaks (`H-alpha`, `H-beta`, `H-gamma`).
+3. Check identified Fulcher lines as supporting evidence when blends are
+   understood.
 4. Report systematic offsets in nm, especially near the previously suspected
    approximately 0.1 nm error.

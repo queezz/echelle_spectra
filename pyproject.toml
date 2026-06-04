@@ -55,6 +55,7 @@ Homepage = "https://github.com/queezz/echelle_spectra"
 echelle_spectra = "echelle_spectra.echelle_spectra_gui:start"
 echelle-pattern = "echelle_spectra.pattern_cli:main"
 echelle-align = "echelle_spectra.alignment_cli:main"
+echelle-validate-lines = "echelle_spectra.line_validation_cli:main"
 echelle-spectrocube = "echelle_spectra.spectrocube_cli:main"
 
 [project.optional-dependencies]
@@ -107,6 +108,7 @@ where = ["src"]
   "resources/*.py",
   "resources/graphics/*",
   "resources/calibration_files/*",
+  "resources/calibration_files/alignments/*",
   "resources/test_data/*",
 ]
 

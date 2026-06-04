@@ -81,6 +81,7 @@ nav:
       - Basic usage: usage.md
       - Pattern extraction: pattern-extraction.md
       - Calibration alignment: calibration-alignment.md
+      - Wavelength line validation: line-validation.md
       - Exporting to SpectroCube: spectrocube-export.md
   - API:
       - Pattern extraction: pattern-extraction-api.md
