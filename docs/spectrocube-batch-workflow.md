@@ -28,6 +28,12 @@ The current config crops the unstable low-wavelength edge below `403.0 nm`. This
 crop is a measured property of the camera/spectrometer/calibration setup, so it
 lives in the config and should not be remeasured for every shot.
 
+Some absolute-calibration columns can be non-finite before export, especially at
+weak or unstable wavelength edges. `Spectrum` construction allows those known
+columns without printing `0 * inf` runtime warnings, and SpectroCube export drops
+non-finite wavelength/intensity columns by default. The dropped count is recorded
+in metadata. Unexpected errors or failed exports should still be investigated.
+
 ## Calibration config
 
 The reusable calibration/export config is:
@@ -89,6 +95,9 @@ machine-specific absolute paths. For a real lab dataset, either copy the plan to
 an ignored local path and edit the dataset locations there, or keep the packaged
 plan and override the input/output paths from the CLI.
 
+Do not commit personal absolute dataset paths into `src/echelle_spectra/resources`.
+Keep those in `local/` or pass them at runtime.
+
 Template-only run from the repository root:
 
 ```powershell
@@ -138,6 +147,8 @@ After generation, open a representative cube in SpectroView and check:
 - the viewer reports `intensity_units: W/m2/nm/sr`
 - the wavelength range starts near `403 nm`
 - the low-wavelength edge no longer dominates the plot
+- metadata includes dropped-column counts when non-finite/cropped columns were
+  removed
 
 For the first validated product, `spectroview --info` reported:
 

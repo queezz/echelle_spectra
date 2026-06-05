@@ -80,6 +80,14 @@ The following fields from `Spectrum` are automatically written to SpectroCube at
 | `dropped_nonfinite_wavelength_columns` | count of invalid wavelength columns dropped before export |
 | `calibration_source` | `"integrating sphere (echelle_spectra)"` (absolute modes only) |
 
+!!! note "Non-finite absolute-calibration columns"
+    Absolute calibration can produce non-finite columns where the sphere response
+    is invalid or the low-wavelength edge is outside the useful calibration
+    region. These columns are tolerated during `Spectrum` construction and are
+    dropped during SpectroCube export by default. Keep
+    `drop_nonfinite_columns = true` for routine calibrated exports unless you are
+    deliberately debugging the calibration arrays.
+
 Additional arbitrary metadata can be passed as keyword arguments:
 
 ```python
