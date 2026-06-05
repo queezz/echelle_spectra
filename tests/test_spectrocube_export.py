@@ -54,6 +54,11 @@ def _make_synthetic_spectrum(
     sp.fpth = fpth
     sp.shotnumber = "042"
     sp.absolute = {}  # present but empty for this synthetic case
+    sp.calibration_folder = "/cal"
+    sp.calibration_files = {
+        "orders": "pattern_CMOS_20250926.txt",
+        "wavelength": "alignments/Th_wavelength_CMOS_20240305_aligned_to_20250926.txt",
+    }
 
     return sp
 
@@ -166,6 +171,16 @@ class TestToSpectrocube:
         assert sc.ds.attrs["notes"] == "test run"
         assert sc.ds.attrs["grating"] == "316 l/mm"
 
+    def test_calibration_file_metadata_preserved(self):
+        sp = _make_synthetic_spectrum()
+        sc = to_spectrocube(sp)
+        assert sc.ds.attrs["calibration_folder"] == "/cal"
+        assert sc.ds.attrs["calibration_order_pattern_file"] == "pattern_CMOS_20250926.txt"
+        assert (
+            sc.ds.attrs["wavelength_calibration_file"]
+            == "alignments/Th_wavelength_CMOS_20240305_aligned_to_20250926.txt"
+        )
+
     def test_invalid_units_raises(self):
         sp = _make_synthetic_spectrum()
         with pytest.raises(ValueError, match="Unknown units"):
@@ -182,6 +197,36 @@ class TestToSpectrocube:
         sc = to_spectrocube(sp, units="wm")
         report = sc.validate()
         assert report.ok, str(report)
+
+    def test_nonfinite_intensity_column_is_dropped(self):
+        sp = _make_synthetic_spectrum(n_frames=2, n_wavelengths=5)
+        sp.wmsr[:, 2] = np.inf
+        sc = to_spectrocube(sp, units="wmsr", squeeze_single_frame=False)
+        assert sc.intensity.shape == (2, 4)
+        assert np.all(np.isfinite(sc.intensity))
+        assert sc.ds.attrs["dropped_nonfinite_wavelength_columns"] == 1
+        assert 550.0 not in sc.wavelength
+
+    def test_wavelength_min_crop_updates_metadata(self):
+        sp = _make_synthetic_spectrum(n_frames=2, n_wavelengths=5)
+        sc = to_spectrocube(
+            sp,
+            units="counts",
+            squeeze_single_frame=False,
+            wavelength_min_nm=475.0,
+        )
+        np.testing.assert_allclose(sc.wavelength, [475.0, 550.0, 625.0, 700.0])
+        assert sc.intensity.shape == (2, 4)
+        assert sc.ds.attrs["wavelength_crop_min_nm"] == pytest.approx(475.0)
+        assert sc.ds.attrs["original_wavelength_min_nm"] == pytest.approx(400.0)
+        assert sc.ds.attrs["original_wavelength_max_nm"] == pytest.approx(700.0)
+        assert sc.ds.attrs["original_wavelength_points"] == 5
+        assert sc.ds.attrs["dropped_wavelength_crop_columns"] == 1
+
+    def test_wavelength_crop_rejects_empty_result(self):
+        sp = _make_synthetic_spectrum(n_frames=2, n_wavelengths=5)
+        with pytest.raises(ValueError, match="removed all columns"):
+            to_spectrocube(sp, wavelength_min_nm=900.0)
 
     def test_wavelength_medium_stored(self):
         sp = _make_synthetic_spectrum()

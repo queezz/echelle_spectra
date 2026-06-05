@@ -13,7 +13,8 @@ from unittest.mock import MagicMock, patch
 import numpy as np
 import pytest
 
-from echelle_spectra.spectrocube_cli import _build_parser, _output_path_for, main
+from echelle_spectra.spectrocube_cli import _build_parser, _output_path_for, _settings_from_args, main
+from echelle_spectra.tools.loader import DEFAULT_CAMERA_FILENAMES, _normalize_calibration_file_override
 
 # ---------------------------------------------------------------------------
 # Parser tests — pure argparse, no side effects
@@ -24,14 +25,23 @@ class TestParser:
     def test_single_file_defaults(self):
         args = _build_parser().parse_args(["shot.sif"])
         assert args.input == "shot.sif"
-        assert args.units == "counts"
-        assert args.camera == "CMOS"
+        assert args.units is None
+        assert args.camera is None
         assert args.output is None
         assert args.overwrite is False
         assert args.dry_run is False
         assert args.verbose is False
-        assert args.instrument_id == "echelle"
+        assert args.instrument_id is None
+        assert args.wavelength_medium is None
         assert args.pattern == "*.SIF"
+
+    def test_settings_defaults(self):
+        args = _build_parser().parse_args(["shot.sif"])
+        _, settings = _settings_from_args(args)
+        assert settings["units"] == "counts"
+        assert settings["camera"] == "CMOS"
+        assert settings["instrument_id"] == "echelle"
+        assert settings["wavelength_medium"] == "air"
 
     @pytest.mark.parametrize("units", ["counts", "wm", "wmsr", "phmsr"])
     def test_units_choices(self, units):
@@ -74,6 +84,14 @@ class TestParser:
         args = _build_parser().parse_args(["shot.sif", "--instrument-id", "BlackEchelle"])
         assert args.instrument_id == "BlackEchelle"
 
+    def test_wavelength_medium(self):
+        args = _build_parser().parse_args(["shot.sif", "--wavelength-medium", "vacuum"])
+        assert args.wavelength_medium == "vacuum"
+
+    def test_invalid_wavelength_medium_exits(self):
+        with pytest.raises(SystemExit):
+            _build_parser().parse_args(["shot.sif", "--wavelength-medium", "water"])
+
     def test_custom_pattern(self):
         args = _build_parser().parse_args(["/data/", "--pattern", "*.sif"])
         assert args.pattern == "*.sif"
@@ -81,6 +99,37 @@ class TestParser:
     def test_calibration_dir(self):
         args = _build_parser().parse_args(["shot.sif", "--calibration-dir", "/cal"])
         assert args.calibration_dir == "/cal"
+
+    def test_calibration_resource_overrides(self):
+        args = _build_parser().parse_args(
+            [
+                "shot.sif",
+                "--order-pattern",
+                "pattern_CMOS_20250926.txt",
+                "--wavelength",
+                "alignments/table.txt",
+                "--sphere",
+                "sphere.sif",
+                "--sphere-background",
+                "sphere-bg.sif",
+                "--integral",
+                "integrating_sphere.txt",
+            ]
+        )
+        assert args.order_pattern == "pattern_CMOS_20250926.txt"
+        assert args.wavelength == "alignments/table.txt"
+        assert args.sphere == "sphere.sif"
+        assert args.sphere_background == "sphere-bg.sif"
+        assert args.integral == "integrating_sphere.txt"
+
+    def test_config_path(self):
+        args = _build_parser().parse_args(["shot.sif", "--config", "config.toml"])
+        assert args.config == "config.toml"
+
+    def test_plan_path_without_input(self):
+        args = _build_parser().parse_args(["--plan", "plan.toml"])
+        assert args.input is None
+        assert args.plan == "plan.toml"
 
     def test_frame_flag_accepted(self):
         args = _build_parser().parse_args(["shot.sif", "--frame", "3"])
@@ -318,3 +367,146 @@ class TestExportBackendCalled:
 
         call_kwargs = mock_export.call_args.kwargs
         assert call_kwargs["instrument_id"] == "BlackEchelle"
+
+    def test_wavelength_medium_forwarded(self, tmp_path, mock_spectrocube):
+        sif = tmp_path / "shot.SIF"
+        sif.touch()
+
+        with patch(
+            "echelle_spectra.spectrocube_cli._export_one",
+            return_value=True,
+        ) as mock_export:
+            with pytest.raises(SystemExit):
+                main([str(sif), "--wavelength-medium", "vacuum"])
+
+        call_kwargs = mock_export.call_args.kwargs
+        assert call_kwargs["wavelength_medium"] == "vacuum"
+
+    def test_calibration_file_overrides_forwarded(self, tmp_path, mock_spectrocube):
+        sif = tmp_path / "shot.SIF"
+        sif.touch()
+
+        with patch(
+            "echelle_spectra.spectrocube_cli._export_one",
+            return_value=True,
+        ) as mock_export:
+            with pytest.raises(SystemExit):
+                main(
+                    [
+                        str(sif),
+                        "--order-pattern",
+                        "pattern_CMOS_20250926.txt",
+                        "--wavelength",
+                        "alignments/table.txt",
+                        "--sphere",
+                        "sphere.sif",
+                        "--sphere-background",
+                        "sphere-bg.sif",
+                        "--integral",
+                        "integrating_sphere.txt",
+                    ]
+                )
+
+        call_kwargs = mock_export.call_args.kwargs
+        assert call_kwargs["calibration_files"] == {
+            "orders": "pattern_CMOS_20250926.txt",
+            "wavelength": "alignments/table.txt",
+            "sphr": "sphere.sif",
+            "bkgr": "sphere-bg.sif",
+            "integral": "integrating_sphere.txt",
+        }
+
+    def test_config_values_forwarded(self, tmp_path, mock_spectrocube):
+        cfg = tmp_path / "config.toml"
+        cfg.write_text(
+            """
+[calibration]
+camera = "CMOS"
+calibration_dir = "cal"
+order_pattern = "pattern.txt"
+wavelength = "wave.txt"
+sphere = "sphere.sif"
+sphere_background = "sphere-bg.sif"
+integral = "integral.txt"
+instrument_id = "BlackEchelle"
+wavelength_medium = "air"
+
+[export]
+units = "wmsr"
+wavelength_min_nm = 403.0
+output_suffix = "_wmsr"
+calibration_source = "sphere"
+""".strip()
+        )
+        sif = tmp_path / "shot.SIF"
+        sif.touch()
+
+        with patch(
+            "echelle_spectra.spectrocube_cli._export_one",
+            return_value=True,
+        ) as mock_export:
+            with pytest.raises(SystemExit):
+                main([str(sif), "--config", str(cfg)])
+
+        call_kwargs = mock_export.call_args.kwargs
+        assert call_kwargs["units"] == "wmsr"
+        assert call_kwargs["instrument_id"] == "BlackEchelle"
+        assert call_kwargs["wavelength_min_nm"] == pytest.approx(403.0)
+        assert call_kwargs["calibration_source"] == "sphere"
+        assert call_kwargs["calibration_files"]["sphr"] == "sphere.sif"
+
+    def test_plan_supplies_input_output_and_config(self, tmp_path, mock_spectrocube):
+        cfg = tmp_path / "config.toml"
+        cfg.write_text(
+            """
+[export]
+units = "wm"
+output_suffix = "_wm"
+""".strip()
+        )
+        sif = tmp_path / "shot.SIF"
+        sif.touch()
+        out = tmp_path / "planned.nc"
+        plan = tmp_path / "plan.toml"
+        plan.write_text(
+            f"""
+[plan]
+config = "{cfg.name}"
+input = "{sif.as_posix()}"
+output = "{out.as_posix()}"
+overwrite = true
+""".strip()
+        )
+
+        with patch(
+            "echelle_spectra.spectrocube_cli._export_one",
+            return_value=True,
+        ) as mock_export:
+            with pytest.raises(SystemExit):
+                main(["--plan", str(plan)])
+
+        call_args = mock_export.call_args.args
+        call_kwargs = mock_export.call_args.kwargs
+        assert call_args[0] == sif
+        assert call_args[1] == out
+        assert call_kwargs["units"] == "wm"
+        assert call_kwargs["overwrite"] is True
+
+
+class TestCalibrationDefaults:
+    def test_cmos_defaults_to_accepted_20250926_alignment(self):
+        files = DEFAULT_CAMERA_FILENAMES["CMOS"]
+        assert files["orders"] == "pattern_CMOS_20250926.txt"
+        assert (
+            files["wavelength"]
+            == "alignments/Th_wavelength_CMOS_20240305_aligned_to_20250926.txt"
+        )
+
+    def test_existing_relative_override_resolves_to_absolute_path(self, tmp_path, monkeypatch):
+        f = tmp_path / "table.txt"
+        f.write_text("x")
+        monkeypatch.chdir(tmp_path)
+        assert Path(_normalize_calibration_file_override("table.txt")).is_absolute()
+
+    def test_missing_relative_override_stays_relative_to_calibration_dir(self):
+        assert _normalize_calibration_file_override("sphere.sif") == "sphere.sif"

@@ -65,8 +65,8 @@ class EchelleSpectraGUI(QMainWindow, window_layout.Ui_MainWindow):
         }
 
         files_cmos = {
-            "orders": "pattern_CMOS_20240305.txt",
-            "wavelength": "Th_wavelength_CMOS_20240305.txt",
+            "orders": "pattern_CMOS_20250926.txt",
+            "wavelength": "alignments/Th_wavelength_CMOS_20240305_aligned_to_20250926.txt",
             "sphr": "sphere_cmos_20240305.sif",
             "bkgr": "sphere_cmos_20240305_bkg.sif",
             "integral": "integrating_sphere.txt",

@@ -165,6 +165,46 @@ def _normalize_wavelength_axis(
     )
 
 
+def _drop_nonfinite_columns(
+    wavelength: np.ndarray,
+    intensity_2d: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray, int]:
+    """Remove wavelength columns that cannot be plotted or serialized cleanly."""
+    valid = np.isfinite(wavelength) & np.all(np.isfinite(intensity_2d), axis=0)
+    dropped = int(valid.size - np.count_nonzero(valid))
+    if dropped == 0:
+        return wavelength, intensity_2d, 0
+    return wavelength[valid], intensity_2d[:, valid], dropped
+
+
+def _crop_wavelength_axis(
+    wavelength: np.ndarray,
+    intensity_2d: np.ndarray,
+    *,
+    min_nm: float | None = None,
+    max_nm: float | None = None,
+) -> tuple[np.ndarray, np.ndarray, int]:
+    """Crop wavelength columns to the requested inclusive wavelength range."""
+    if min_nm is None and max_nm is None:
+        return wavelength, intensity_2d, 0
+
+    keep = np.ones(wavelength.shape, dtype=bool)
+    if min_nm is not None:
+        keep &= wavelength >= float(min_nm)
+    if max_nm is not None:
+        keep &= wavelength <= float(max_nm)
+    dropped = int(keep.size - np.count_nonzero(keep))
+    if not np.any(keep):
+        raise ValueError(
+            "Wavelength crop removed all columns. "
+            f"Requested min_nm={min_nm!r}, max_nm={max_nm!r}; "
+            f"available range is {wavelength[0]:.6g}–{wavelength[-1]:.6g} nm."
+        )
+    if dropped == 0:
+        return wavelength, intensity_2d, 0
+    return wavelength[keep], intensity_2d[:, keep], dropped
+
+
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
@@ -178,6 +218,9 @@ def to_spectrocube(
     wavelength_medium: str = "air",
     calibration_source: str | None = "integrating sphere (echelle_spectra)",
     squeeze_single_frame: bool = True,
+    drop_nonfinite_columns: bool = True,
+    wavelength_min_nm: float | None = None,
+    wavelength_max_nm: float | None = None,
     **extra_attrs,
 ) -> "SpectroCube":
     """Convert a calibrated :class:`~echelle_spectra.tools.echelle.Spectrum`
@@ -210,6 +253,15 @@ def to_spectrocube(
         When *True* and the spectrum contains exactly one frame, store
         intensity as a 1-D ``(wavelength,)`` array.  When *False*, always
         keep the 2-D ``(frame, wavelength)`` shape.  Default: ``True``.
+    drop_nonfinite_columns : bool
+        Drop wavelength columns where the wavelength or any frame intensity is
+        non-finite.  This is useful for absolute calibration columns where a
+        zero sphere response would otherwise create infinities.  Dropped column
+        counts are recorded in metadata.  Default: ``True``.
+    wavelength_min_nm, wavelength_max_nm : float, optional
+        Inclusive wavelength crop bounds in nm.  When supplied, the exported
+        wavelength axis and intensity are cropped and the original range is
+        recorded in metadata.
     **extra_attrs
         Any additional key/value pairs are forwarded to
         :meth:`~spectrocube.SpectroCube.from_arrays` as global NetCDF
@@ -263,6 +315,22 @@ def to_spectrocube(
         intensity_2d = intensity_2d[np.newaxis, :]
 
     wavelength, intensity_2d = _normalize_wavelength_axis(wavelength, intensity_2d)
+    original_wavelength_min_nm = float(wavelength[0])
+    original_wavelength_max_nm = float(wavelength[-1])
+    original_wavelength_points = int(wavelength.size)
+
+    dropped_nonfinite_columns = 0
+    if drop_nonfinite_columns:
+        wavelength, intensity_2d, dropped_nonfinite_columns = _drop_nonfinite_columns(
+            wavelength,
+            intensity_2d,
+        )
+    wavelength, intensity_2d, dropped_wavelength_crop_columns = _crop_wavelength_axis(
+        wavelength,
+        intensity_2d,
+        min_nm=wavelength_min_nm,
+        max_nm=wavelength_max_nm,
+    )
 
     n_frames = intensity_2d.shape[0]
     if squeeze_single_frame and n_frames == 1:
@@ -306,6 +374,29 @@ def to_spectrocube(
     if bg_frames:
         attrs["background_frames"] = str(bg_frames)
 
+    if dropped_nonfinite_columns:
+        attrs["dropped_nonfinite_wavelength_columns"] = dropped_nonfinite_columns
+    if dropped_wavelength_crop_columns:
+        if wavelength_min_nm is not None:
+            attrs["wavelength_crop_min_nm"] = float(wavelength_min_nm)
+        if wavelength_max_nm is not None:
+            attrs["wavelength_crop_max_nm"] = float(wavelength_max_nm)
+        attrs["original_wavelength_min_nm"] = original_wavelength_min_nm
+        attrs["original_wavelength_max_nm"] = original_wavelength_max_nm
+        attrs["original_wavelength_points"] = original_wavelength_points
+        attrs["dropped_wavelength_crop_columns"] = dropped_wavelength_crop_columns
+
+    calibration_folder = getattr(spectrum, "calibration_folder", None)
+    if calibration_folder is not None:
+        attrs["calibration_folder"] = str(calibration_folder)
+
+    calibration_files = getattr(spectrum, "calibration_files", {})
+    if calibration_files:
+        if calibration_files.get("orders"):
+            attrs["calibration_order_pattern_file"] = str(calibration_files["orders"])
+        if calibration_files.get("wavelength"):
+            attrs["wavelength_calibration_file"] = str(calibration_files["wavelength"])
+
     if unit_meta["calibration_type"] == "absolute" and calibration_source is not None:
         attrs["calibration_source"] = calibration_source
 
@@ -333,6 +424,9 @@ def export_spectrocube(
     wavelength_medium: str = "air",
     calibration_source: str | None = "integrating sphere (echelle_spectra)",
     squeeze_single_frame: bool = True,
+    drop_nonfinite_columns: bool = True,
+    wavelength_min_nm: float | None = None,
+    wavelength_max_nm: float | None = None,
     validate: bool = True,
     **extra_attrs,
 ) -> "SpectroCube":
@@ -348,7 +442,8 @@ def export_spectrocube(
     path : str
         Output file path.  Should end in ``.nc``.
     units, instrument_id, wavelength_medium, calibration_source,
-    squeeze_single_frame, **extra_attrs
+    squeeze_single_frame, drop_nonfinite_columns, wavelength_min_nm,
+    wavelength_max_nm, **extra_attrs
         Forwarded to :func:`to_spectrocube` — see its docstring for details.
     validate : bool
         Passed to :meth:`~spectrocube.SpectroCube.save`.  Default: ``True``.
@@ -372,6 +467,9 @@ def export_spectrocube(
         wavelength_medium=wavelength_medium,
         calibration_source=calibration_source,
         squeeze_single_frame=squeeze_single_frame,
+        drop_nonfinite_columns=drop_nonfinite_columns,
+        wavelength_min_nm=wavelength_min_nm,
+        wavelength_max_nm=wavelength_max_nm,
         **extra_attrs,
     )
     sc.save(path, validate=validate)

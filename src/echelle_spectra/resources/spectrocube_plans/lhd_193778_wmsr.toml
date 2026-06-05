@@ -1,0 +1,6 @@
+[plan]
+config = "../calibration_files/export_configs/lhd_cmos_20250926.toml"
+input = "local/193778_Echelle.SIF"
+output = "local/193778_Echelle_spectrocube_wmsr_403nm.nc"
+overwrite = true
+verbose = true

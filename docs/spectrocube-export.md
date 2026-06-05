@@ -74,6 +74,10 @@ The following fields from `Spectrum` are automatically written to SpectroCube at
 | `source_file` | `spectrum.fpth` |
 | `shot_number` | `spectrum.shotnumber` |
 | `background_frames` | `spectrum.info["BackgroundFrames"]` (when non-empty) |
+| `calibration_folder` | calibration resource folder used to load the spectrum |
+| `calibration_order_pattern_file` | order-pattern file used for extraction |
+| `wavelength_calibration_file` | wavelength lookup table used for extraction |
+| `dropped_nonfinite_wavelength_columns` | count of invalid wavelength columns dropped before export |
 | `calibration_source` | `"integrating sphere (echelle_spectra)"` (absolute modes only) |
 
 Additional arbitrary metadata can be passed as keyword arguments:
@@ -125,6 +129,12 @@ computes it externally as `trigger_delay + frame * CycleTime`.  Use the
 The viewer has a **Save SpectroCube** button in the Controls dock (below
 the existing "Save spec" / "Save lines" checkboxes).
 
+For CMOS/LHD data, the GUI defaults to the accepted 20250926 calibration context:
+
+- `pattern_CMOS_20250926.txt`
+- `alignments/Th_wavelength_CMOS_20240305_aligned_to_20250926.txt`
+- `wavelength_medium = "air"` in exported SpectroCube metadata
+
 **Workflow:**
 
 1. Open a SIF file with the **Manual SIF load** button or by entering a shot
@@ -154,7 +164,53 @@ After installation the `echelle-spectrocube` command is available on the PATH.
 ### Single-file export
 
 ```bash
-echelle-spectrocube shot_193777_Echelle.SIF --units wm -o output/shot_193777.nc
+echelle-spectrocube shot_193777_Echelle.SIF --units wm --wavelength-medium air -o output/shot_193777.nc
+```
+
+### Config-driven export
+
+Stable camera/spectrometer/calibration choices can be stored in a calibration
+config TOML, including wavelength crop bounds measured once for that calibration
+context:
+
+```bash
+echelle-spectrocube local/193778_Echelle.SIF \
+  --config src/echelle_spectra/resources/calibration_files/export_configs/lhd_cmos_20250926.toml
+```
+
+The 20250926 CMOS/LHD config crops the unstable low-wavelength edge below
+`403.0 nm`, exports `wmsr` (`W/m2/nm/sr`), and records the original wavelength
+range plus dropped-column counts in SpectroCube metadata.
+
+### Plan-driven export
+
+For repeatable single-file or batch generation, use a plan TOML that points at
+the calibration config and supplies input/output paths:
+
+```bash
+echelle-spectrocube --plan src/echelle_spectra/resources/spectrocube_plans/lhd_193778_wmsr.toml
+```
+
+The current plan writes:
+
+```text
+local/193778_Echelle_spectrocube_wmsr_403nm.nc
+```
+
+For the 20250926 CMOS/LHD calibration pass, use the local sphere/background
+pair and export absolute spectral radiance:
+
+```powershell
+echelle-spectrocube local\193778_Echelle.SIF `
+  --units wmsr `
+  --wavelength-medium air `
+  --calibration-dir local\20250926_calib `
+  --order-pattern pattern_CMOS_20250926.txt `
+  --wavelength C:\path\to\calibration_files\alignments\Th_wavelength_CMOS_20240305_aligned_to_20250926.txt `
+  --sphere sphere-0.1s-x3.sif `
+  --sphere-background sphere-0.1s-x3-bg.sif `
+  --integral C:\path\to\calibration_files\integrating_sphere.txt `
+  -o local\193778_Echelle_spectrocube_wmsr.nc
 ```
 
 ### Batch folder export
@@ -175,11 +231,24 @@ echelle-spectrocube /data/shots/ --dry-run --verbose
 | Option | Default | Description |
 |--------|---------|-------------|
 | `INPUT` | *(required)* | `.sif` file or folder |
+| `--config` | *(none)* | Calibration/export config TOML |
+| `--plan` | *(none)* | SpectroCube generation plan TOML |
 | `--units` | `counts` | `counts`, `wm`, `wmsr`, or `phmsr` |
 | `-o / --output` | same dir as INPUT | Output file (single) or directory (batch) |
 | `--camera` | `CMOS` | Which bundled calibration to use: `CMOS` or `CCD` |
 | `--calibration-dir` | bundled resources | Path to calibration files folder |
+| `--order-pattern` | selected camera default | Override order-pattern file |
+| `--wavelength` | selected camera default | Override wavelength lookup table |
+| `--sphere` | selected camera default | Override integrating-sphere SIF |
+| `--sphere-background` | selected camera default | Override integrating-sphere background SIF |
+| `--integral` | selected camera default | Override integrating-sphere spectral table |
 | `--instrument-id` | `echelle` | Stored in SpectroCube metadata |
+| `--wavelength-medium` | `air` | Wavelength convention stored in SpectroCube metadata: `air` or `vacuum` |
+| `--wavelength-min-nm` | config/default | Inclusive low-wavelength crop bound |
+| `--wavelength-max-nm` | config/default | Inclusive high-wavelength crop bound |
+| `--calibration-source` | config/default | Absolute calibration source metadata |
+| `--no-drop-nonfinite-columns` | drop enabled | Keep non-finite wavelength columns instead of dropping them |
+| `--output-suffix` | `_spectrocube` | Batch output suffix before `.nc` |
 | `--pattern` | `*.SIF` | Glob for batch discovery (also tries `*.sif` as fallback) |
 | `--overwrite` | *(skip existing)* | Replace existing output files |
 | `--dry-run` | — | Print plan without writing |
@@ -210,6 +279,10 @@ For each input file `shot_042_Echelle.SIF` the output is named
 
     The same `--camera` flag selects either the CCD or CMOS calibration file
     set (matching the radio button in the GUI).
+
+    The default CMOS file set is the accepted 20250926/LHD context:
+    `pattern_CMOS_20250926.txt` plus
+    `alignments/Th_wavelength_CMOS_20240305_aligned_to_20250926.txt`.
 
 ---
 

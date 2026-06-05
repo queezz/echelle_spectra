@@ -779,6 +779,8 @@ class Spectrum:
 
         self.absolute = image.clbr.absolute
         self.direction = image.clbr.direction
+        self.calibration_folder = getattr(image.clbr, "folder", None)
+        self.calibration_files = dict(getattr(image.clbr, "filenames", {}))
         image = None
 
         # Flip wavelength, it is from high to low by default for black Echelle

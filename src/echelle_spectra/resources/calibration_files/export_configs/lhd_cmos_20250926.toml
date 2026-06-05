@@ -1,0 +1,22 @@
+[metadata]
+config_id = "lhd_cmos_20250926"
+crop_measured_at = "2026-06-05"
+crop_measurement_note = "Absolute-calibrated low-lambda edge is unstable from ~401.5-403 nm; crop below 403.0 nm for this CMOS/LHD calibration context."
+
+[calibration]
+camera = "CMOS"
+instrument_id = "echelle"
+wavelength_medium = "air"
+calibration_dir = "local/20250926_calib"
+order_pattern = "pattern_CMOS_20250926.txt"
+wavelength = "src/echelle_spectra/resources/calibration_files/alignments/Th_wavelength_CMOS_20240305_aligned_to_20250926.txt"
+sphere = "sphere-0.1s-x3.sif"
+sphere_background = "sphere-0.1s-x3-bg.sif"
+integral = "src/echelle_spectra/resources/calibration_files/integrating_sphere.txt"
+
+[export]
+units = "wmsr"
+output_suffix = "_spectrocube_wmsr_403nm"
+wavelength_min_nm = 403.0
+drop_nonfinite_columns = true
+calibration_source = "local 20250926 integrating sphere (echelle_spectra)"

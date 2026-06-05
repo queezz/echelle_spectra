@@ -31,6 +31,16 @@ import argparse
 import sys
 from pathlib import Path
 
+from .spectrocube_config import export_config_from_toml, export_plan_from_toml
+
+_DEFAULTS = {
+    "units": "counts",
+    "camera": "CMOS",
+    "instrument_id": "echelle",
+    "wavelength_medium": "air",
+    "drop_nonfinite_columns": True,
+}
+
 # ---------------------------------------------------------------------------
 # Argument parser
 # ---------------------------------------------------------------------------
@@ -48,13 +58,26 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument(
         "input",
+        nargs="?",
         metavar="INPUT",
-        help="Input .sif file or folder containing .sif files (batch mode).",
+        help="Input .sif file or folder containing .sif files (batch mode). Optional with --plan.",
+    )
+    p.add_argument(
+        "--config",
+        default=None,
+        metavar="TOML",
+        help="Calibration/export config TOML with stable camera/spectrometer settings.",
+    )
+    p.add_argument(
+        "--plan",
+        default=None,
+        metavar="TOML",
+        help="SpectroCube generation plan TOML. Can supply input/output and --config.",
     )
     p.add_argument(
         "--units",
         choices=["counts", "wm", "wmsr", "phmsr"],
-        default="counts",
+        default=None,
         help=(
             "Intensity quantity to export.  One of: counts (default), wm "
             "[W m⁻² nm⁻¹], wmsr [W m⁻² sr⁻¹ nm⁻¹], phmsr [ph s⁻¹ m⁻² sr⁻¹ nm⁻¹]."
@@ -83,7 +106,7 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--camera",
         choices=["CMOS", "CCD"],
-        default="CMOS",
+        default=None,
         help="Bundled calibration file set to use (default: CMOS).",
     )
     p.add_argument(
@@ -96,10 +119,75 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
     p.add_argument(
+        "--order-pattern",
+        default=None,
+        metavar="FILE",
+        help="Order-pattern table to use instead of the selected camera default.",
+    )
+    p.add_argument(
+        "--wavelength",
+        default=None,
+        metavar="FILE",
+        help="Wavelength lookup table to use instead of the selected camera default.",
+    )
+    p.add_argument(
+        "--sphere",
+        default=None,
+        metavar="FILE",
+        help="Integrating-sphere SIF to use instead of the selected camera default.",
+    )
+    p.add_argument(
+        "--sphere-background",
+        default=None,
+        metavar="FILE",
+        help="Integrating-sphere background SIF to use instead of the selected camera default.",
+    )
+    p.add_argument(
+        "--integral",
+        default=None,
+        metavar="FILE",
+        help="Integrating-sphere spectral table to use instead of the selected camera default.",
+    )
+    p.add_argument(
         "--instrument-id",
-        default="echelle",
+        default=None,
         metavar="ID",
         help="Instrument identifier stored in SpectroCube metadata (default: echelle).",
+    )
+    p.add_argument(
+        "--wavelength-medium",
+        choices=["air", "vacuum"],
+        default=None,
+        help="Wavelength convention stored in SpectroCube metadata (default: air).",
+    )
+    p.add_argument(
+        "--wavelength-min-nm",
+        type=float,
+        default=None,
+        help="Crop exported wavelengths below this inclusive lower bound.",
+    )
+    p.add_argument(
+        "--wavelength-max-nm",
+        type=float,
+        default=None,
+        help="Crop exported wavelengths above this inclusive upper bound.",
+    )
+    p.add_argument(
+        "--calibration-source",
+        default=None,
+        help="Calibration source metadata for absolute intensity exports.",
+    )
+    p.add_argument(
+        "--no-drop-nonfinite-columns",
+        action="store_false",
+        dest="drop_nonfinite_columns",
+        default=None,
+        help="Do not drop wavelength columns containing non-finite intensities.",
+    )
+    p.add_argument(
+        "--output-suffix",
+        default=None,
+        help="Batch output suffix before .nc (default: _spectrocube).",
     )
     p.add_argument(
         "--pattern",
@@ -135,6 +223,71 @@ def _output_path_for(sif_path: Path, output_dir: Path) -> Path:
     return output_dir / f"{sif_path.stem}_spectrocube.nc"
 
 
+def _output_path_with_suffix(sif_path: Path, output_dir: Path, suffix: str | None) -> Path:
+    suffix = suffix or "_spectrocube"
+    return output_dir / f"{sif_path.stem}{suffix}.nc"
+
+
+def _settings_from_args(args: argparse.Namespace) -> tuple[argparse.Namespace, dict]:
+    """Merge built-in defaults, config TOML, plan TOML, and CLI overrides."""
+    plan = export_plan_from_toml(args.plan) if args.plan else {}
+
+    config_path = args.config or plan.get("config")
+    settings = dict(_DEFAULTS)
+    settings["calibration_files"] = {}
+    settings["extra_attrs"] = {}
+    if config_path:
+        config_settings = export_config_from_toml(config_path)
+        for key, value in config_settings.items():
+            if value not in (None, {}, ""):
+                if key == "extra_attrs":
+                    settings["extra_attrs"].update(value)
+                else:
+                    settings[key] = value
+
+    for key, attr in {
+        "units": "units",
+        "camera": "camera",
+        "instrument_id": "instrument_id",
+        "wavelength_medium": "wavelength_medium",
+        "wavelength_min_nm": "wavelength_min_nm",
+        "wavelength_max_nm": "wavelength_max_nm",
+        "calibration_source": "calibration_source",
+        "drop_nonfinite_columns": "drop_nonfinite_columns",
+        "output_suffix": "output_suffix",
+    }.items():
+        value = getattr(args, attr)
+        if value is not None:
+            settings[key] = value
+
+    calibration_files = dict(settings.get("calibration_files") or {})
+    for key, value in {
+        "orders": args.order_pattern,
+        "wavelength": args.wavelength,
+        "sphr": args.sphere,
+        "bkgr": args.sphere_background,
+        "integral": args.integral,
+    }.items():
+        if value:
+            calibration_files[key] = value
+    settings["calibration_files"] = calibration_files
+
+    if args.calibration_dir is not None:
+        settings["calibration_dir"] = args.calibration_dir
+
+    if args.input is None:
+        args.input = plan.get("input") or plan.get("input_dir")
+    if args.output is None:
+        args.output = plan.get("output") or plan.get("output_dir")
+    if args.pattern == "*.SIF" and plan.get("pattern"):
+        args.pattern = plan["pattern"]
+    args.overwrite = bool(args.overwrite or plan.get("overwrite", False))
+    args.dry_run = bool(args.dry_run or plan.get("dry_run", False))
+    args.verbose = bool(args.verbose or plan.get("verbose", False))
+
+    return args, settings
+
+
 def _export_one(
     sif_path: Path,
     output_nc: Path,
@@ -142,7 +295,14 @@ def _export_one(
     units: str,
     camera: str,
     calibration_dir: Path | None,
+    calibration_files: dict[str, str] | None,
     instrument_id: str,
+    wavelength_medium: str,
+    wavelength_min_nm: float | None,
+    wavelength_max_nm: float | None,
+    calibration_source: str | None,
+    drop_nonfinite_columns: bool,
+    extra_attrs: dict,
     overwrite: bool,
     dry_run: bool,
     verbose: bool,
@@ -171,13 +331,20 @@ def _export_one(
             calibration_folder=calibration_dir,
             camera=camera,
             calibration=calibration,
+            calibration_files=calibration_files,
         )
         export_spectrocube(
             sp,
             str(output_nc),
             units=units,
             instrument_id=instrument_id,
+            wavelength_medium=wavelength_medium,
+            wavelength_min_nm=wavelength_min_nm,
+            wavelength_max_nm=wavelength_max_nm,
+            calibration_source=calibration_source,
+            drop_nonfinite_columns=drop_nonfinite_columns,
             squeeze_single_frame=False,
+            **extra_attrs,
         )
     except Exception as exc:
         print(f"  FAIL  {sif_path.name}: {exc}", file=sys.stderr)
@@ -197,6 +364,7 @@ def main(argv: list[str] | None = None) -> None:
     """Main entry point for the ``echelle-spectrocube`` console script."""
     parser = _build_parser()
     args = parser.parse_args(argv)
+    args, settings = _settings_from_args(args)
 
     # Verify spectrocube is importable before doing any work
     try:
@@ -212,25 +380,36 @@ def main(argv: list[str] | None = None) -> None:
         )
         sys.exit(1)
 
+    if args.input is None:
+        parser.error("INPUT is required unless supplied by --plan.")
+
     input_path = Path(args.input)
-    cal_dir = Path(args.calibration_dir) if args.calibration_dir else None
+    cal_dir = Path(settings["calibration_dir"]) if settings.get("calibration_dir") else None
+    calibration_files = settings["calibration_files"]
 
     # ---- single file -------------------------------------------------------
     if input_path.is_file():
         if args.output:
             out = Path(args.output)
             if out.is_dir():
-                out = _output_path_for(input_path, out)
+                out = _output_path_with_suffix(input_path, out, settings.get("output_suffix"))
         else:
-            out = _output_path_for(input_path, input_path.parent)
+            out = _output_path_with_suffix(input_path, input_path.parent, settings.get("output_suffix"))
 
         ok = _export_one(
             input_path,
             out,
-            units=args.units,
-            camera=args.camera,
+            units=settings["units"],
+            camera=settings["camera"],
             calibration_dir=cal_dir,
-            instrument_id=args.instrument_id,
+            calibration_files=calibration_files,
+            instrument_id=settings["instrument_id"],
+            wavelength_medium=settings["wavelength_medium"],
+            wavelength_min_nm=settings.get("wavelength_min_nm"),
+            wavelength_max_nm=settings.get("wavelength_max_nm"),
+            calibration_source=settings.get("calibration_source"),
+            drop_nonfinite_columns=settings["drop_nonfinite_columns"],
+            extra_attrs=settings["extra_attrs"],
             overwrite=args.overwrite,
             dry_run=args.dry_run,
             verbose=True,
@@ -265,8 +444,12 @@ def main(argv: list[str] | None = None) -> None:
                 from .tools.loader import build_calibration
 
                 if args.verbose:
-                    print(f"  Loading {args.camera} calibration …")
-                clbr = build_calibration(cal_dir, args.camera)
+                    print(f"  Loading {settings['camera']} calibration …")
+                clbr = build_calibration(
+                    cal_dir,
+                    settings["camera"],
+                    calibration_files=calibration_files,
+                )
                 if args.verbose:
                     print("  Calibration ready.")
             except Exception as exc:
@@ -275,14 +458,21 @@ def main(argv: list[str] | None = None) -> None:
 
         failed: list[Path] = []
         for sif in sif_files:
-            nc_out = _output_path_for(sif, out_dir)
+            nc_out = _output_path_with_suffix(sif, out_dir, settings.get("output_suffix"))
             ok = _export_one(
                 sif,
                 nc_out,
-                units=args.units,
-                camera=args.camera,
+                units=settings["units"],
+                camera=settings["camera"],
                 calibration_dir=cal_dir,
-                instrument_id=args.instrument_id,
+                calibration_files=calibration_files,
+                instrument_id=settings["instrument_id"],
+                wavelength_medium=settings["wavelength_medium"],
+                wavelength_min_nm=settings.get("wavelength_min_nm"),
+                wavelength_max_nm=settings.get("wavelength_max_nm"),
+                calibration_source=settings.get("calibration_source"),
+                drop_nonfinite_columns=settings["drop_nonfinite_columns"],
+                extra_attrs=settings["extra_attrs"],
                 overwrite=args.overwrite,
                 dry_run=args.dry_run,
                 verbose=args.verbose,

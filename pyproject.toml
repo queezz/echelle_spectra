@@ -109,6 +109,8 @@ where = ["src"]
   "resources/graphics/*",
   "resources/calibration_files/*",
   "resources/calibration_files/alignments/*",
+  "resources/calibration_files/export_configs/*",
+  "resources/spectrocube_plans/*",
   "resources/test_data/*",
 ]
 
