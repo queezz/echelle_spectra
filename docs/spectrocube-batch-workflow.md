@@ -78,19 +78,30 @@ local/193778_Echelle_spectrocube_wmsr_403nm.nc
 
 ## Dataset batch plan
 
-The active dataset batch plan is:
+The packaged dataset batch plan template is:
 
 ```text
 src/echelle_spectra/resources/spectrocube_plans/lhd_20250926_wmsr_batch.toml
 ```
 
-It points at the 20250926 LHD dataset folder and writes calibrated cubes to a
-dedicated `spectrocubes_wmsr_403nm` output folder.
+It uses portable `local/...` paths so package resources do not contain
+machine-specific absolute paths. For a real lab dataset, either copy the plan to
+an ignored local path and edit the dataset locations there, or keep the packaged
+plan and override the input/output paths from the CLI.
 
-Run it from the repository root:
+Template-only run from the repository root:
 
 ```powershell
 & "$env:USERPROFILE\.venvs\echelle-spectra\Scripts\python.exe" -m echelle_spectra.spectrocube_cli --plan src\echelle_spectra\resources\spectrocube_plans\lhd_20250926_wmsr_batch.toml
+```
+
+Real dataset run with CLI path overrides:
+
+```powershell
+& "$env:USERPROFILE\.venvs\echelle-spectra\Scripts\python.exe" -m echelle_spectra.spectrocube_cli `
+  --plan src\echelle_spectra\resources\spectrocube_plans\lhd_20250926_wmsr_batch.toml `
+  C:\path\to\20250926 `
+  -o C:\path\to\20250926\spectrocubes_wmsr_403nm
 ```
 
 The batch terminal output starts with the source and destination, then reports
@@ -98,8 +109,8 @@ only the current file in verbose mode:
 
 ```text
 📦 SpectroCube batch
-📂 Source:      C:\Users\queez\Dropbox\Experiments\2025-LHD-BH\Echelle\20250926
-🎯 Destination: C:\Users\queez\Dropbox\Experiments\2025-LHD-BH\Echelle\20250926\spectrocubes_wmsr_403nm
+📂 Source:      C:\path\to\20250926
+🎯 Destination: C:\path\to\20250926\spectrocubes_wmsr_403nm
 🔎 Pattern:     *.SIF
 🧮 Files:       53 (export)
 ⚙️  Loading CMOS calibration...
@@ -112,7 +123,7 @@ only the current file in verbose mode:
 To preview a config-driven batch without a plan:
 
 ```powershell
-& "$env:USERPROFILE\.venvs\echelle-spectra\Scripts\python.exe" -m echelle_spectra.spectrocube_cli C:\Users\queez\Dropbox\Experiments\2025-LHD-BH\Echelle\20250926 `
+& "$env:USERPROFILE\.venvs\echelle-spectra\Scripts\python.exe" -m echelle_spectra.spectrocube_cli C:\path\to\20250926 `
   --config src\echelle_spectra\resources\calibration_files\export_configs\lhd_cmos_20250926.toml `
   --pattern "*.SIF" `
   --dry-run `
