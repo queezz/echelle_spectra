@@ -30,6 +30,7 @@ from __future__ import annotations
 import argparse
 import sys
 from pathlib import Path
+from typing import Literal
 
 from .spectrocube_config import export_config_from_toml, export_plan_from_toml
 
@@ -40,6 +41,8 @@ _DEFAULTS = {
     "wavelength_medium": "air",
     "drop_nonfinite_columns": True,
 }
+
+_ExportStatus = Literal["exported", "skipped", "dry-run", "failed"]
 
 # ---------------------------------------------------------------------------
 # Argument parser
@@ -228,6 +231,28 @@ def _output_path_with_suffix(sif_path: Path, output_dir: Path, suffix: str | Non
     return output_dir / f"{sif_path.stem}{suffix}.nc"
 
 
+def _color(text: str, code: str, *, stream=sys.stdout) -> str:
+    if hasattr(stream, "isatty") and stream.isatty():
+        return f"\033[{code}m{text}\033[0m"
+    return text
+
+
+def _batch_header(
+    *,
+    input_path: Path,
+    output_dir: Path,
+    n_files: int,
+    pattern: str,
+    dry_run: bool,
+) -> None:
+    mode = "DRY RUN" if dry_run else "export"
+    print(_color("📦 SpectroCube batch", "1;36"))
+    print(f"📂 Source:      {input_path}")
+    print(f"🎯 Destination: {output_dir}")
+    print(f"🔎 Pattern:     {pattern}")
+    print(f"🧮 Files:       {n_files} ({mode})")
+
+
 def _settings_from_args(args: argparse.Namespace) -> tuple[argparse.Namespace, dict]:
     """Merge built-in defaults, config TOML, plan TOML, and CLI overrides."""
     plan = export_plan_from_toml(args.plan) if args.plan else {}
@@ -307,21 +332,19 @@ def _export_one(
     dry_run: bool,
     verbose: bool,
     calibration: object | None = None,
-) -> bool:
-    """Export one SIF file.  Returns True on success, False on failure."""
+) -> _ExportStatus:
+    """Export one SIF file."""
     from .tools.spectrocube_export import export_spectrocube
 
     if output_nc.exists() and not overwrite:
         if verbose:
-            print(f"  SKIP  {sif_path.name}  (output exists; use --overwrite)")
-        return True
+            print(_color(f"⏭️  SKIP {sif_path.name}  (output exists; use --overwrite)", "33"))
+        return "skipped"
 
     if dry_run:
-        print(f"  DRY   {sif_path}  ->  {output_nc}")
-        return True
-
-    if verbose:
-        print(f"  ...   {sif_path.name}")
+        if verbose:
+            print(_color(f"🧪 DRY  {sif_path.name}", "36"))
+        return "dry-run"
 
     try:
         from .tools.loader import load_spectrum
@@ -347,12 +370,10 @@ def _export_one(
             **extra_attrs,
         )
     except Exception as exc:
-        print(f"  FAIL  {sif_path.name}: {exc}", file=sys.stderr)
-        return False
+        print(_color(f"❌ FAIL {sif_path.name}: {exc}", "31", stream=sys.stderr), file=sys.stderr)
+        return "failed"
 
-    if verbose:
-        print(f"  OK    {output_nc}")
-    return True
+    return "exported"
 
 
 # ---------------------------------------------------------------------------
@@ -396,7 +417,7 @@ def main(argv: list[str] | None = None) -> None:
         else:
             out = _output_path_with_suffix(input_path, input_path.parent, settings.get("output_suffix"))
 
-        ok = _export_one(
+        status = _export_one(
             input_path,
             out,
             units=settings["units"],
@@ -414,7 +435,7 @@ def main(argv: list[str] | None = None) -> None:
             dry_run=args.dry_run,
             verbose=True,
         )
-        sys.exit(0 if ok else 1)
+        sys.exit(0 if status != "failed" else 1)
 
     # ---- batch folder ------------------------------------------------------
     elif input_path.is_dir():
@@ -434,7 +455,13 @@ def main(argv: list[str] | None = None) -> None:
         if not args.dry_run:
             out_dir.mkdir(parents=True, exist_ok=True)
 
-        print(f"Batch: {len(sif_files)} file(s)  ->  {out_dir}")
+        _batch_header(
+            input_path=input_path,
+            output_dir=out_dir,
+            n_files=len(sif_files),
+            pattern=args.pattern,
+            dry_run=args.dry_run,
+        )
 
         # Load calibration once and reuse across all files (avoids re-reading
         # the sphere SIF images for every input file).
@@ -444,22 +471,28 @@ def main(argv: list[str] | None = None) -> None:
                 from .tools.loader import build_calibration
 
                 if args.verbose:
-                    print(f"  Loading {settings['camera']} calibration …")
+                    print(f"⚙️  Loading {settings['camera']} calibration...")
                 clbr = build_calibration(
                     cal_dir,
                     settings["camera"],
                     calibration_files=calibration_files,
                 )
                 if args.verbose:
-                    print("  Calibration ready.")
+                    print(_color("✅ Calibration ready.", "32"))
             except Exception as exc:
                 print(f"ERROR: Could not load calibration: {exc}", file=sys.stderr)
                 sys.exit(1)
 
         failed: list[Path] = []
-        for sif in sif_files:
+        n_exported = 0
+        n_skipped = 0
+        n_dry_run = 0
+        total = len(sif_files)
+        for index, sif in enumerate(sif_files, start=1):
             nc_out = _output_path_with_suffix(sif, out_dir, settings.get("output_suffix"))
-            ok = _export_one(
+            if args.verbose:
+                print(_color(f"🔄 [{index}/{total}] {sif.name}", "36"))
+            status = _export_one(
                 sif,
                 nc_out,
                 units=settings["units"],
@@ -478,8 +511,14 @@ def main(argv: list[str] | None = None) -> None:
                 verbose=args.verbose,
                 calibration=clbr,
             )
-            if not ok:
+            if status == "failed":
                 failed.append(sif)
+            elif status == "skipped":
+                n_skipped += 1
+            elif status == "dry-run":
+                n_dry_run += 1
+            else:
+                n_exported += 1
 
         n_ok = len(sif_files) - len(failed)
         if failed:
@@ -490,9 +529,10 @@ def main(argv: list[str] | None = None) -> None:
             sys.exit(1)
 
         if args.dry_run:
-            print(f"Dry run complete. {len(sif_files)} file(s) would be converted.")
+            print(_color(f"🧪 Dry run complete. {n_dry_run}/{total} file(s) would be converted.", "36"))
         else:
-            print(f"Done. {n_ok}/{len(sif_files)} exported successfully.")
+            skipped = f", {n_skipped} skipped" if n_skipped else ""
+            print(_color(f"✅ Done. {n_exported}/{total} exported successfully{skipped}.", "32"))
         sys.exit(0)
 
     # ---- path not found ----------------------------------------------------

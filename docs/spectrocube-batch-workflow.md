@@ -93,6 +93,22 @@ Run it from the repository root:
 & "$env:USERPROFILE\.venvs\echelle-spectra\Scripts\python.exe" -m echelle_spectra.spectrocube_cli --plan src\echelle_spectra\resources\spectrocube_plans\lhd_20250926_wmsr_batch.toml
 ```
 
+The batch terminal output starts with the source and destination, then reports
+only the current file in verbose mode:
+
+```text
+📦 SpectroCube batch
+📂 Source:      C:\Users\queez\Dropbox\Experiments\2025-LHD-BH\Echelle\20250926
+🎯 Destination: C:\Users\queez\Dropbox\Experiments\2025-LHD-BH\Echelle\20250926\spectrocubes_wmsr_403nm
+🔎 Pattern:     *.SIF
+🧮 Files:       53 (export)
+⚙️  Loading CMOS calibration...
+✅ Calibration ready.
+🔄 [1/53] 193778_Echelle.SIF
+🔄 [2/53] 193779_Echelle.SIF
+✅ Done. 53/53 exported successfully.
+```
+
 To preview a config-driven batch without a plan:
 
 ```powershell

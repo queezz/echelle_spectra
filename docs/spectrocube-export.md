@@ -255,7 +255,7 @@ echelle-spectrocube /data/shots/ --dry-run --verbose
 | `--pattern` | `*.SIF` | Glob for batch discovery (also tries `*.sif` as fallback) |
 | `--overwrite` | *(skip existing)* | Replace existing output files |
 | `--dry-run` | — | Print plan without writing |
-| `--verbose` | — | Per-file progress output |
+| `--verbose` | — | Per-file current-progress output |
 
 ### Output filename convention
 

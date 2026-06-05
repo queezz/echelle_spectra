@@ -229,6 +229,22 @@ class TestDryRunBatch:
         assert exc.value.code == 0
         assert "DRY" in capsys.readouterr().out
 
+    def test_verbose_batch_output_is_compact(self, tmp_path, capsys, mock_spectrocube):
+        (tmp_path / "a.SIF").touch()
+        (tmp_path / "b.SIF").touch()
+        out_dir = tmp_path / "out"
+
+        with pytest.raises(SystemExit) as exc:
+            main([str(tmp_path), "--dry-run", "--verbose", "-o", str(out_dir)])
+
+        assert exc.value.code == 0
+        stdout = capsys.readouterr().out
+        assert "Source:" in stdout
+        assert "Destination:" in stdout
+        assert "[1/2] a.SIF" in stdout
+        assert "[2/2] b.SIF" in stdout
+        assert str(out_dir / "a_spectrocube.nc") not in stdout
+
 
 # ---------------------------------------------------------------------------
 # Missing spectrocube
