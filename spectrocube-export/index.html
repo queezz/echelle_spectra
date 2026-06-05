@@ -9,7 +9,7 @@
         <link rel="prev" href="../line-validation/">
       
       
-        <link rel="next" href="../pattern-extraction-api/">
+        <link rel="next" href="../spectrocube-batch-workflow/">
       
       
         
@@ -816,6 +816,28 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#config-driven-export" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Config-driven export
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#plan-driven-export" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Plan-driven export
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#batch-folder-export" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -890,6 +912,34 @@
   
 </nav>
       
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../spectrocube-batch-workflow/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Batch SpectroCube workflow
+  
+
+    
+  </span>
+  
+  
+
+      </a>
     </li>
   
 
@@ -1312,6 +1362,28 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#config-driven-export" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Config-driven export
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#plan-driven-export" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Plan-driven export
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#batch-folder-export" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1528,11 +1600,36 @@ because only this package knows what the calibration quantities mean.</p>
 <td><code>spectrum.info["BackgroundFrames"]</code> (when non-empty)</td>
 </tr>
 <tr>
+<td><code>calibration_folder</code></td>
+<td>calibration resource folder used to load the spectrum</td>
+</tr>
+<tr>
+<td><code>calibration_order_pattern_file</code></td>
+<td>order-pattern file used for extraction</td>
+</tr>
+<tr>
+<td><code>wavelength_calibration_file</code></td>
+<td>wavelength lookup table used for extraction</td>
+</tr>
+<tr>
+<td><code>dropped_nonfinite_wavelength_columns</code></td>
+<td>count of invalid wavelength columns dropped before export</td>
+</tr>
+<tr>
 <td><code>calibration_source</code></td>
 <td><code>"integrating sphere (echelle_spectra)"</code> (absolute modes only)</td>
 </tr>
 </tbody>
 </table>
+<div class="admonition note">
+<p class="admonition-title">Non-finite absolute-calibration columns</p>
+<p>Absolute calibration can produce non-finite columns where the sphere response
+is invalid or the low-wavelength edge is outside the useful calibration
+region. These columns are tolerated during <code>Spectrum</code> construction and are
+dropped during SpectroCube export by default. Keep
+<code>drop_nonfinite_columns = true</code> for routine calibrated exports unless you are
+deliberately debugging the calibration arrays.</p>
+</div>
 <p>Additional arbitrary metadata can be passed as keyword arguments:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="n">sc</span> <span class="o">=</span> <span class="n">export_spectrocube</span><span class="p">(</span>
 <a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>    <span class="n">sp</span><span class="p">,</span>
@@ -1569,6 +1666,12 @@ computes it externally as <code>trigger_delay + frame * CycleTime</code>.  Use t
 <h2 id="gui-save-spectrocube-button">GUI — Save SpectroCube button<a class="headerlink" href="#gui-save-spectrocube-button" title="Permanent link">¶</a></h2>
 <p>The viewer has a <strong>Save SpectroCube</strong> button in the Controls dock (below
 the existing "Save spec" / "Save lines" checkboxes).</p>
+<p>For CMOS/LHD data, the GUI defaults to the accepted 20250926 calibration context:</p>
+<ul>
+<li><code>pattern_CMOS_20250926.txt</code></li>
+<li><code>alignments/Th_wavelength_CMOS_20240305_aligned_to_20250926.txt</code></li>
+<li><code>wavelength_medium = "air"</code> in exported SpectroCube metadata</li>
+</ul>
 <p><strong>Workflow:</strong></p>
 <ol>
 <li>Open a SIF file with the <strong>Manual SIF load</strong> button or by entering a shot
@@ -1592,18 +1695,51 @@ than crashing.  See <a href="#local-development-installation">Local development 
 <hr>
 <h2 id="cli-echelle-spectrocube">CLI — <code>echelle-spectrocube</code><a class="headerlink" href="#cli-echelle-spectrocube" title="Permanent link">¶</a></h2>
 <p>After installation the <code>echelle-spectrocube</code> command is available on the PATH.</p>
+<p>For the current LHD CMOS dataset workflow, see
+<a href="../spectrocube-batch-workflow/">Batch SpectroCube workflow</a>.</p>
 <h3 id="single-file-export">Single-file export<a class="headerlink" href="#single-file-export" title="Permanent link">¶</a></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>echelle-spectrocube<span class="w"> </span>shot_193777_Echelle.SIF<span class="w"> </span>--units<span class="w"> </span>wm<span class="w"> </span>-o<span class="w"> </span>output/shot_193777.nc
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>echelle-spectrocube<span class="w"> </span>shot_193777_Echelle.SIF<span class="w"> </span>--units<span class="w"> </span>wm<span class="w"> </span>--wavelength-medium<span class="w"> </span>air<span class="w"> </span>-o<span class="w"> </span>output/shot_193777.nc
+</code></pre></div>
+<h3 id="config-driven-export">Config-driven export<a class="headerlink" href="#config-driven-export" title="Permanent link">¶</a></h3>
+<p>Stable camera/spectrometer/calibration choices can be stored in a calibration
+config TOML, including wavelength crop bounds measured once for that calibration
+context:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>echelle-spectrocube<span class="w"> </span>local/193778_Echelle.SIF<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="w">  </span>--config<span class="w"> </span>src/echelle_spectra/resources/calibration_files/export_configs/lhd_cmos_20250926.toml
+</code></pre></div>
+<p>The 20250926 CMOS/LHD config crops the unstable low-wavelength edge below
+<code>403.0 nm</code>, exports <code>wmsr</code> (<code>W/m2/nm/sr</code>), and records the original wavelength
+range plus dropped-column counts in SpectroCube metadata.</p>
+<h3 id="plan-driven-export">Plan-driven export<a class="headerlink" href="#plan-driven-export" title="Permanent link">¶</a></h3>
+<p>For repeatable single-file or batch generation, use a plan TOML that points at
+the calibration config and supplies input/output paths:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>echelle-spectrocube<span class="w"> </span>--plan<span class="w"> </span>src/echelle_spectra/resources/spectrocube_plans/lhd_193778_wmsr.toml
+</code></pre></div>
+<p>The current plan writes:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>local/193778_Echelle_spectrocube_wmsr_403nm.nc
+</code></pre></div>
+<p>For the 20250926 CMOS/LHD calibration pass, use the local sphere/background
+pair and export absolute spectral radiance:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="n">echelle-spectrocube</span> <span class="n">local</span><span class="p">\</span><span class="n">193778_Echelle</span><span class="p">.</span><span class="n">SIF</span> <span class="p">`</span>
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>  <span class="p">-</span><span class="n">-units</span> <span class="n">wmsr</span> <span class="p">`</span>
+<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a>  <span class="p">-</span><span class="n">-wavelength-medium</span> <span class="n">air</span> <span class="p">`</span>
+<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a>  <span class="p">-</span><span class="n">-calibration-dir</span> <span class="n">local</span><span class="p">\</span><span class="n">20250926_calib</span> <span class="p">`</span>
+<a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a>  <span class="p">-</span><span class="n">-order-pattern</span> <span class="n">pattern_CMOS_20250926</span><span class="p">.</span><span class="n">txt</span> <span class="p">`</span>
+<a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a>  <span class="p">-</span><span class="n">-wavelength</span> <span class="n">C</span><span class="p">:\</span><span class="n">path</span><span class="p">\</span><span class="n">to</span><span class="p">\</span><span class="n">calibration_files</span><span class="p">\</span><span class="n">alignments</span><span class="p">\</span><span class="n">Th_wavelength_CMOS_20240305_aligned_to_20250926</span><span class="p">.</span><span class="n">txt</span> <span class="p">`</span>
+<a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a>  <span class="p">-</span><span class="n">-sphere</span> <span class="n">sphere</span><span class="p">-</span><span class="n">0</span><span class="p">.</span><span class="n">1s-x3</span><span class="p">.</span><span class="n">sif</span> <span class="p">`</span>
+<a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a>  <span class="p">-</span><span class="n">-sphere-background</span> <span class="n">sphere</span><span class="p">-</span><span class="n">0</span><span class="p">.</span><span class="n">1s-x3-bg</span><span class="p">.</span><span class="n">sif</span> <span class="p">`</span>
+<a id="__codelineno-9-9" name="__codelineno-9-9" href="#__codelineno-9-9"></a>  <span class="p">-</span><span class="n">-integral</span> <span class="n">C</span><span class="p">:\</span><span class="n">path</span><span class="p">\</span><span class="n">to</span><span class="p">\</span><span class="n">calibration_files</span><span class="p">\</span><span class="n">integrating_sphere</span><span class="p">.</span><span class="n">txt</span> <span class="p">`</span>
+<a id="__codelineno-9-10" name="__codelineno-9-10" href="#__codelineno-9-10"></a>  <span class="n">-o</span> <span class="n">local</span><span class="p">\</span><span class="n">193778_Echelle_spectrocube_wmsr</span><span class="p">.</span><span class="n">nc</span>
 </code></pre></div>
 <h3 id="batch-folder-export">Batch folder export<a class="headerlink" href="#batch-folder-export" title="Permanent link">¶</a></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="c1"># Export all .SIF files in a folder, save .nc files alongside them</span>
-<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>echelle-spectrocube<span class="w"> </span>/data/shots/<span class="w"> </span>--units<span class="w"> </span>wm
-<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>
-<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="c1"># Save to a separate output directory</span>
-<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a>echelle-spectrocube<span class="w"> </span>/data/shots/<span class="w"> </span>--units<span class="w"> </span>wmsr<span class="w"> </span>-o<span class="w"> </span>/data/nc/
-<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a>
-<a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a><span class="c1"># Preview what would happen (no files written)</span>
-<a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a>echelle-spectrocube<span class="w"> </span>/data/shots/<span class="w"> </span>--dry-run<span class="w"> </span>--verbose
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="c1"># Export all .SIF files in a folder, save .nc files alongside them</span>
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>echelle-spectrocube<span class="w"> </span>/data/shots/<span class="w"> </span>--units<span class="w"> </span>wm
+<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a>
+<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="c1"># Save to a separate output directory</span>
+<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a>echelle-spectrocube<span class="w"> </span>/data/shots/<span class="w"> </span>--units<span class="w"> </span>wmsr<span class="w"> </span>-o<span class="w"> </span>/data/nc/
+<a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a>
+<a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a><span class="c1"># Preview what would happen (no files written)</span>
+<a id="__codelineno-10-8" name="__codelineno-10-8" href="#__codelineno-10-8"></a>echelle-spectrocube<span class="w"> </span>/data/shots/<span class="w"> </span>--dry-run<span class="w"> </span>--verbose
 </code></pre></div>
 <h3 id="full-option-reference">Full option reference<a class="headerlink" href="#full-option-reference" title="Permanent link">¶</a></h3>
 <table>
@@ -1619,6 +1755,16 @@ than crashing.  See <a href="#local-development-installation">Local development 
 <td><code>INPUT</code></td>
 <td><em>(required)</em></td>
 <td><code>.sif</code> file or folder</td>
+</tr>
+<tr>
+<td><code>--config</code></td>
+<td><em>(none)</em></td>
+<td>Calibration/export config TOML</td>
+</tr>
+<tr>
+<td><code>--plan</code></td>
+<td><em>(none)</em></td>
+<td>SpectroCube generation plan TOML</td>
 </tr>
 <tr>
 <td><code>--units</code></td>
@@ -1641,9 +1787,64 @@ than crashing.  See <a href="#local-development-installation">Local development 
 <td>Path to calibration files folder</td>
 </tr>
 <tr>
+<td><code>--order-pattern</code></td>
+<td>selected camera default</td>
+<td>Override order-pattern file</td>
+</tr>
+<tr>
+<td><code>--wavelength</code></td>
+<td>selected camera default</td>
+<td>Override wavelength lookup table</td>
+</tr>
+<tr>
+<td><code>--sphere</code></td>
+<td>selected camera default</td>
+<td>Override integrating-sphere SIF</td>
+</tr>
+<tr>
+<td><code>--sphere-background</code></td>
+<td>selected camera default</td>
+<td>Override integrating-sphere background SIF</td>
+</tr>
+<tr>
+<td><code>--integral</code></td>
+<td>selected camera default</td>
+<td>Override integrating-sphere spectral table</td>
+</tr>
+<tr>
 <td><code>--instrument-id</code></td>
 <td><code>echelle</code></td>
 <td>Stored in SpectroCube metadata</td>
+</tr>
+<tr>
+<td><code>--wavelength-medium</code></td>
+<td><code>air</code></td>
+<td>Wavelength convention stored in SpectroCube metadata: <code>air</code> or <code>vacuum</code></td>
+</tr>
+<tr>
+<td><code>--wavelength-min-nm</code></td>
+<td>config/default</td>
+<td>Inclusive low-wavelength crop bound</td>
+</tr>
+<tr>
+<td><code>--wavelength-max-nm</code></td>
+<td>config/default</td>
+<td>Inclusive high-wavelength crop bound</td>
+</tr>
+<tr>
+<td><code>--calibration-source</code></td>
+<td>config/default</td>
+<td>Absolute calibration source metadata</td>
+</tr>
+<tr>
+<td><code>--no-drop-nonfinite-columns</code></td>
+<td>drop enabled</td>
+<td>Keep non-finite wavelength columns instead of dropping them</td>
+</tr>
+<tr>
+<td><code>--output-suffix</code></td>
+<td><code>_spectrocube</code></td>
+<td>Batch output suffix before <code>.nc</code></td>
 </tr>
 <tr>
 <td><code>--pattern</code></td>
@@ -1663,7 +1864,7 @@ than crashing.  See <a href="#local-development-installation">Local development 
 <tr>
 <td><code>--verbose</code></td>
 <td>—</td>
-<td>Per-file progress output</td>
+<td>Per-file current-progress output</td>
 </tr>
 </tbody>
 </table>
@@ -1681,10 +1882,13 @@ installed package under <code>resources/calibration_files/</code> (or supplied v
 files, so the cost is equivalent to opening the GUI once.</p>
 <p>If the <code>.sif</code> sphere files are not bundled with your installation (they are
 large binaries), point to a local copy:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>echelle-spectrocube<span class="w"> </span>/data/shots/<span class="w"> </span>--calibration-dir<span class="w"> </span>/lab/calibration_files/
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a>echelle-spectrocube<span class="w"> </span>/data/shots/<span class="w"> </span>--calibration-dir<span class="w"> </span>/lab/calibration_files/
 </code></pre></div>
 <p>The same <code>--camera</code> flag selects either the CCD or CMOS calibration file
 set (matching the radio button in the GUI).</p>
+<p>The default CMOS file set is the accepted 20250926/LHD context:
+<code>pattern_CMOS_20250926.txt</code> plus
+<code>alignments/Th_wavelength_CMOS_20240305_aligned_to_20250926.txt</code>.</p>
 </div>
 <hr>
 <h2 id="local-development-installation">Local development installation<a class="headerlink" href="#local-development-installation" title="Permanent link">¶</a></h2>
@@ -1693,25 +1897,25 @@ In a fresh virtual environment:</p>
 <div class="tabbed-set tabbed-alternate" data-tabs="1:2"><input checked="checked" id="__tabbed_1_1" name="__tabbed_1" type="radio"><input id="__tabbed_1_2" name="__tabbed_1" type="radio"><div class="tabbed-labels"><label for="__tabbed_1_1">Unix / macOS</label><label for="__tabbed_1_2">Windows PowerShell</label></div>
 <div class="tabbed-content">
 <div class="tabbed-block">
-<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="c1"># 1. Install spectrocube (the neutral container)</span>
-<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>pip<span class="w"> </span>install<span class="w"> </span>-e<span class="w"> </span>/path/to/2026-spectrocube
-<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>
-<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="c1"># 2. Install echelle_spectra with the spectrocube optional extra</span>
-<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a>pip<span class="w"> </span>install<span class="w"> </span>-e<span class="w"> </span>/path/to/echelle_spectra<span class="o">[</span>spectrocube<span class="o">]</span>
-<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a>
-<a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a><span class="c1"># Or, if spectrocube is already installed separately:</span>
-<a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a>pip<span class="w"> </span>install<span class="w"> </span>-e<span class="w"> </span>/path/to/echelle_spectra
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="c1"># 1. Install spectrocube (the neutral container)</span>
+<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a>pip<span class="w"> </span>install<span class="w"> </span>-e<span class="w"> </span>/path/to/2026-spectrocube
+<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a>
+<a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a><span class="c1"># 2. Install echelle_spectra with the spectrocube optional extra</span>
+<a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a>pip<span class="w"> </span>install<span class="w"> </span>-e<span class="w"> </span>/path/to/echelle_spectra<span class="o">[</span>spectrocube<span class="o">]</span>
+<a id="__codelineno-12-6" name="__codelineno-12-6" href="#__codelineno-12-6"></a>
+<a id="__codelineno-12-7" name="__codelineno-12-7" href="#__codelineno-12-7"></a><span class="c1"># Or, if spectrocube is already installed separately:</span>
+<a id="__codelineno-12-8" name="__codelineno-12-8" href="#__codelineno-12-8"></a>pip<span class="w"> </span>install<span class="w"> </span>-e<span class="w"> </span>/path/to/echelle_spectra
 </code></pre></div>
 </div>
 <div class="tabbed-block">
-<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="c"># 1. Install spectrocube (the neutral container)</span>
-<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="n">pip</span> <span class="n">install</span> <span class="n">-e</span> <span class="n">C</span><span class="p">:\</span><span class="n">path</span><span class="p">\</span><span class="n">to</span><span class="p">\</span><span class="n">2026-spectrocube</span>
-<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a>
-<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="c"># 2. Install echelle_spectra with the spectrocube optional extra</span>
-<a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a><span class="n">pip</span> <span class="n">install</span> <span class="n">-e</span> <span class="n">C</span><span class="p">:\</span><span class="n">path</span><span class="p">\</span><span class="n">to</span><span class="p">\</span><span class="n">echelle_spectra</span><span class="no">[spectrocube]</span>
-<a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a>
-<a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a><span class="c"># Or, if spectrocube is already installed separately:</span>
-<a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a><span class="n">pip</span> <span class="n">install</span> <span class="n">-e</span> <span class="n">C</span><span class="p">:\</span><span class="n">path</span><span class="p">\</span><span class="n">to</span><span class="p">\</span><span class="n">echelle_spectra</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="c"># 1. Install spectrocube (the neutral container)</span>
+<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="n">pip</span> <span class="n">install</span> <span class="n">-e</span> <span class="n">C</span><span class="p">:\</span><span class="n">path</span><span class="p">\</span><span class="n">to</span><span class="p">\</span><span class="n">2026-spectrocube</span>
+<a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a>
+<a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a><span class="c"># 2. Install echelle_spectra with the spectrocube optional extra</span>
+<a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a><span class="n">pip</span> <span class="n">install</span> <span class="n">-e</span> <span class="n">C</span><span class="p">:\</span><span class="n">path</span><span class="p">\</span><span class="n">to</span><span class="p">\</span><span class="n">echelle_spectra</span><span class="no">[spectrocube]</span>
+<a id="__codelineno-13-6" name="__codelineno-13-6" href="#__codelineno-13-6"></a>
+<a id="__codelineno-13-7" name="__codelineno-13-7" href="#__codelineno-13-7"></a><span class="c"># Or, if spectrocube is already installed separately:</span>
+<a id="__codelineno-13-8" name="__codelineno-13-8" href="#__codelineno-13-8"></a><span class="n">pip</span> <span class="n">install</span> <span class="n">-e</span> <span class="n">C</span><span class="p">:\</span><span class="n">path</span><span class="p">\</span><span class="n">to</span><span class="p">\</span><span class="n">echelle_spectra</span>
 </code></pre></div>
 </div>
 </div>
@@ -1720,13 +1924,13 @@ In a fresh virtual environment:</p>
 <div class="tabbed-set tabbed-alternate" data-tabs="2:2"><input checked="checked" id="__tabbed_2_1" name="__tabbed_2" type="radio"><input id="__tabbed_2_2" name="__tabbed_2" type="radio"><div class="tabbed-labels"><label for="__tabbed_2_1">Unix / macOS</label><label for="__tabbed_2_2">Windows PowerShell</label></div>
 <div class="tabbed-content">
 <div class="tabbed-block">
-<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="nb">source</span><span class="w"> </span>~/.venvs/echelle-spectra/bin/activate
-<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>pip<span class="w"> </span>install<span class="w"> </span>-e<span class="w"> </span>/path/to/2026-spectrocube<span class="w">   </span><span class="c1"># makes spectrocube importable</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="nb">source</span><span class="w"> </span>~/.venvs/echelle-spectra/bin/activate
+<a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a>pip<span class="w"> </span>install<span class="w"> </span>-e<span class="w"> </span>/path/to/2026-spectrocube<span class="w">   </span><span class="c1"># makes spectrocube importable</span>
 </code></pre></div>
 </div>
 <div class="tabbed-block">
-<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="p">&amp;</span> <span class="s2">"$env:USERPROFILE\.venvs\echelle-spectra\Scripts\Activate.ps1"</span>
-<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="n">pip</span> <span class="n">install</span> <span class="n">-e</span> <span class="n">C</span><span class="p">:\</span><span class="n">path</span><span class="p">\</span><span class="n">to</span><span class="p">\</span><span class="n">2026-spectrocube</span>   <span class="c"># makes spectrocube importable</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a><span class="p">&amp;</span> <span class="s2">"$env:USERPROFILE\.venvs\echelle-spectra\Scripts\Activate.ps1"</span>
+<a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a><span class="n">pip</span> <span class="n">install</span> <span class="n">-e</span> <span class="n">C</span><span class="p">:\</span><span class="n">path</span><span class="p">\</span><span class="n">to</span><span class="p">\</span><span class="n">2026-spectrocube</span>   <span class="c"># makes spectrocube importable</span>
 </code></pre></div>
 </div>
 </div>

@@ -672,6 +672,34 @@
 
               
             
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../spectrocube-batch-workflow/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Batch SpectroCube workflow
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
           </ul>
         </nav>
       
@@ -1288,6 +1316,61 @@ keep the 2-D <code>(frame, wavelength)</code> shape.  Default: <code>True</code>
           </tr>
           <tr class="doc-section-item">
             <td>
+                <code>drop_nonfinite_columns</code>
+            </td>
+            <td>
+                  <code><span title="bool">bool</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Drop wavelength columns where the wavelength or any frame intensity is
+non-finite.  This is useful for absolute calibration columns where a
+zero sphere response would otherwise create infinities.  Dropped column
+counts are recorded in metadata.  Default: <code>True</code>.</p>
+              </div>
+            </td>
+            <td>
+                  <code>True</code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>wavelength_min_nm</code>
+            </td>
+            <td>
+                  <code><span title="float">float</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Inclusive wavelength crop bounds in nm.  When supplied, the exported
+wavelength axis and intensity are cropped and the original range is
+recorded in metadata.</p>
+              </div>
+            </td>
+            <td>
+                  <code>None</code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>wavelength_max_nm</code>
+            </td>
+            <td>
+                  <code><span title="float">float</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Inclusive wavelength crop bounds in nm.  When supplied, the exported
+wavelength axis and intensity are cropped and the original range is
+recorded in metadata.</p>
+              </div>
+            </td>
+            <td>
+                  <code>None</code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
                 <code>**extra_attrs</code>
             </td>
             <td>
@@ -1504,7 +1587,7 @@ decreasing).</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Forwarded to :func:<code>to_spectrocube</code> — see its docstring for details.</p>
+                
               </div>
             </td>
             <td>
@@ -1513,10 +1596,42 @@ decreasing).</p>
           </tr>
           <tr class="doc-section-item">
             <td>
-                <code>**extra_attrs</code>
+                <code>drop_nonfinite_columns</code>
             </td>
             <td>
                   <code><span title="bool">bool</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                
+              </div>
+            </td>
+            <td>
+                  <code>True</code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>wavelength_min_nm</code>
+            </td>
+            <td>
+                  <code><span title="bool">bool</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                
+              </div>
+            </td>
+            <td>
+                  <code>True</code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>wavelength_max_nm</code>
+            </td>
+            <td>
+                  <code><span title="float">float</span> | None</code>
             </td>
             <td>
               <div class="doc-md-description">
@@ -1524,7 +1639,23 @@ decreasing).</p>
               </div>
             </td>
             <td>
-                  <code>True</code>
+                  <code>None</code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>**extra_attrs</code>
+            </td>
+            <td>
+                  <code><span title="float">float</span> | None</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Forwarded to :func:<code>to_spectrocube</code> — see its docstring for details.</p>
+              </div>
+            </td>
+            <td>
+                  <code>None</code>
             </td>
           </tr>
           <tr class="doc-section-item">
