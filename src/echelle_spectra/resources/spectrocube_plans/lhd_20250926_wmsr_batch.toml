@@ -1,0 +1,6 @@
+[plan]
+config = "../calibration_files/export_configs/lhd_cmos_20250926.toml"
+input_dir = "C:/Users/queez/Dropbox/Experiments/2025-LHD-BH/Echelle/20250926"
+output_dir = "C:/Users/queez/Dropbox/Experiments/2025-LHD-BH/Echelle/20250926/spectrocubes_wmsr_403nm"
+pattern = "*.SIF"
+verbose = true

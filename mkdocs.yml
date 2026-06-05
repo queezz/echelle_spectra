@@ -83,6 +83,7 @@ nav:
       - Calibration alignment: calibration-alignment.md
       - Wavelength line validation: line-validation.md
       - Exporting to SpectroCube: spectrocube-export.md
+      - Batch SpectroCube workflow: spectrocube-batch-workflow.md
   - API:
       - Pattern extraction: pattern-extraction-api.md
       - SpectroCube export: spectrocube-export-api.md

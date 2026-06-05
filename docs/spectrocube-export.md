@@ -161,6 +161,9 @@ the `spectrocube` package is not installed).
 
 After installation the `echelle-spectrocube` command is available on the PATH.
 
+For the current LHD CMOS dataset workflow, see
+[Batch SpectroCube workflow](spectrocube-batch-workflow.md).
+
 ### Single-file export
 
 ```bash

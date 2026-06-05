@@ -34,6 +34,10 @@ Before exporting a dataset, run the
 with Balmer lines, then use Fulcher-alpha line positions as supporting checks when
 the features are visible and not dominated by blends.
 
+After validation, use the
+[Batch SpectroCube workflow](spectrocube-batch-workflow.md) to generate cropped,
+absolute `wmsr` SpectroCube products from the dataset plan.
+
 ---
 
 ## GUI
