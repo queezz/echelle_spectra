@@ -726,6 +726,13 @@ class Calibrations:
         self.absolute = {"wmsr": wmsr, "wm": wm, "phmsr": phmsr}
 
 # MARK: Spectrum
+def _apply_absolute_calibration(counts, absolute_scale, exposure_time):
+    """Scale counts while allowing known non-finite calibration columns."""
+    with np.errstate(invalid="ignore"):
+        calibrated = counts * absolute_scale
+    return calibrated / exposure_time
+
+
 class Spectrum:
     """Echelle spectra converted from EchelleImage
     Contains image info, input - EchelleImage.order_image(....,sm=True)
@@ -789,9 +796,21 @@ class Spectrum:
             self.counts = np.flip(self.counts, axis=1)
             self.absolute = {i: np.flip(j) for i, j in self.absolute.items()}
 
-        self.wm = self.counts * self.absolute["wm"] / self.info["ExposureTime"]
-        self.wmsr = self.counts * self.absolute["wmsr"] / self.info["ExposureTime"]
-        self.phmsr = self.counts * self.absolute["phmsr"] / self.info["ExposureTime"]
+        self.wm = _apply_absolute_calibration(
+            self.counts,
+            self.absolute["wm"],
+            self.info["ExposureTime"],
+        )
+        self.wmsr = _apply_absolute_calibration(
+            self.counts,
+            self.absolute["wmsr"],
+            self.info["ExposureTime"],
+        )
+        self.phmsr = _apply_absolute_calibration(
+            self.counts,
+            self.absolute["phmsr"],
+            self.info["ExposureTime"],
+        )
 
         self.savepath = None
         self.shotnumber = None

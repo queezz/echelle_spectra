@@ -19,17 +19,21 @@ from echelle_spectra.tools.echelle import Spectrum
 # ---------------------------------------------------------------------------
 
 
-def _make_fake_image(spectra: np.ndarray) -> object:
+def _make_fake_image(
+    spectra: np.ndarray,
+    absolute: dict[str, np.ndarray] | None = None,
+) -> object:
     """Return a minimal duck-typed EchelleImage-like object."""
 
     n_wl = spectra.shape[1]
+    absolute_values = absolute or {
+        "wm": np.ones(n_wl),
+        "wmsr": np.ones(n_wl),
+        "phmsr": np.ones(n_wl),
+    }
 
     class _FakeClbr:
-        absolute = {
-            "wm": np.ones(n_wl),
-            "wmsr": np.ones(n_wl),
-            "phmsr": np.ones(n_wl),
-        }
+        absolute = absolute_values
         direction = 1  # positive: no flip
 
     class _FakeImage:
@@ -149,3 +153,20 @@ class TestSingleFrame:
         spectra = rng.integers(100, 5000, size=(1, 30)).astype(float)
         sp = Spectrum(_make_fake_image(spectra))
         assert np.all(np.isfinite(sp.counts))
+
+
+class TestAbsoluteCalibrationWarnings:
+    def test_zero_counts_times_infinite_calibration_does_not_warn(self):
+        spectra = np.zeros((1, 5), dtype=float)
+        absolute = {
+            "wm": np.array([1.0, np.inf, 1.0, np.nan, 1.0]),
+            "wmsr": np.array([1.0, np.inf, 1.0, np.nan, 1.0]),
+            "phmsr": np.array([1.0, np.inf, 1.0, np.nan, 1.0]),
+        }
+        img = _make_fake_image(spectra, absolute=absolute)
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", RuntimeWarning)
+            sp = Spectrum(img)
+
+        assert np.count_nonzero(~np.isfinite(sp.wmsr)) == 2
