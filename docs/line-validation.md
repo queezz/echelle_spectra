@@ -102,6 +102,41 @@ right detector/wavelength neighborhood.
 Downstream Fulcher extraction, deblending, population analysis, and temperature
 fits stay in `fulcheranalyzer` or later SpectroCube consumers.
 
+### 2026-06-10 order-8 Fulcher-alpha check
+
+A local QC run compared the accepted 20250926 aligned wavelength table against a
+candidate table with the order-8 `H2 629.662` calibration row removed:
+
+```text
+local/fulcher_alpha_calibration_qc/2026-06-10_22-04-fulcher-alpha-calibration-qc
+```
+
+The run selected downstream "good" Fulcher-alpha H2 Q-branch lines from the
+`2026-fulcher-extractor` policy set:
+
+- overview QC lines;
+- `matrix_action=keep`;
+- not Boltzmann-excluded;
+- not `suspicious` or `accept_with_warning`;
+- including trusted decontaminated overview lines without explicit policy rows.
+
+On `local/193778_Echelle.SIF`, the comparison was:
+
+| calibration | selected | fit | missed | order-8 RMS nm | all-line RMS nm | max abs nm |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| `aligned_20250926` | 15 | 11 | 4 | 0.079666 | 0.054069 | 0.159501 |
+| `drop_order8_h2_629662` | 15 | 10 | 5 | 0.044075 | 0.028627 | 0.087834 |
+
+This supports the earlier lamp-line QC result: the order-8 `H2 629.662` row is
+not a safe calibration anchor for the 20250926 wavelength table. Removing it
+improves Fulcher-alpha reproduction, but does not fully solve the local
+623-630 nm problem. In particular, `H2_Q9_1-1` at `623.7457 nm` remains a large
+positive residual (`+0.087834 nm`) in the candidate table, and `H2_Q7_2-2` at
+`629.6622 nm` drops below the current fit criteria after the row is removed.
+
+Treat this as evidence for a local order-aware correction pass rather than as a
+final replacement calibration.
+
 ---
 
 ## Python API
