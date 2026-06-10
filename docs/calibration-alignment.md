@@ -45,6 +45,58 @@ candidates = select_candidate_lines(rows)
 NIST matching is intentionally not part of v1.  The local curated table is reproducible
 and keeps the manual comments that already flag doubtful lines.
 
+For calibration review, cached NIST ASD line exports can be overlaid on a lamp
+order spectrum with `echelle-nist-overlay`. This is a diagnostic tool for
+finding candidate anchors; it does not download from NIST or change resource
+tables by itself.
+
+Example using cached Th I and Ar I CSV exports:
+
+```bash
+echelle-nist-overlay \
+  src/echelle_spectra/resources/calibration_files/ThAr-0.3s-x3_20240305.sif \
+  --line-list ThI=local/thar_nist_synthetic_overlay/nist_th_i_600_640.csv \
+  --line-list ArI=local/thar_nist_synthetic_overlay/nist_ar_i_600_640.csv \
+  --orders 8 \
+  --min-nm 608 \
+  --max-nm 634.5 \
+  --output-dir local/thar_nist_synthetic_overlay/order8-review \
+  --candidate-table-out local/thar_nist_synthetic_overlay/order8-review/Th_wavelength_CMOS_20240305_plus_order8_nist_thar_candidates.txt
+```
+
+Common lamp presets can also be resolved from cached NIST ASD exports. Presets
+include `thar`, `hg`, `ne`, `he`, `ar`, `th`, `h`, and `h2`; ion stages I and II
+are included where useful. The package bundles a small curated ThAr cache
+covering 578-640 nm for Fulcher-alpha calibration review, so the ThAr preset can
+be used without an explicit cache directory in that window:
+
+```bash
+echelle-nist-overlay \
+  src/echelle_spectra/resources/calibration_files/ThAr-0.3s-x3_20240305.sif \
+  --lamp thar \
+  --orders 8-10 \
+  --min-nm 578 \
+  --max-nm 635 \
+  --output-dir local/runs/2026-06-11_thar-review
+```
+
+Use `--line-list-dir` for lamps or wavelength ranges not present in the bundled
+cache. The CLI still requires cached NIST ASD exports; it does not query NIST
+during a calibration run. Use `echelle-nist-overlay --list-lamps` to inspect the
+built-in presets.
+
+The overlay writes:
+
+- order plots with measured lamp spectra, line-list sticks, and broadened synthetic spectra;
+- measured peak and nearest-line CSVs;
+- a candidate-anchor CSV;
+- optionally, a generated candidate wavelength table.
+
+Review the overlay plot before promoting candidate rows. Dense Th I regions can
+have many nearby NIST lines, so the candidate filter requires a local dominant
+line, a successful Gaussian centroid, and a wavelength match within the chosen
+tolerance.
+
 ---
 
 ## Fit centroids

@@ -137,6 +137,44 @@ positive residual (`+0.087834 nm`) in the candidate table, and `H2_Q7_2-2` at
 Treat this as evidence for a local order-aware correction pass rather than as a
 final replacement calibration.
 
+### 2026-06-10 Th-Ar/NIST order-8 candidate check
+
+A follow-up local run used the old 2024 Th-Ar lamp with cached NIST ASD Th I and
+Ar I line exports to generate independent order-8 candidate anchors:
+
+```text
+local/thar_nist_synthetic_overlay/2026-06-11_00-05-package-smoke-pixel-fix
+```
+
+The valid package-generated run fixed detector-pixel bookkeeping for decreasing
+wavelength orders and produced:
+
+- `Th_wavelength_CMOS_20240305_plus_order8_nist_thar_candidates.txt`
+- `Th_wavelength_CMOS_20240305_plus_order8_nist_thar_drop_h2_629662_aligned_to_20250926.txt`
+- `2026-06-11_00-03-fulcher-alpha-qc-corrected-thar-drop629/`
+
+The most useful candidate disabled the old order-8 `H2 629.6622` row, added
+NIST-backed Th/Ar rows to the 2024 table, then applied the normal 2025 Ne-lamp
+rigid alignment. Order-8 wavelength-table residuals improved substantially:
+
+| calibration | order-8 rows | order-8 RMS nm | max abs nm |
+| --- | ---: | ---: | ---: |
+| `aligned_20250926` | 9 | 0.069843 | 0.161373 |
+| `aligned_plus_order8_thar_drop629` | 18 | 0.007298 | 0.026176 |
+
+Fulcher-alpha reproduction also improved:
+
+| calibration | selected | fit | missed | order-8 RMS nm | all-line RMS nm | max abs nm |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| `aligned_20250926` | 15 | 11 | 4 | 0.079666 | 0.054069 | 0.159501 |
+| `aligned_plus_order8_thar_drop629` | 15 | 10 | 5 | 0.045576 | 0.029552 | 0.091117 |
+
+The extra missed line is `H2_Q7_2-2` at `629.6622 nm`, which is expected when
+the calibration no longer forces that endpoint feature. The mid-order Q branch
+improves: for example, `H2_Q2_2-2` moves from `-0.006696 nm` to `-0.001229 nm`,
+and `H2_Q3_2-2` moves from `-0.015923 nm` to `-0.002203 nm`. `H2_Q9_1-1`
+remains a likely blend/identity problem rather than a clean calibration anchor.
+
 ---
 
 ## Python API

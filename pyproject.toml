@@ -57,6 +57,7 @@ echelle-pattern = "echelle_spectra.pattern_cli:main"
 echelle-align = "echelle_spectra.alignment_cli:main"
 echelle-validate-lines = "echelle_spectra.line_validation_cli:main"
 echelle-wavelength-qc = "echelle_spectra.wavelength_qc_cli:main"
+echelle-nist-overlay = "echelle_spectra.nist_overlay_cli:main"
 echelle-spectrocube = "echelle_spectra.spectrocube_cli:main"
 
 [project.optional-dependencies]
@@ -111,6 +112,7 @@ where = ["src"]
   "resources/calibration_files/*",
   "resources/calibration_files/alignments/*",
   "resources/calibration_files/export_configs/*",
+  "resources/nist_asd_cache/*.csv",
   "resources/spectrocube_plans/*",
   "resources/test_data/*",
 ]
