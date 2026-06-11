@@ -729,6 +729,45 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Fulcher checks">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#2026-06-10-order-8-fulcher-alpha-check" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2026-06-10 order-8 Fulcher-alpha check
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2026-06-11-promoted-order-8-tharnist-correction" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2026-06-11 promoted order-8 ThAr/NIST correction
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2026-06-10-th-arnist-order-8-candidate-check" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2026-06-10 Th-Ar/NIST order-8 candidate check
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -1165,6 +1204,45 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Fulcher checks">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#2026-06-10-order-8-fulcher-alpha-check" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2026-06-10 order-8 Fulcher-alpha check
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2026-06-11-promoted-order-8-tharnist-correction" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2026-06-11 promoted order-8 ThAr/NIST correction
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2026-06-10-th-arnist-order-8-candidate-check" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2026-06-10 Th-Ar/NIST order-8 candidate check
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -1322,24 +1400,229 @@ use Fulcher lines to confirm that the molecular band structure lands in the
 right detector/wavelength neighborhood.</p>
 <p>Downstream Fulcher extraction, deblending, population analysis, and temperature
 fits stay in <code>fulcheranalyzer</code> or later SpectroCube consumers.</p>
+<h3 id="2026-06-10-order-8-fulcher-alpha-check">2026-06-10 order-8 Fulcher-alpha check<a class="headerlink" href="#2026-06-10-order-8-fulcher-alpha-check" title="Permanent link">¶</a></h3>
+<p>A local QC run compared the accepted 20250926 aligned wavelength table against a
+candidate table with the order-8 <code>H2 629.662</code> calibration row removed:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>local/fulcher_alpha_calibration_qc/2026-06-10_22-04-fulcher-alpha-calibration-qc
+</code></pre></div>
+<p>The run selected downstream "good" Fulcher-alpha H2 Q-branch lines from the
+<code>2026-fulcher-extractor</code> policy set:</p>
+<ul>
+<li>overview QC lines;</li>
+<li><code>matrix_action=keep</code>;</li>
+<li>not Boltzmann-excluded;</li>
+<li>not <code>suspicious</code> or <code>accept_with_warning</code>;</li>
+<li>including trusted decontaminated overview lines without explicit policy rows.</li>
+</ul>
+<p>On <code>local/193778_Echelle.SIF</code>, the comparison was:</p>
+<table>
+<thead>
+<tr>
+<th>calibration</th>
+<th style="text-align: right;">selected</th>
+<th style="text-align: right;">fit</th>
+<th style="text-align: right;">missed</th>
+<th style="text-align: right;">order-8 RMS nm</th>
+<th style="text-align: right;">all-line RMS nm</th>
+<th style="text-align: right;">max abs nm</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>aligned_20250926</code></td>
+<td style="text-align: right;">15</td>
+<td style="text-align: right;">11</td>
+<td style="text-align: right;">4</td>
+<td style="text-align: right;">0.079666</td>
+<td style="text-align: right;">0.054069</td>
+<td style="text-align: right;">0.159501</td>
+</tr>
+<tr>
+<td><code>drop_order8_h2_629662</code></td>
+<td style="text-align: right;">15</td>
+<td style="text-align: right;">10</td>
+<td style="text-align: right;">5</td>
+<td style="text-align: right;">0.044075</td>
+<td style="text-align: right;">0.028627</td>
+<td style="text-align: right;">0.087834</td>
+</tr>
+</tbody>
+</table>
+<p>This supports the earlier lamp-line QC result: the order-8 <code>H2 629.662</code> row is
+not a safe calibration anchor for the 20250926 wavelength table. Removing it
+improves Fulcher-alpha reproduction, but does not fully solve the local
+623-630 nm problem. In particular, <code>H2_Q9_1-1</code> at <code>623.7457 nm</code> remains a large
+positive residual (<code>+0.087834 nm</code>) in the candidate table, and <code>H2_Q7_2-2</code> at
+<code>629.6622 nm</code> drops below the current fit criteria after the row is removed.</p>
+<p>Treat this as evidence for a local order-aware correction pass rather than as a
+final replacement calibration.</p>
+<h3 id="2026-06-11-promoted-order-8-tharnist-correction">2026-06-11 promoted order-8 ThAr/NIST correction<a class="headerlink" href="#2026-06-11-promoted-order-8-tharnist-correction" title="Permanent link">¶</a></h3>
+<p>The default 20250926-aligned CMOS wavelength table now carries the reviewed
+order-8 correction:</p>
+<ul>
+<li>the old order-8 <code>H2 629.6622</code> endpoint row is disabled;</li>
+<li>reviewed order-8 ThAr/NIST rows from the 2024 ThAr lamp are added from
+  <code>611.49232</code> to <code>622.45271 nm</code>;</li>
+<li>the ambiguous 626 nm lamp feature is represented as a <code>ThBlend</code> compound
+  centroid at <code>626.12439 nm</code>, using the local <code>Th II 626.106436</code> and
+  <code>Th I 626.14181</code> structure instead of promoting either line as isolated.</li>
+</ul>
+<p>The package-resource QC run is:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>local/runs/2026-06-11_00-30-fulcher-orders8-10-nist-review/package_resource_qc_after_thblend626
+</code></pre></div>
+<p>Order-8 wavelength-table residuals improve from the old aligned table's
+<code>0.069843 nm</code> RMS / <code>0.161373 nm</code> max residual to:</p>
+<table>
+<thead>
+<tr>
+<th>calibration</th>
+<th style="text-align: right;">order-8 rows</th>
+<th style="text-align: right;">order-8 RMS nm</th>
+<th style="text-align: right;">max abs nm</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>updated_aligned</code></td>
+<td style="text-align: right;">17</td>
+<td style="text-align: right;">0.002617</td>
+<td style="text-align: right;">0.005914</td>
+</tr>
+</tbody>
+</table>
+<p>In the disputed 626-630 nm region, the updated aligned table has:</p>
+<table>
+<thead>
+<tr>
+<th>row</th>
+<th style="text-align: right;">residual nm</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ThBlend 626.12439</code></td>
+<td style="text-align: right;">-0.005914</td>
+</tr>
+<tr>
+<td><code>NeI 626.64900</code></td>
+<td style="text-align: right;">+0.002281</td>
+</tr>
+<tr>
+<td><code>NeI 630.47800</code></td>
+<td style="text-align: right;">+0.001420</td>
+</tr>
+</tbody>
+</table>
+<p>A focused variant pass compared single-line and blend interpretations:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>local/runs/2026-06-11_00-30-fulcher-orders8-10-nist-review/calibration_variant_work
+</code></pre></div>
+<p>The <code>ThBlend 626.12439</code> row is slightly worse than dropping the 626 nm feature
+entirely by raw order-8 RMS, but it preserves real local ThAr structure and keeps
+the order-8 max residual below <code>0.006 nm</code>. Reintroducing <code>H2 629.6622</code> fails the
+lamp-line gate, with order-8 RMS <code>0.050685 nm</code> and max residual <code>0.170773 nm</code>.</p>
+<p>Fulcher-alpha validation remains a secondary check rather than the primary row
+promotion signal. The selected-Fulcher variant comparison found the <code>ThBlend</code>
+table and the <code>Th II 626.106436</code> table nearly tied; the large remaining order-8
+Fulcher residual is still <code>H2_Q9_1-1</code>, a blend/identity issue near <code>623.7457 nm</code>.
+<code>H2_Q7_2-2</code> at <code>629.6622 nm</code> remains missed after the endpoint row is removed,
+so it is validation evidence requiring multi-component Fulcher fitting, not a
+safe wavelength-table anchor.</p>
+<h3 id="2026-06-10-th-arnist-order-8-candidate-check">2026-06-10 Th-Ar/NIST order-8 candidate check<a class="headerlink" href="#2026-06-10-th-arnist-order-8-candidate-check" title="Permanent link">¶</a></h3>
+<p>A follow-up local run used the old 2024 Th-Ar lamp with cached NIST ASD Th I and
+Ar I line exports to generate independent order-8 candidate anchors:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>local/thar_nist_synthetic_overlay/2026-06-11_00-05-package-smoke-pixel-fix
+</code></pre></div>
+<p>The valid package-generated run fixed detector-pixel bookkeeping for decreasing
+wavelength orders and produced:</p>
+<ul>
+<li><code>Th_wavelength_CMOS_20240305_plus_order8_nist_thar_candidates.txt</code></li>
+<li><code>Th_wavelength_CMOS_20240305_plus_order8_nist_thar_drop_h2_629662_aligned_to_20250926.txt</code></li>
+<li><code>2026-06-11_00-03-fulcher-alpha-qc-corrected-thar-drop629/</code></li>
+</ul>
+<p>The most useful candidate disabled the old order-8 <code>H2 629.6622</code> row, added
+NIST-backed Th/Ar rows to the 2024 table, then applied the normal 2025 Ne-lamp
+rigid alignment. Order-8 wavelength-table residuals improved substantially:</p>
+<table>
+<thead>
+<tr>
+<th>calibration</th>
+<th style="text-align: right;">order-8 rows</th>
+<th style="text-align: right;">order-8 RMS nm</th>
+<th style="text-align: right;">max abs nm</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>aligned_20250926</code></td>
+<td style="text-align: right;">9</td>
+<td style="text-align: right;">0.069843</td>
+<td style="text-align: right;">0.161373</td>
+</tr>
+<tr>
+<td><code>aligned_plus_order8_thar_drop629</code></td>
+<td style="text-align: right;">18</td>
+<td style="text-align: right;">0.007298</td>
+<td style="text-align: right;">0.026176</td>
+</tr>
+</tbody>
+</table>
+<p>Fulcher-alpha reproduction also improved:</p>
+<table>
+<thead>
+<tr>
+<th>calibration</th>
+<th style="text-align: right;">selected</th>
+<th style="text-align: right;">fit</th>
+<th style="text-align: right;">missed</th>
+<th style="text-align: right;">order-8 RMS nm</th>
+<th style="text-align: right;">all-line RMS nm</th>
+<th style="text-align: right;">max abs nm</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>aligned_20250926</code></td>
+<td style="text-align: right;">15</td>
+<td style="text-align: right;">11</td>
+<td style="text-align: right;">4</td>
+<td style="text-align: right;">0.079666</td>
+<td style="text-align: right;">0.054069</td>
+<td style="text-align: right;">0.159501</td>
+</tr>
+<tr>
+<td><code>aligned_plus_order8_thar_drop629</code></td>
+<td style="text-align: right;">15</td>
+<td style="text-align: right;">10</td>
+<td style="text-align: right;">5</td>
+<td style="text-align: right;">0.045576</td>
+<td style="text-align: right;">0.029552</td>
+<td style="text-align: right;">0.091117</td>
+</tr>
+</tbody>
+</table>
+<p>The extra missed line is <code>H2_Q7_2-2</code> at <code>629.6622 nm</code>, which is expected when
+the calibration no longer forces that endpoint feature. The mid-order Q branch
+improves: for example, <code>H2_Q2_2-2</code> moves from <code>-0.006696 nm</code> to <code>-0.001229 nm</code>,
+and <code>H2_Q3_2-2</code> moves from <code>-0.015923 nm</code> to <code>-0.002203 nm</code>. <code>H2_Q9_1-1</code>
+remains a likely blend/identity problem rather than a clean calibration anchor.</p>
 <hr>
 <h2 id="python-api">Python API<a class="headerlink" href="#python-api" title="Permanent link">¶</a></h2>
 <p>The core helper operates on extracted spectra and caller-supplied line tables:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">echelle_spectra.tools.line_validation</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>    <span class="n">balmer_air_targets</span><span class="p">,</span>
-<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>    <span class="n">build_stitched_order_index</span><span class="p">,</span>
-<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>    <span class="n">validate_lines</span><span class="p">,</span>
-<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="p">)</span>
-<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a>
-<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="n">targets</span> <span class="o">=</span> <span class="n">balmer_air_targets</span><span class="p">()</span>
-<a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a><span class="n">order_index</span> <span class="o">=</span> <span class="n">build_stitched_order_index</span><span class="p">(</span><span class="n">calibration</span><span class="p">)</span>
-<a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a><span class="n">results</span> <span class="o">=</span> <span class="n">validate_lines</span><span class="p">(</span>
-<a id="__codelineno-4-10" name="__codelineno-4-10" href="#__codelineno-4-10"></a>    <span class="n">spectrum</span><span class="o">.</span><span class="n">wavelength</span><span class="p">,</span>
-<a id="__codelineno-4-11" name="__codelineno-4-11" href="#__codelineno-4-11"></a>    <span class="n">spectrum</span><span class="o">.</span><span class="n">counts</span><span class="p">,</span>
-<a id="__codelineno-4-12" name="__codelineno-4-12" href="#__codelineno-4-12"></a>    <span class="n">targets</span><span class="p">,</span>
-<a id="__codelineno-4-13" name="__codelineno-4-13" href="#__codelineno-4-13"></a>    <span class="n">signal_frames</span><span class="o">=</span><span class="nb">range</span><span class="p">(</span><span class="mi">40</span><span class="p">),</span>
-<a id="__codelineno-4-14" name="__codelineno-4-14" href="#__codelineno-4-14"></a>    <span class="n">order_index</span><span class="o">=</span><span class="n">order_index</span><span class="p">,</span>
-<a id="__codelineno-4-15" name="__codelineno-4-15" href="#__codelineno-4-15"></a><span class="p">)</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">echelle_spectra.tools.line_validation</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>    <span class="n">balmer_air_targets</span><span class="p">,</span>
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>    <span class="n">build_stitched_order_index</span><span class="p">,</span>
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a>    <span class="n">validate_lines</span><span class="p">,</span>
+<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="p">)</span>
+<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a>
+<a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a><span class="n">targets</span> <span class="o">=</span> <span class="n">balmer_air_targets</span><span class="p">()</span>
+<a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a><span class="n">order_index</span> <span class="o">=</span> <span class="n">build_stitched_order_index</span><span class="p">(</span><span class="n">calibration</span><span class="p">)</span>
+<a id="__codelineno-8-9" name="__codelineno-8-9" href="#__codelineno-8-9"></a><span class="n">results</span> <span class="o">=</span> <span class="n">validate_lines</span><span class="p">(</span>
+<a id="__codelineno-8-10" name="__codelineno-8-10" href="#__codelineno-8-10"></a>    <span class="n">spectrum</span><span class="o">.</span><span class="n">wavelength</span><span class="p">,</span>
+<a id="__codelineno-8-11" name="__codelineno-8-11" href="#__codelineno-8-11"></a>    <span class="n">spectrum</span><span class="o">.</span><span class="n">counts</span><span class="p">,</span>
+<a id="__codelineno-8-12" name="__codelineno-8-12" href="#__codelineno-8-12"></a>    <span class="n">targets</span><span class="p">,</span>
+<a id="__codelineno-8-13" name="__codelineno-8-13" href="#__codelineno-8-13"></a>    <span class="n">signal_frames</span><span class="o">=</span><span class="nb">range</span><span class="p">(</span><span class="mi">40</span><span class="p">),</span>
+<a id="__codelineno-8-14" name="__codelineno-8-14" href="#__codelineno-8-14"></a>    <span class="n">order_index</span><span class="o">=</span><span class="n">order_index</span><span class="p">,</span>
+<a id="__codelineno-8-15" name="__codelineno-8-15" href="#__codelineno-8-15"></a><span class="p">)</span>
 </code></pre></div>
 <p>Each result contains:</p>
 <ul>
