@@ -72,6 +72,26 @@ def test_default_nist_cache_contains_curated_th_ar_exports():
     }
 
 
+def test_default_nist_cache_contains_curated_hg_exports():
+    resolved = resolve_cached_line_lists(lamps=["hg"], cache_dir=default_nist_cache_dir())
+
+    assert set(resolved) == {"HgI", "HgII"}
+    assert {path.name for path in resolved.values()} == {
+        "nist_hg_i_578_640.csv",
+        "nist_hg_ii_578_640.csv",
+    }
+
+
+def test_default_nist_cache_contains_curated_ne_exports():
+    resolved = resolve_cached_line_lists(lamps=["ne"], cache_dir=default_nist_cache_dir())
+
+    assert set(resolved) == {"NeI", "NeII"}
+    assert {path.name for path in resolved.values()} == {
+        "nist_ne_i_578_640.csv",
+        "nist_ne_ii_578_640.csv",
+    }
+
+
 def test_load_nist_asd_exports_reads_csv_and_tsv(tmp_path: Path):
     csv_path = tmp_path / "nist_hg_i.csv"
     csv_path.write_text(

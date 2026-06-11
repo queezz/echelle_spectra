@@ -372,29 +372,44 @@ def plot_order_residuals(result: WavelengthQcResult, output_dir: str | Path) -> 
     """Plot per-order residual RMS and dispersion smoothness."""
     out = Path(output_dir)
     fig, axes = plt.subplots(2, 1, figsize=(12, 8), sharex=False, constrained_layout=True)
-    for table in result.tables:
+    markers = ("o", "s", "^", "D", "v", "P", "X")
+    linestyles = ("-", "--", "-.", ":")
+    all_orders = sorted(
+        {fit.order for fits_by_order in result.fits.values() for fit in fits_by_order.values()}
+    )
+    for index, table in enumerate(result.tables):
         fits = result.fits[table.name]
+        orders = [fit.order for fit in fits.values()]
         axes[0].plot(
-            [fit.order for fit in fits.values()],
+            orders,
             [fit.rms_residual_nm for fit in fits.values()],
-            marker="o",
+            marker=markers[index % len(markers)],
+            linestyle=linestyles[index % len(linestyles)],
             label=table.name,
         )
         axes[1].plot(
-            [fit.order for fit in fits.values()],
+            orders,
             [fit.slope_mid_nm_per_px for fit in fits.values()],
-            marker="o",
+            marker=markers[index % len(markers)],
+            linestyle=linestyles[index % len(linestyles)],
             label=table.name,
         )
+    if all_orders:
+        for ax in axes:
+            ax.set_xlim(min(all_orders) - 0.5, max(all_orders) + 0.5)
+            ax.set_xticks(all_orders)
+            ax.tick_params(axis="x", labelsize=8)
     axes[0].set_title("Per-order polynomial residual RMS")
     axes[0].set_xlabel("order")
     axes[0].set_ylabel("RMS residual, nm")
-    axes[0].grid(True, alpha=0.2)
+    axes[0].grid(True, axis="y", alpha=0.25)
+    axes[0].grid(True, axis="x", alpha=0.12)
     axes[0].legend()
     axes[1].set_title("Mid-order dispersion smoothness")
     axes[1].set_xlabel("order")
     axes[1].set_ylabel("d wavelength / d pixel, nm/px")
-    axes[1].grid(True, alpha=0.2)
+    axes[1].grid(True, axis="y", alpha=0.25)
+    axes[1].grid(True, axis="x", alpha=0.12)
     axes[1].legend()
     fig.savefig(out / "order_residual_and_dispersion_qc.png", dpi=180)
     plt.close(fig)

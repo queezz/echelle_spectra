@@ -66,9 +66,9 @@ echelle-nist-overlay \
 
 Common lamp presets can also be resolved from cached NIST ASD exports. Presets
 include `thar`, `hg`, `ne`, `he`, `ar`, `th`, `h`, and `h2`; ion stages I and II
-are included where useful. The package bundles a small curated ThAr cache
-covering 578-640 nm for Fulcher-alpha calibration review, so the ThAr preset can
-be used without an explicit cache directory in that window:
+are included where useful. The package bundles small curated ThAr, Hg, and Ne
+caches covering 578-640 nm for Fulcher-alpha calibration review, so those presets
+can be used without an explicit cache directory in that window:
 
 ```bash
 echelle-nist-overlay \
@@ -95,7 +95,21 @@ The overlay writes:
 Review the overlay plot before promoting candidate rows. Dense Th I regions can
 have many nearby NIST lines, so the candidate filter requires a local dominant
 line, a successful Gaussian centroid, and a wavelength match within the chosen
-tolerance.
+tolerance. Treat the synthetic trace as line-position and local-structure
+evidence, not as a calibrated lamp-intensity model; NIST tabular relative
+intensities may not match the measured lamp, detector, and extraction response.
+
+For Fulcher-alpha order-8 review, inspect neighboring overlapping orders as well.
+Some wavelengths near the edge of order 8 are better centered in order 7, so
+order 7 can verify that a local lamp structure is real even when the order-8
+polynomial is poorly constrained.
+
+`echelle-wavelength-qc` writes `order_residual_and_dispersion_qc.png`. The upper
+panel shows per-order wavelength-table RMS. The lower panel shows mid-order
+dispersion smoothness, defined as the derivative of each fitted wavelength
+polynomial at detector center, in nm/pixel. A kink in this curve can indicate a
+physically implausible order solution even when an individual order has acceptable
+statistics.
 
 ---
 

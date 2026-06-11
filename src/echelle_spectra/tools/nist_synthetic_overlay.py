@@ -318,7 +318,21 @@ def _plot_order(
     ax.set_title(f"Order {order} lamp with synthetic line-list overlay", loc="left")
 
     ax2.plot(wavelength, norm, color="black", lw=0.8, label="baseline-subtracted lamp")
-    ax2.plot(wavelength, synthetic, color="#157a6e", lw=1.0, label="synthetic sticks")
+    synthetic_display = synthetic
+    norm_scale = (
+        float(np.nanpercentile(norm[np.isfinite(norm)], 99.5))
+        if np.any(np.isfinite(norm))
+        else 1.0
+    )
+    if np.isfinite(norm_scale) and norm_scale > 1.0:
+        synthetic_display = synthetic * norm_scale
+    ax2.plot(
+        wavelength,
+        synthetic_display,
+        color="#157a6e",
+        lw=1.0,
+        label="synthetic line positions (display-scaled)",
+    )
     for peak in peaks:
         x = float(peak["peak_nm_current_table"])
         ax2.scatter(
