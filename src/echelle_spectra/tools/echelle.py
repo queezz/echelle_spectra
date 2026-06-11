@@ -788,6 +788,36 @@ class Spectrum:
         self.direction = image.clbr.direction
         self.calibration_folder = getattr(image.clbr, "folder", None)
         self.calibration_files = dict(getattr(image.clbr, "filenames", {}))
+        self.calibration_order_half_width_px = int(getattr(image.clbr, "dv", 0))
+        self.calibration_detector_width_px = int(getattr(image.clbr, "DIMW", 0))
+        order_borders = getattr(image.clbr, "order_borders", None)
+        order_wavel = getattr(image.clbr, "order_wavel", None)
+        self.calibration_order_count = int(order_borders.shape[0]) if order_borders is not None else 0
+        self.order_border_pixel_ranges = []
+        self.order_wavelength_ranges_nm = []
+        for order_idx, order_mask in enumerate(order_borders if order_borders is not None else []):
+            pixels = np.flatnonzero(order_mask)
+            if pixels.size:
+                self.order_border_pixel_ranges.append(
+                    {
+                        "order": int(order_idx),
+                        "start_px": int(pixels[0]),
+                        "end_px": int(pixels[-1]),
+                        "n_px": int(pixels.size),
+                    }
+                )
+            if order_wavel is not None and order_idx < len(order_wavel):
+                order_wavelength = np.asarray(order_wavel[order_idx])
+                finite_wavelength = order_wavelength[np.isfinite(order_wavelength)]
+                if finite_wavelength.size:
+                    self.order_wavelength_ranges_nm.append(
+                        {
+                            "order": int(order_idx),
+                            "min_nm": float(np.min(finite_wavelength)),
+                            "max_nm": float(np.max(finite_wavelength)),
+                            "n_px": int(finite_wavelength.size),
+                        }
+                    )
         image = None
 
         # Flip wavelength, it is from high to low by default for black Echelle

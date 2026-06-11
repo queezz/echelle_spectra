@@ -17,6 +17,9 @@ Design notes
 from __future__ import annotations
 
 import datetime
+import hashlib
+import json
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -65,6 +68,34 @@ _MAX_NONMONOTONIC_FRACTION = 0.02
 # Absolute floor: always allow up to this many reversals regardless of axis
 # size.  An echelle spectrum has ~30 orders so well under this in practice.
 _MAX_NONMONOTONIC_ABSOLUTE = 50
+
+
+def _json_attr(value: object) -> str:
+    """Serialize structured metadata into a stable NetCDF string attribute."""
+    return json.dumps(value, sort_keys=True, separators=(",", ":"))
+
+
+def _resolve_calibration_file(folder: object, filename: object) -> Path | None:
+    if not filename:
+        return None
+    path = Path(str(filename))
+    if not path.is_absolute() and folder is not None:
+        path = Path(str(folder)) / path
+    return path
+
+
+def _file_digest(path: Path | None) -> dict[str, object] | None:
+    if path is None or not path.is_file():
+        return None
+    digest = hashlib.sha256()
+    with path.open("rb") as fh:
+        for block in iter(lambda: fh.read(1024 * 1024), b""):
+            digest.update(block)
+    return {
+        "path": str(path),
+        "size_bytes": int(path.stat().st_size),
+        "sha256": digest.hexdigest(),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -396,6 +427,39 @@ def to_spectrocube(
             attrs["calibration_order_pattern_file"] = str(calibration_files["orders"])
         if calibration_files.get("wavelength"):
             attrs["wavelength_calibration_file"] = str(calibration_files["wavelength"])
+        if calibration_files.get("integral"):
+            attrs["absolute_calibration_integral_file"] = str(calibration_files["integral"])
+        file_digests = {
+            key: digest
+            for key in ("orders", "wavelength", "integral")
+            if (
+                digest := _file_digest(
+                    _resolve_calibration_file(
+                        calibration_folder,
+                        calibration_files.get(key),
+                    )
+                )
+            )
+        }
+        if file_digests:
+            attrs["calibration_file_digests_json"] = _json_attr(file_digests)
+
+    for attr_name in (
+        "calibration_order_count",
+        "calibration_detector_width_px",
+        "calibration_order_half_width_px",
+    ):
+        value = getattr(spectrum, attr_name, None)
+        if value is not None:
+            attrs[attr_name] = int(value)
+
+    order_border_pixel_ranges = getattr(spectrum, "order_border_pixel_ranges", None)
+    if order_border_pixel_ranges:
+        attrs["order_border_pixel_ranges_json"] = _json_attr(order_border_pixel_ranges)
+
+    order_wavelength_ranges_nm = getattr(spectrum, "order_wavelength_ranges_nm", None)
+    if order_wavelength_ranges_nm:
+        attrs["order_wavelength_ranges_nm_json"] = _json_attr(order_wavelength_ranges_nm)
 
     if unit_meta["calibration_type"] == "absolute" and calibration_source is not None:
         attrs["calibration_source"] = calibration_source

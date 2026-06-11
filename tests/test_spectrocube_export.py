@@ -6,6 +6,8 @@ calibration resources are needed.
 
 from __future__ import annotations
 
+import json
+
 import numpy as np
 import pytest
 
@@ -59,6 +61,17 @@ def _make_synthetic_spectrum(
         "orders": "pattern_CMOS_20250926.txt",
         "wavelength": "alignments/Th_wavelength_CMOS_20240305_aligned_to_20250926.txt",
     }
+    sp.calibration_order_count = 2
+    sp.calibration_detector_width_px = 2304
+    sp.calibration_order_half_width_px = 8
+    sp.order_border_pixel_ranges = [
+        {"order": 0, "start_px": 0, "end_px": 1000, "n_px": 1001},
+        {"order": 1, "start_px": 1001, "end_px": 2303, "n_px": 1303},
+    ]
+    sp.order_wavelength_ranges_nm = [
+        {"order": 0, "min_nm": 600.0, "max_nm": 650.0, "n_px": 2304},
+        {"order": 1, "min_nm": 550.0, "max_nm": 610.0, "n_px": 2304},
+    ]
 
     return sp
 
@@ -180,6 +193,21 @@ class TestToSpectrocube:
             sc.ds.attrs["wavelength_calibration_file"]
             == "alignments/Th_wavelength_CMOS_20240305_aligned_to_20250926.txt"
         )
+
+    def test_order_border_metadata_preserved(self):
+        sp = _make_synthetic_spectrum()
+        sc = to_spectrocube(sp)
+        assert sc.ds.attrs["calibration_order_count"] == 2
+        assert sc.ds.attrs["calibration_detector_width_px"] == 2304
+        assert sc.ds.attrs["calibration_order_half_width_px"] == 8
+        assert json.loads(sc.ds.attrs["order_border_pixel_ranges_json"]) == [
+            {"end_px": 1000, "n_px": 1001, "order": 0, "start_px": 0},
+            {"end_px": 2303, "n_px": 1303, "order": 1, "start_px": 1001},
+        ]
+        assert json.loads(sc.ds.attrs["order_wavelength_ranges_nm_json"]) == [
+            {"max_nm": 650.0, "min_nm": 600.0, "n_px": 2304, "order": 0},
+            {"max_nm": 610.0, "min_nm": 550.0, "n_px": 2304, "order": 1},
+        ]
 
     def test_invalid_units_raises(self):
         sp = _make_synthetic_spectrum()
