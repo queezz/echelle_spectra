@@ -137,6 +137,58 @@ positive residual (`+0.087834 nm`) in the candidate table, and `H2_Q7_2-2` at
 Treat this as evidence for a local order-aware correction pass rather than as a
 final replacement calibration.
 
+### 2026-06-11 promoted order-8 ThAr/NIST correction
+
+The default 20250926-aligned CMOS wavelength table now carries the reviewed
+order-8 correction:
+
+- the old order-8 `H2 629.6622` endpoint row is disabled;
+- reviewed order-8 ThAr/NIST rows from the 2024 ThAr lamp are added from
+  `611.49232` to `622.45271 nm`;
+- the ambiguous 626 nm lamp feature is represented as a `ThBlend` compound
+  centroid at `626.12439 nm`, using the local `Th II 626.106436` and
+  `Th I 626.14181` structure instead of promoting either line as isolated.
+
+The package-resource QC run is:
+
+```text
+local/runs/2026-06-11_00-30-fulcher-orders8-10-nist-review/package_resource_qc_after_thblend626
+```
+
+Order-8 wavelength-table residuals improve from the old aligned table's
+`0.069843 nm` RMS / `0.161373 nm` max residual to:
+
+| calibration | order-8 rows | order-8 RMS nm | max abs nm |
+| --- | ---: | ---: | ---: |
+| `updated_aligned` | 17 | 0.002617 | 0.005914 |
+
+In the disputed 626-630 nm region, the updated aligned table has:
+
+| row | residual nm |
+| --- | ---: |
+| `ThBlend 626.12439` | -0.005914 |
+| `NeI 626.64900` | +0.002281 |
+| `NeI 630.47800` | +0.001420 |
+
+A focused variant pass compared single-line and blend interpretations:
+
+```text
+local/runs/2026-06-11_00-30-fulcher-orders8-10-nist-review/calibration_variant_work
+```
+
+The `ThBlend 626.12439` row is slightly worse than dropping the 626 nm feature
+entirely by raw order-8 RMS, but it preserves real local ThAr structure and keeps
+the order-8 max residual below `0.006 nm`. Reintroducing `H2 629.6622` fails the
+lamp-line gate, with order-8 RMS `0.050685 nm` and max residual `0.170773 nm`.
+
+Fulcher-alpha validation remains a secondary check rather than the primary row
+promotion signal. The selected-Fulcher variant comparison found the `ThBlend`
+table and the `Th II 626.106436` table nearly tied; the large remaining order-8
+Fulcher residual is still `H2_Q9_1-1`, a blend/identity issue near `623.7457 nm`.
+`H2_Q7_2-2` at `629.6622 nm` remains missed after the endpoint row is removed,
+so it is validation evidence requiring multi-component Fulcher fitting, not a
+safe wavelength-table anchor.
+
 ### 2026-06-10 Th-Ar/NIST order-8 candidate check
 
 A follow-up local run used the old 2024 Th-Ar lamp with cached NIST ASD Th I and

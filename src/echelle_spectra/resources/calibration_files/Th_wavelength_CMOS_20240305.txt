@@ -82,7 +82,16 @@
 8	2124	2149	2132.5406	612.84500	NeI  # ok
 8	1089	1113	1095.9054	623.43600	HgI  # ok
 8	1175	1210	1189.8111	622.48150	H2  # ok
-8	0440	0470	0453.4658	629.66220	H2  # ok
+#8	0440	0470	0453.4658	629.66220	H2  # disabled: endpoint conflicts with 2026-06-11 ThAr/NIST order-8 review
+8	2257.011	2269.011	2263.0107	611.49232	ArII  # reviewed candidate; present in 0.3s and 10s ThAr
+8	1896.765	1908.765	1902.7648	615.19927	ThI  # reviewed candidate; present in 0.3s and 10s ThAr
+8	1698.823	1710.823	1704.8233	617.22775	ArII  # reviewed candidate; present in 0.3s and 10s ThAr
+8	1597.700	1609.700	1603.7004	618.26216	ThI  # reviewed candidate; present in 0.3s and 10s ThAr
+8	1445.000	1457.000	1450.9997	619.82226	ThI  # reviewed candidate; present in 0.3s and 10s ThAr
+8	1393.370	1405.370	1399.3700	620.34924	ThI  # reviewed candidate; present in 0.3s and 10s ThAr
+8	1356.710	1368.710	1362.7100	620.72200	ThI  # reviewed candidate; present in 0.3s and 10s ThAr
+8	1186.974	1198.974	1192.9744	622.45271	ThI  # reviewed candidate; present in 0.3s and 10s ThAr
+8	0824.099	0836.099	0830.0989	626.12439	ThBlend  # weighted ThII 626.106436 + ThI 626.14181 compound centroid
 
 9	0190	0215	0197.9910	616.35900	NeI  # ok
 9	0400	0425	0407.6311	614.30600	NeI  # ok
