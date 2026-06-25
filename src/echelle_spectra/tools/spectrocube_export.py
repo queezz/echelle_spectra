@@ -19,6 +19,7 @@ from __future__ import annotations
 import datetime
 import hashlib
 import json
+import re
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -96,6 +97,20 @@ def _file_digest(path: Path | None) -> dict[str, object] | None:
         "size_bytes": int(path.stat().st_size),
         "sha256": digest.hexdigest(),
     }
+
+
+def _shot_number_from_spectrum(spectrum: object) -> str | None:
+    shotnumber = getattr(spectrum, "shotnumber", None)
+    if shotnumber not in (None, ""):
+        return str(shotnumber)
+
+    fpth = getattr(spectrum, "fpth", None)
+    if fpth is None:
+        return None
+    match = re.match(r"^(\d+)", Path(str(fpth)).stem)
+    if match is None:
+        return None
+    return match.group(1)
 
 
 # ---------------------------------------------------------------------------
@@ -397,9 +412,9 @@ def to_spectrocube(
     if fpth is not None:
         attrs["source_file"] = str(fpth)
 
-    shotnumber = getattr(spectrum, "shotnumber", None)
+    shotnumber = _shot_number_from_spectrum(spectrum)
     if shotnumber is not None:
-        attrs["shot_number"] = str(shotnumber)
+        attrs["shot_number"] = shotnumber
 
     bg_frames = info.get("BackgroundFrames", [])
     if bg_frames:

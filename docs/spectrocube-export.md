@@ -71,8 +71,10 @@ The following fields from `Spectrum` are automatically written to SpectroCube at
 | `created_at` | UTC timestamp at export time |
 | `exposure_s` | `spectrum.info["ExposureTime"]` |
 | `frame_interval_s` | `spectrum.info["CycleTime"]` |
+| `trigger_delay_s` | optional export-config metadata, when the experiment timing reference is known |
+| `frame_time_formula` | optional export-config metadata; for LHD Echelle runs this is `trigger_delay_s + frame * frame_interval_s` |
 | `source_file` | `spectrum.fpth` |
-| `shot_number` | `spectrum.shotnumber` |
+| `shot_number` | `spectrum.shotnumber`, or a leading numeric shot id inferred from the source filename |
 | `background_frames` | `spectrum.info["BackgroundFrames"]` (when non-empty) |
 | `calibration_folder` | calibration resource folder used to load the spectrum |
 | `calibration_order_pattern_file` | order-pattern file used for extraction |
@@ -126,9 +128,10 @@ When `spectrum.counts` has shape `(n_frames, n_wavelengths)`:
   default (`squeeze_single_frame=True`).  Pass `squeeze_single_frame=False`
   to keep the 2-D shape.
 
-Frame *time* is not stored as a separate coordinate because `echelle_spectra`
-computes it externally as `trigger_delay + frame * CycleTime`.  Use the
-`frame_interval_s` and `exposure_s` attrs to reconstruct it if needed.
+Frame *time* is not stored as a separate coordinate because some Echelle runs
+are interpreted relative to an experiment trigger. Use `frame_interval_s`,
+`exposure_s`, and, when present, `trigger_delay_s`/`frame_time_formula` to
+reconstruct the time axis.
 
 ---
 

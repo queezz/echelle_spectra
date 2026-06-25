@@ -2,6 +2,10 @@
 config_id = "lhd_cmos_20250926"
 crop_measured_at = "2026-06-05"
 crop_measurement_note = "Absolute-calibrated low-lambda edge is unstable from ~401.5-403 nm; crop below 403.0 nm for this CMOS/LHD calibration context."
+trigger_delay_s = 2.50
+time_axis_reference = "LHD discharge time"
+frame_time_formula = "trigger_delay_s + frame * frame_interval_s"
+trigger_delay_note = "Echelle trigger time confirmed as usually 2.50 s for this experiment by M. Kobayashi on 2026-06-24."
 
 [calibration]
 camera = "CMOS"

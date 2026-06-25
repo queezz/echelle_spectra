@@ -178,6 +178,12 @@ class TestToSpectrocube:
         sc = to_spectrocube(sp)
         assert sc.ds.attrs["shot_number"] == "042"
 
+    def test_metadata_shot_number_inferred_from_lhd_filename(self):
+        sp = _make_synthetic_spectrum(fpth="/data/193776_Echelle.SIF")
+        sp.shotnumber = None
+        sc = to_spectrocube(sp)
+        assert sc.ds.attrs["shot_number"] == "193776"
+
     def test_extra_attrs_forwarded(self):
         sp = _make_synthetic_spectrum()
         sc = to_spectrocube(sp, notes="test run", grating="316 l/mm")

@@ -436,6 +436,12 @@ class TestExportBackendCalled:
         cfg = tmp_path / "config.toml"
         cfg.write_text(
             """
+[metadata]
+trigger_delay_s = 2.50
+time_axis_reference = "LHD discharge time"
+frame_time_formula = "trigger_delay_s + frame * frame_interval_s"
+trigger_delay_note = "confirmed timing"
+
 [calibration]
 camera = "CMOS"
 calibration_dir = "cal"
@@ -470,6 +476,13 @@ calibration_source = "sphere"
         assert call_kwargs["wavelength_min_nm"] == pytest.approx(403.0)
         assert call_kwargs["calibration_source"] == "sphere"
         assert call_kwargs["calibration_files"]["sphr"] == "sphere.sif"
+        assert call_kwargs["extra_attrs"]["trigger_delay_s"] == pytest.approx(2.50)
+        assert call_kwargs["extra_attrs"]["time_axis_reference"] == "LHD discharge time"
+        assert (
+            call_kwargs["extra_attrs"]["frame_time_formula"]
+            == "trigger_delay_s + frame * frame_interval_s"
+        )
+        assert call_kwargs["extra_attrs"]["trigger_delay_note"] == "confirmed timing"
 
     def test_plan_supplies_input_output_and_config(self, tmp_path, mock_spectrocube):
         cfg = tmp_path / "config.toml"

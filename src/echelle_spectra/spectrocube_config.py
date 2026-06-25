@@ -60,6 +60,14 @@ def export_config_from_toml(path: str | Path) -> dict[str, Any]:
         settings["extra_attrs"]["wavelength_crop_note"] = metadata["crop_measurement_note"]
     if metadata.get("crop_measured_at"):
         settings["extra_attrs"]["wavelength_crop_measured_at"] = metadata["crop_measured_at"]
+    if metadata.get("trigger_delay_s") is not None:
+        settings["extra_attrs"]["trigger_delay_s"] = float(metadata["trigger_delay_s"])
+    if metadata.get("time_axis_reference"):
+        settings["extra_attrs"]["time_axis_reference"] = metadata["time_axis_reference"]
+    if metadata.get("frame_time_formula"):
+        settings["extra_attrs"]["frame_time_formula"] = metadata["frame_time_formula"]
+    if metadata.get("trigger_delay_note"):
+        settings["extra_attrs"]["trigger_delay_note"] = metadata["trigger_delay_note"]
 
     return settings
 
@@ -74,4 +82,3 @@ def export_plan_from_toml(path: str | Path) -> dict[str, Any]:
             config_path = Path(path).parent / config_path
         plan["config"] = str(config_path)
     return plan
-
