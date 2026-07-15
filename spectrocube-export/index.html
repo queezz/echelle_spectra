@@ -1588,12 +1588,20 @@ because only this package knows what the calibration quantities mean.</p>
 <td><code>spectrum.info["CycleTime"]</code></td>
 </tr>
 <tr>
+<td><code>trigger_delay_s</code></td>
+<td>optional export-config metadata, when the experiment timing reference is known</td>
+</tr>
+<tr>
+<td><code>frame_time_formula</code></td>
+<td>optional export-config metadata; for LHD Echelle runs this is <code>trigger_delay_s + frame * frame_interval_s</code></td>
+</tr>
+<tr>
 <td><code>source_file</code></td>
 <td><code>spectrum.fpth</code></td>
 </tr>
 <tr>
 <td><code>shot_number</code></td>
-<td><code>spectrum.shotnumber</code></td>
+<td><code>spectrum.shotnumber</code>, or a leading numeric shot id inferred from the source filename</td>
 </tr>
 <tr>
 <td><code>background_frames</code></td>
@@ -1659,9 +1667,10 @@ deliberately debugging the calibration arrays.</p>
   default (<code>squeeze_single_frame=True</code>).  Pass <code>squeeze_single_frame=False</code>
   to keep the 2-D shape.</li>
 </ul>
-<p>Frame <em>time</em> is not stored as a separate coordinate because <code>echelle_spectra</code>
-computes it externally as <code>trigger_delay + frame * CycleTime</code>.  Use the
-<code>frame_interval_s</code> and <code>exposure_s</code> attrs to reconstruct it if needed.</p>
+<p>Frame <em>time</em> is not stored as a separate coordinate because some Echelle runs
+are interpreted relative to an experiment trigger. Use <code>frame_interval_s</code>,
+<code>exposure_s</code>, and, when present, <code>trigger_delay_s</code>/<code>frame_time_formula</code> to
+reconstruct the time axis.</p>
 <hr>
 <h2 id="gui-save-spectrocube-button">GUI — Save SpectroCube button<a class="headerlink" href="#gui-save-spectrocube-button" title="Permanent link">¶</a></h2>
 <p>The viewer has a <strong>Save SpectroCube</strong> button in the Controls dock (below
