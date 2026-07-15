@@ -1,5 +1,8 @@
 
 <p align="center">
+  <a href="https://doi.org/10.5281/zenodo.21371984">
+    <img src="https://zenodo.org/badge/158617783.svg" alt="DOI">
+  </a>
   <a href="https://www.python.org/downloads/release/python-395">
     <img src="https://img.shields.io/badge/python-3.9+-brightgreen.svg" alt="Python 3.9+">
   </a>
