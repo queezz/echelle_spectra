@@ -61,7 +61,9 @@ Calibration files can be assembled into an immutable, digested snapshot with
 `echelle snapshot create`. Existing `echelle-*` commands remain available for
 compatibility. Batch processing writes durable per-source receipts, continues
 after ordinary failures, reports rate and ETA, and safely resumes an interrupted
-run after verifying completed source and output digests. See the
+run after verifying completed source and output digests. Several source folders
+can be processed together with one sequential worker per drive and isolated
+outputs, receipts, progress, and failures. See the
 [calibration snapshot guide](docs/calibration-snapshots.md) and
 [campaign run guide](docs/campaign-runs.md).
 

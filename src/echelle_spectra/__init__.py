@@ -7,7 +7,7 @@ from .tools.config_loader import load_config
 from .tools.spectrocube_export import export_spectrocube as export_spectrocube
 from .tools.spectrocube_export import to_spectrocube as to_spectrocube
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"
 
 __all__ = [
     "echelle",

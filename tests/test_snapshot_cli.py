@@ -80,3 +80,27 @@ def test_bare_umbrella_command_explains_the_next_steps(capsys) -> None:
     assert "Start with 'echelle status'" in output
     assert "snapshot" in output
     assert "process" in output
+
+
+def test_bare_campaign_subcommands_are_self_explaining(tmp_path: Path, capsys) -> None:
+    assert cli.main(["process"]) == 0
+    assert "Batch folder" in capsys.readouterr().out
+
+    assert cli.main(["snapshot"]) == 0
+    assert "Create and verify immutable calibration" in capsys.readouterr().out
+
+    assert (
+        cli.main(
+            [
+                "status",
+                "--calibrations",
+                str(tmp_path / "calibrations"),
+                "--registry",
+                str(tmp_path / "registry.toml"),
+                "--runs",
+                str(tmp_path / "runs"),
+            ]
+        )
+        == 0
+    )
+    assert "Echelle campaign status" in capsys.readouterr().out

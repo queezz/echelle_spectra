@@ -138,6 +138,22 @@ its recorded source and output digests still match. See
 [Durable campaign runs](campaign-runs.md) for the receipt schema and explicit
 `--run-dir` workflow.
 
+For several USB drives, pass one folder per drive and repeat the volume label:
+
+```powershell
+echelle process D:\2024\shots E:\2025\shots `
+  -o F:\spectrocubes `
+  --runs-dir F:\runs `
+  --volume-label NIFS-2024 `
+  --volume-label NIFS-2025 `
+  --config local\campaign-export.toml
+```
+
+The output root receives one child directory per source. Processing is
+sequential within each source and concurrent across sources; receipts and
+failures remain independent, while `echelle status --runs F:\runs` reconciles
+the latest state of both targets.
+
 To preview a config-driven batch without a plan:
 
 ```powershell

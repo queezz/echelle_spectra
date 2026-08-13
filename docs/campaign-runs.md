@@ -15,6 +15,33 @@ The terminal reports the current count, measured file rate, and estimated time
 remaining. An ordinary file failure is recorded and processing continues with
 the next source. The command exits nonzero after the run if any source failed.
 
+## Several drives at once
+
+Pass one source folder per drive. Echelle runs one sequential reader for each
+source and processes those sources concurrently:
+
+```powershell
+echelle process D:\nifs-a\shots E:\nifs-b\shots `
+  -o F:\nifs-cubes `
+  --runs-dir F:\nifs-runs `
+  --volume-label NIFS-A `
+  --volume-label NIFS-B `
+  --snapshot-id 20260813_cmos
+```
+
+`-o` is a destination root in this form. Each source receives its own named
+child directory, its own sequential calibration/export worker, and its own
+receipt tree under `--runs-dir`. Repeat `--volume-label` in the same order as
+the source folders, or omit all labels to use the drive/root identity. A file
+failure or calibration failure on one target does not stop another target.
+`--run-dir` remains the exact-resume control for a single source; rerun the same
+multi-source command to resume all matching unfinished target receipts.
+
+Progress lines are prefixed with their drive label. The command exits `0` only
+when every target completes, `1` after any ordinary target failure, and `130`
+after Ctrl-C. On interrupt, active atomic exports finish or clean up safely and
+all workers stop before taking another source.
+
 ## What is recorded
 
 Each run directory contains:
@@ -61,6 +88,9 @@ echelle status --runs local\runs
 ```
 
 Status reports the newest run's state, accounted sources, result counts, and
-snapshot ID. It reads receipt files; it does not infer progress from filenames.
+snapshot ID. When several source/output targets have receipts, it also reports
+their newest states individually and reconciles their combined totals. It reads
+receipt files recursively; it does not infer progress from filenames or count
+superseded retries twice.
 
 Dry runs remain side-effect free: they create neither outputs nor receipts.

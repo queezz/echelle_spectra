@@ -6,7 +6,7 @@ import argparse
 import sys
 from pathlib import Path
 
-from .campaign_run import list_run_summaries
+from .campaign_run import latest_run_summaries, list_run_summaries
 from .snapshot import SnapshotValidationError, load_snapshot
 
 
@@ -45,6 +45,34 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _print_combined_run_status(runs_root: Path) -> None:
+    targets = latest_run_summaries(runs_root)
+    if len(targets) <= 1:
+        return
+    statuses = {status for target in targets for status in target["counts"]}
+    combined_counts = {
+        status: sum(int(target["counts"].get(status, 0)) for target in targets)
+        for status in statuses
+    }
+    combined_accounted = sum(combined_counts.values())
+    combined_expected = sum(int(target["expected_files"]) for target in targets)
+    combined_details = ", ".join(
+        f"{count} {status}" for status, count in sorted(combined_counts.items()) if count
+    )
+    print(f"  targets:   {len(targets)} independent source(s)")
+    print(
+        f"  combined:  {combined_accounted}/{combined_expected} "
+        f"({combined_details or 'no terminal records'})"
+    )
+    for target in targets:
+        target_counts = target["counts"]
+        target_accounted = sum(target_counts.values())
+        print(
+            f"    {target['volume_label']}: {target_accounted}/"
+            f"{target['expected_files']} [{target['state']}] {target['id']}"
+        )
+
+
 def _status(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(prog="echelle status")
     parser.add_argument("--calibrations", default="calibrations", metavar="DIR")
@@ -77,7 +105,8 @@ def _status(argv: list[str]) -> int:
         print(f"  registry:  {registry}")
     else:
         print(f"  registry:  not found ({registry})")
-    runs = list_run_summaries(Path(args.runs))
+    runs_root = Path(args.runs)
+    runs = list_run_summaries(runs_root)
     if runs:
         latest = runs[0]
         counts = latest["counts"]
@@ -90,6 +119,7 @@ def _status(argv: list[str]) -> int:
         print(f"  latest:    {latest['id']} [{latest['state']}]")
         print(f"  progress:  {accounted}/{latest['expected_files']} ({details})")
         print(f"  snapshot:  {latest['snapshot_id']}")
+        _print_combined_run_status(runs_root)
     else:
         print(f"  runs:      none found under {args.runs}")
     return 1 if invalid else 0
@@ -114,7 +144,12 @@ def main(argv: list[str] | None = None) -> int:
 
         return snapshot_main(remainder, prog="echelle snapshot")
     if command == "process":
+        from .spectrocube_cli import _build_parser as build_process_parser
         from .spectrocube_cli import main as process_main
+
+        if not remainder:
+            build_process_parser(prog="echelle process").print_help()
+            return 0
 
         result = process_main(remainder, prog="echelle process")
         return 0 if result is None else int(result)

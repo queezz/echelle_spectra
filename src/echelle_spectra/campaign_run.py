@@ -70,6 +70,13 @@ def new_run_directory(runs_root: Path, source_root: Path) -> Path:
     return candidate
 
 
+def target_runs_root(runs_root: Path, source_root: Path) -> Path:
+    """Return a stable isolated receipt root for one multi-target source."""
+    resolved = str(source_root.resolve()).encode("utf-8")
+    path_digest = hashlib.sha256(resolved).hexdigest()[:8]
+    return runs_root / f"{_slug(source_root.name)}-{path_digest}"
+
+
 @dataclass(frozen=True)
 class SourceIdentity:
     """Content identity recorded before processing starts."""
@@ -314,7 +321,7 @@ def list_run_summaries(runs_root: Path) -> list[dict[str, Any]]:
     summaries = []
     if not runs_root.is_dir():
         return summaries
-    for manifest in runs_root.glob("*/run.toml"):
+    for manifest in runs_root.rglob("run.toml"):
         try:
             receipt = RunReceipt.load(manifest.parent)
         except (OSError, ValueError, KeyError):
@@ -326,7 +333,24 @@ def list_run_summaries(runs_root: Path) -> list[dict[str, Any]]:
                 "counts": receipt.counts(),
                 "expected_files": receipt.expected_files,
                 "snapshot_id": receipt.snapshot_id,
+                "source_root": str(receipt.source_root),
+                "output_root": str(receipt.output_root),
+                "pattern": receipt.pattern,
+                "volume_label": receipt.volume_label,
                 "updated_at": manifest.stat().st_mtime,
             }
         )
     return sorted(summaries, key=lambda item: item["updated_at"], reverse=True)
+
+
+def latest_run_summaries(runs_root: Path) -> list[dict[str, Any]]:
+    """Return the newest receipt for each independent source/output target."""
+    latest: dict[tuple[str, str, str], dict[str, Any]] = {}
+    for summary in list_run_summaries(runs_root):
+        key = (
+            os.path.normcase(str(Path(summary["source_root"]).resolve())),
+            os.path.normcase(str(Path(summary["output_root"]).resolve())),
+            str(summary["pattern"]),
+        )
+        latest.setdefault(key, summary)
+    return list(latest.values())

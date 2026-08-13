@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import sys
+import threading
+from collections import defaultdict
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -205,6 +207,80 @@ def test_batch_continues_after_failure_and_accounts_for_every_source(
     assert receipt.counts() == {"exported": 2, "failed": 1, "interrupted": 0, "skipped": 0}
     failure = next(record for record in receipt._records if record["status"] == "failed")
     assert failure["reason"] == "synthetic detector failure"
+
+
+def test_multi_drive_workers_run_concurrently_and_reconcile_status(
+    tmp_path: Path, fake_spectrocube, capsys
+) -> None:
+    drive_a = tmp_path / "drive-a"
+    drive_b = tmp_path / "drive-b"
+    drive_a.mkdir()
+    drive_b.mkdir()
+    _files(drive_a, "a.SIF", "b.SIF")
+    _files(drive_b, "a.SIF", "b.SIF")
+    outputs = tmp_path / "cubes"
+    runs = tmp_path / "runs"
+    first_reads = threading.Barrier(2)
+    calls: dict[str, list[str]] = defaultdict(list)
+
+    def export(sif: Path, nc_out: Path, **_kwargs) -> ExportResult:
+        calls[sif.parent.name].append(sif.name)
+        if sif.name == "a.SIF":
+            first_reads.wait(timeout=2)
+        if sif.parent == drive_b and sif.name == "a.SIF":
+            return ExportResult("failed", "synthetic drive-b read failure")
+        nc_out.write_text(f"cube {sif.parent.name}/{sif.name}", encoding="utf-8")
+        return ExportResult("exported")
+
+    with (
+        patch("echelle_spectra.tools.loader.build_calibration", return_value=object()),
+        patch("echelle_spectra.spectrocube_cli._export_one", side_effect=export),
+        pytest.raises(SystemExit) as result,
+    ):
+        main(
+            [
+                str(drive_a),
+                str(drive_b),
+                "-o",
+                str(outputs),
+                "--runs-dir",
+                str(runs),
+                "--volume-label",
+                "NIFS-A",
+                "--volume-label",
+                "NIFS-B",
+            ]
+        )
+
+    assert result.value.code == 1
+    assert calls == {
+        "drive-a": ["a.SIF", "b.SIF"],
+        "drive-b": ["a.SIF", "b.SIF"],
+    }
+    assert sorted(path.name for path in (outputs / "drive-a").glob("*.nc")) == [
+        "a_spectrocube.nc",
+        "b_spectrocube.nc",
+    ]
+    assert sorted(path.name for path in (outputs / "drive-b").glob("*.nc")) == [
+        "b_spectrocube.nc"
+    ]
+
+    receipts = [RunReceipt.load(path.parent) for path in runs.rglob("run.toml")]
+    assert len(receipts) == 2
+    by_volume = {receipt.volume_label: receipt for receipt in receipts}
+    assert by_volume["NIFS-A"].state == "completed"
+    assert by_volume["NIFS-A"].counts()["exported"] == 2
+    assert by_volume["NIFS-B"].state == "partial"
+    assert by_volume["NIFS-B"].counts()["exported"] == 1
+    assert by_volume["NIFS-B"].counts()["failed"] == 1
+
+    capsys.readouterr()
+    assert cli.main(["status", "--runs", str(runs)]) == 0
+    shown = capsys.readouterr().out
+    assert "targets:   2 independent source(s)" in shown
+    assert "combined:  4/4" in shown
+    assert "NIFS-A: 2/2 [completed]" in shown
+    assert "NIFS-B: 2/2 [partial]" in shown
 
 
 def test_changed_output_is_not_accepted_as_completed(tmp_path: Path) -> None:

@@ -5,6 +5,24 @@ follows the Fleet convention from 0.3.0 onward: a substantial capability earns
 a minor release, a compatible correction earns a patch, and documentation,
 tests, or internal refactoring alone do not move the number.
 
+## 1.1.0 — 2026-08-13
+
+**Campaign processing now spans several drives safely.** `echelle process`
+accepts several source folders and runs one sequential worker per source while
+processing independent sources concurrently. Each target has an isolated output
+directory, receipt tree, progress prefix, calibration instance, and failure
+domain; an ordinary failure on one target does not stop the others.
+
+**Status reconciles the campaign rather than double-counting retries.**
+`echelle status` discovers nested per-target receipt trees, selects the newest
+receipt for each source/output/pattern target, and reports individual plus
+combined accounting. Ctrl-C requests a safe stop across workers and preserves
+the established atomic-output and resumable-receipt guarantees.
+
+Bare `echelle`, `echelle process`, `echelle snapshot`, and `echelle status`
+surfaces now explain or report their next safe action, while every established
+`echelle-*` entry point remains available.
+
 ## 1.0.0 — 2026-08-13
 
 **Campaign processing becomes dependable automation.** Every non-dry folder
