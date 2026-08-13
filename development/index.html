@@ -9,14 +9,14 @@
         <link rel="prev" href="../spectrocube-export-api/">
       
       
-        <link rel="next" href="../archaeology/report/">
+        <link rel="next" href="../portable-kit/">
       
       
         
       
       
       <link rel="icon" href="../assets/echelle.png">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
     
     
       
@@ -24,7 +24,7 @@
       
     
     
-      <link rel="stylesheet" href="../assets/stylesheets/main.484c7ddc.min.css">
+      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
       
         
         <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
@@ -567,6 +567,62 @@
   
   
     <li class="md-nav__item">
+      <a href="../calibration-snapshots/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Calibration snapshots
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../campaign-runs/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Durable campaign runs
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../pattern-extraction/" class="md-nav__link">
         
   
@@ -623,6 +679,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../calibration-bench/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Live calibration bench
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../line-validation/" class="md-nav__link">
         
   
@@ -631,6 +715,34 @@
     
   
     Wavelength line validation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../known-line-overlays/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Known-line overlays
   
 
     
@@ -992,6 +1104,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#portable-kit-and-release-builds" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Portable kit and release builds
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#historical-html-docs" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1006,6 +1129,34 @@
   
 </nav>
       
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../portable-kit/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Portable NIFS kit
+  
+
+    
+  </span>
+  
+  
+
+      </a>
     </li>
   
 
@@ -1180,6 +1331,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#portable-kit-and-release-builds" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Portable kit and release builds
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#historical-html-docs" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1244,6 +1406,15 @@
 <p>GitHub Actions deploys the site automatically on every push to <code>main</code> or <code>master</code>. The workflow is defined in <code>.github/workflows/gh-pages.yml</code> and uses <code>peaceiris/actions-gh-pages@v3</code> to push the built site to the <code>gh-pages</code> branch.</p>
 <p>The live site is served at: <a href="https://queezz.github.io/echelle_spectra">https://queezz.github.io/echelle_spectra</a></p>
 <hr>
+<h2 id="portable-kit-and-release-builds">Portable kit and release builds<a class="headerlink" href="#portable-kit-and-release-builds" title="Permanent link">¶</a></h2>
+<p>The pinned NIFS kit manifest, external-only assembly commands, three-command
+bare-machine route, recovery behavior, and byte-identical wheel/sdist contract
+are documented in <a href="../portable-kit/">Portable NIFS kit</a> and the root
+<a href="https://github.com/queezz/echelle_spectra/blob/master/README-KIT.md"><code>README-KIT.md</code></a>.</p>
+<p>Do not build kit payloads or release archives in this checkout. Export a clean
+source copy into OS-local scratch and use <code>scripts.reproducible_build</code> there;
+assemble kits into a separate external destination with <code>scripts.nifs_kit</code>.</p>
+<hr>
 <h2 id="historical-html-docs">Historical HTML docs<a class="headerlink" href="#historical-html-docs" title="Permanent link">¶</a></h2>
 <p>The <code>html-docs</code> branch contains the original static HTML documentation pages (<code>index.html</code> and <code>band_data.html</code>). That branch is <strong>historical</strong> — do not delete it during or after this migration. The new MkDocs site supersedes it but the old pages remain available for reference.</p>
 
@@ -1304,7 +1475,7 @@
       <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.instant", "navigation.tracking", "navigation.tabs", "navigation.top", "content.code.copy", "content.image.zoom"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
     
     
-      <script src="../assets/javascripts/bundle.79ae519e.min.js"></script>
+      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
       
     
   

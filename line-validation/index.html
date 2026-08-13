@@ -6,17 +6,17 @@
       
       
       
-        <link rel="prev" href="../calibration-alignment/">
+        <link rel="prev" href="../calibration-bench/">
       
       
-        <link rel="next" href="../spectrocube-export/">
+        <link rel="next" href="../known-line-overlays/">
       
       
         
       
       
       <link rel="icon" href="../assets/echelle.png">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
     
     
       
@@ -24,7 +24,7 @@
       
     
     
-      <link rel="stylesheet" href="../assets/stylesheets/main.484c7ddc.min.css">
+      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
       
         
         <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
@@ -572,6 +572,62 @@
   
   
     <li class="md-nav__item">
+      <a href="../calibration-snapshots/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Calibration snapshots
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../campaign-runs/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Durable campaign runs
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../pattern-extraction/" class="md-nav__link">
         
   
@@ -608,6 +664,34 @@
     
   
     Calibration alignment
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../calibration-bench/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Live calibration bench
   
 
     
@@ -785,6 +869,34 @@
   
 </nav>
       
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../known-line-overlays/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Known-line overlays
+  
+
+    
+  </span>
+  
+  
+
+      </a>
     </li>
   
 
@@ -1031,6 +1143,34 @@
     
   
     Developer notes
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../portable-kit/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Portable NIFS kit
   
 
     
@@ -1389,10 +1529,11 @@ SpectroCube export for this dataset.</p>
 <a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="w">  </span>--min-snr<span class="w"> </span><span class="m">10</span><span class="w"> </span><span class="se">\</span>
 <a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="w">  </span>--max-abs-residual-nm<span class="w"> </span><span class="m">0</span>.08
 </code></pre></div>
-<p>The Fulcher targets are loaded from the <code>fulcheranalyzer</code> H2 Q-branch wavelength
-table:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>fulcheranalyzer/src/fulcher_analyzer/data_molecular/fulcher-α_band_wavelength.txt
-</code></pre></div>
+<p>The default Fulcher targets come from the package's shared line catalog, copied
+without numerical changes from the Fulcher Extractor table and carrying its
+source reference. This keeps validation reproducible without a sibling checkout
+and makes the GUI and CLI consume exactly the same records. A legacy external
+matrix can still be supplied with <code>--fulcher-table</code>.</p>
 <p>Treat this as a visual and positional validation aid. In the LHD data, many
 Fulcher features are blended at the instrumental width, and some table entries
 share or overlap nearby measured peaks. Use Balmer lines as the primary gate;
@@ -1403,7 +1544,7 @@ fits stay in <code>fulcheranalyzer</code> or later SpectroCube consumers.</p>
 <h3 id="2026-06-10-order-8-fulcher-alpha-check">2026-06-10 order-8 Fulcher-alpha check<a class="headerlink" href="#2026-06-10-order-8-fulcher-alpha-check" title="Permanent link">¶</a></h3>
 <p>A local QC run compared the accepted 20250926 aligned wavelength table against a
 candidate table with the order-8 <code>H2 629.662</code> calibration row removed:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>local/fulcher_alpha_calibration_qc/2026-06-10_22-04-fulcher-alpha-calibration-qc
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>local/fulcher_alpha_calibration_qc/2026-06-10_22-04-fulcher-alpha-calibration-qc
 </code></pre></div>
 <p>The run selected downstream "good" Fulcher-alpha H2 Q-branch lines from the
 <code>2026-fulcher-extractor</code> policy set:</p>
@@ -1468,7 +1609,7 @@ order-8 correction:</p>
   <code>Th I 626.14181</code> structure instead of promoting either line as isolated.</li>
 </ul>
 <p>The package-resource QC run is:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>local/runs/2026-06-11_00-30-fulcher-orders8-10-nist-review/package_resource_qc_after_thblend626
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>local/runs/2026-06-11_00-30-fulcher-orders8-10-nist-review/package_resource_qc_after_thblend626
 </code></pre></div>
 <p>Order-8 wavelength-table residuals improve from the old aligned table's
 <code>0.069843 nm</code> RMS / <code>0.161373 nm</code> max residual to:</p>
@@ -1514,7 +1655,7 @@ order-8 correction:</p>
 </tbody>
 </table>
 <p>A focused variant pass compared single-line and blend interpretations:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>local/runs/2026-06-11_00-30-fulcher-orders8-10-nist-review/calibration_variant_work
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>local/runs/2026-06-11_00-30-fulcher-orders8-10-nist-review/calibration_variant_work
 </code></pre></div>
 <p>The <code>ThBlend 626.12439</code> row is slightly worse than dropping the 626 nm feature
 entirely by raw order-8 RMS, but it preserves real local ThAr structure and keeps
@@ -1530,7 +1671,7 @@ safe wavelength-table anchor.</p>
 <h3 id="2026-06-10-th-arnist-order-8-candidate-check">2026-06-10 Th-Ar/NIST order-8 candidate check<a class="headerlink" href="#2026-06-10-th-arnist-order-8-candidate-check" title="Permanent link">¶</a></h3>
 <p>A follow-up local run used the old 2024 Th-Ar lamp with cached NIST ASD Th I and
 Ar I line exports to generate independent order-8 candidate anchors:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>local/thar_nist_synthetic_overlay/2026-06-11_00-05-package-smoke-pixel-fix
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>local/thar_nist_synthetic_overlay/2026-06-11_00-05-package-smoke-pixel-fix
 </code></pre></div>
 <p>The valid package-generated run fixed detector-pixel bookkeeping for decreasing
 wavelength orders and produced:</p>
@@ -1608,21 +1749,21 @@ remains a likely blend/identity problem rather than a clean calibration anchor.<
 <hr>
 <h2 id="python-api">Python API<a class="headerlink" href="#python-api" title="Permanent link">¶</a></h2>
 <p>The core helper operates on extracted spectra and caller-supplied line tables:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">echelle_spectra.tools.line_validation</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
-<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>    <span class="n">balmer_air_targets</span><span class="p">,</span>
-<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>    <span class="n">build_stitched_order_index</span><span class="p">,</span>
-<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a>    <span class="n">validate_lines</span><span class="p">,</span>
-<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="p">)</span>
-<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a>
-<a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a><span class="n">targets</span> <span class="o">=</span> <span class="n">balmer_air_targets</span><span class="p">()</span>
-<a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a><span class="n">order_index</span> <span class="o">=</span> <span class="n">build_stitched_order_index</span><span class="p">(</span><span class="n">calibration</span><span class="p">)</span>
-<a id="__codelineno-8-9" name="__codelineno-8-9" href="#__codelineno-8-9"></a><span class="n">results</span> <span class="o">=</span> <span class="n">validate_lines</span><span class="p">(</span>
-<a id="__codelineno-8-10" name="__codelineno-8-10" href="#__codelineno-8-10"></a>    <span class="n">spectrum</span><span class="o">.</span><span class="n">wavelength</span><span class="p">,</span>
-<a id="__codelineno-8-11" name="__codelineno-8-11" href="#__codelineno-8-11"></a>    <span class="n">spectrum</span><span class="o">.</span><span class="n">counts</span><span class="p">,</span>
-<a id="__codelineno-8-12" name="__codelineno-8-12" href="#__codelineno-8-12"></a>    <span class="n">targets</span><span class="p">,</span>
-<a id="__codelineno-8-13" name="__codelineno-8-13" href="#__codelineno-8-13"></a>    <span class="n">signal_frames</span><span class="o">=</span><span class="nb">range</span><span class="p">(</span><span class="mi">40</span><span class="p">),</span>
-<a id="__codelineno-8-14" name="__codelineno-8-14" href="#__codelineno-8-14"></a>    <span class="n">order_index</span><span class="o">=</span><span class="n">order_index</span><span class="p">,</span>
-<a id="__codelineno-8-15" name="__codelineno-8-15" href="#__codelineno-8-15"></a><span class="p">)</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">echelle_spectra.tools.line_validation</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>    <span class="n">balmer_air_targets</span><span class="p">,</span>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>    <span class="n">build_stitched_order_index</span><span class="p">,</span>
+<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a>    <span class="n">validate_lines</span><span class="p">,</span>
+<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="p">)</span>
+<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a>
+<a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a><span class="n">targets</span> <span class="o">=</span> <span class="n">balmer_air_targets</span><span class="p">()</span>
+<a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a><span class="n">order_index</span> <span class="o">=</span> <span class="n">build_stitched_order_index</span><span class="p">(</span><span class="n">calibration</span><span class="p">)</span>
+<a id="__codelineno-7-9" name="__codelineno-7-9" href="#__codelineno-7-9"></a><span class="n">results</span> <span class="o">=</span> <span class="n">validate_lines</span><span class="p">(</span>
+<a id="__codelineno-7-10" name="__codelineno-7-10" href="#__codelineno-7-10"></a>    <span class="n">spectrum</span><span class="o">.</span><span class="n">wavelength</span><span class="p">,</span>
+<a id="__codelineno-7-11" name="__codelineno-7-11" href="#__codelineno-7-11"></a>    <span class="n">spectrum</span><span class="o">.</span><span class="n">counts</span><span class="p">,</span>
+<a id="__codelineno-7-12" name="__codelineno-7-12" href="#__codelineno-7-12"></a>    <span class="n">targets</span><span class="p">,</span>
+<a id="__codelineno-7-13" name="__codelineno-7-13" href="#__codelineno-7-13"></a>    <span class="n">signal_frames</span><span class="o">=</span><span class="nb">range</span><span class="p">(</span><span class="mi">40</span><span class="p">),</span>
+<a id="__codelineno-7-14" name="__codelineno-7-14" href="#__codelineno-7-14"></a>    <span class="n">order_index</span><span class="o">=</span><span class="n">order_index</span><span class="p">,</span>
+<a id="__codelineno-7-15" name="__codelineno-7-15" href="#__codelineno-7-15"></a><span class="p">)</span>
 </code></pre></div>
 <p>Each result contains:</p>
 <ul>
@@ -1634,8 +1775,9 @@ remains a likely blend/identity problem rather than a clean calibration anchor.<
 <li><code>peak_snr</code></li>
 <li><code>notes</code></li>
 </ul>
-<p>The API deliberately accepts external line lists so molecule-specific knowledge
-does not have to live inside <code>echelle_spectra</code>.</p>
+<p>The fitting API still accepts caller-supplied targets. The default target
+positions now come through the shared catalog; molecule-specific fitting and
+interpretation remain outside <code>echelle_spectra</code>.</p>
 
 
 
@@ -1694,7 +1836,7 @@ does not have to live inside <code>echelle_spectra</code>.</p>
       <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.instant", "navigation.tracking", "navigation.tabs", "navigation.top", "content.code.copy", "content.image.zoom"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
     
     
-      <script src="../assets/javascripts/bundle.79ae519e.min.js"></script>
+      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
       
     
   
