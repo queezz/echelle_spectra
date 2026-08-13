@@ -26,6 +26,7 @@
 
 <p align="center">
   <a href="https://queezz.github.io/echelle_spectra">Documentation</a> •
+  <a href="CHANGELOG.md">Changelog</a> •
   <a href="#quick-start">Quick Start</a> •
   <a href="#cmos-workflow">CMOS Workflow</a> •
   <a href="#venv">Venv</a>
@@ -43,6 +44,22 @@ echelle_spectra          # launch GUI
 ```
 
 See the [documentation](https://queezz.github.io/echelle_spectra) for full details.
+
+---
+
+## Calibration campaign commands
+
+The `echelle` umbrella command is the front door for calibration campaigns:
+
+```bash
+echelle status
+echelle snapshot --help
+echelle process --help
+```
+
+Calibration files can be assembled into an immutable, digested snapshot with
+`echelle snapshot create`. Existing `echelle-*` commands remain available for
+compatibility. See the [calibration snapshot guide](docs/calibration-snapshots.md).
 
 ---
 

@@ -4,9 +4,9 @@
 
 """
 import pyqtgraph as pg
-from pyqtgraph.Qt import QtCore, QtGui
-from pyqtgraph.dockarea import DockArea, Dock
 from PyQt5 import QtWidgets
+from pyqtgraph.dockarea import Dock, DockArea
+from pyqtgraph.Qt import QtCore, QtGui
 
 
 def gui_setup_spinbox(spbox, val, min, max):

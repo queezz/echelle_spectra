@@ -1,18 +1,18 @@
 import ctypes
-import numpy as np
 import sys
 from datetime import datetime
 from pathlib import Path
-from PyQt5.QtWidgets import QApplication, QMainWindow
-from PyQt5 import QtWidgets
 
+import numpy as np
+from PyQt5 import QtWidgets
+from PyQt5.QtWidgets import QApplication, QMainWindow
 from pyqtgraph.Qt import QtCore, QtGui
 
+from . import __version__, _config
+from .resources import window_layout
 from .tools import echelle as ech
 from .tools import emissionbands as eb
 from .tools import emissiondata as ebd
-from . import __version__, _config
-from .resources import window_layout
 
 
 class EchelleSpectraGUI(QMainWindow, window_layout.Ui_MainWindow):

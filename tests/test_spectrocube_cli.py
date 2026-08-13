@@ -13,8 +13,16 @@ from unittest.mock import MagicMock, patch
 import numpy as np
 import pytest
 
-from echelle_spectra.spectrocube_cli import _build_parser, _output_path_for, _settings_from_args, main
-from echelle_spectra.tools.loader import DEFAULT_CAMERA_FILENAMES, _normalize_calibration_file_override
+from echelle_spectra.spectrocube_cli import (
+    _build_parser,
+    _output_path_for,
+    _settings_from_args,
+    main,
+)
+from echelle_spectra.tools.loader import (
+    DEFAULT_CAMERA_FILENAMES,
+    _normalize_calibration_file_override,
+)
 
 # ---------------------------------------------------------------------------
 # Parser tests — pure argparse, no side effects

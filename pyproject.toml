@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "echelle_spectra"
-version = "0.2.0"                       # Consider setuptools_scm later for auto-versioning
+version = "0.3.0"                       # Consider setuptools_scm later for auto-versioning
 description = "Graphical tool for the extraction and analysis of calibrated spectra from 2D Echelle spectrometer images"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -52,7 +52,9 @@ Homepage = "https://github.com/queezz/echelle_spectra"
 "Bug Tracker" = "https://github.com/queezz/echelle_spectra/issues"
 
 [project.scripts]
+echelle = "echelle_spectra.cli:main"
 echelle_spectra = "echelle_spectra.echelle_spectra_gui:start"
+echelle-snapshot = "echelle_spectra.snapshot_cli:main"
 echelle-pattern = "echelle_spectra.pattern_cli:main"
 echelle-align = "echelle_spectra.alignment_cli:main"
 echelle-validate-lines = "echelle_spectra.line_validation_cli:main"
@@ -95,7 +97,19 @@ target-version = ["py39", "py310", "py311", "py312"]
 [tool.ruff]
 line-length = 100
 target-version = "py39"
-lint.select = ["E", "F", "W", "I"]  # basic cleanups + import sort
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "W", "C90"]
+ignore = ["E203", "E266", "E501"]
+
+# The pre-0.3.0 numerical core predates the Fleet lint contract. Keep its
+# behavior stable while making import/error hygiene part of the gate; new
+# campaign modules receive the complete science-package rules above.
+[tool.ruff.lint.per-file-ignores]
+"src/echelle_spectra/echelle_spectra_gui.py" = ["UP"]
+"src/echelle_spectra/resources/window_layout.py" = ["UP", "B"]
+"src/echelle_spectra/spectrocube_cli.py" = ["C90"]
+"src/echelle_spectra/tools/*.py" = ["UP", "B", "C90", "E722", "E731", "E741"]
 
 [tool.setuptools]
 include-package-data = true
@@ -119,7 +133,9 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-v"
+# Keep caches out of the Dropbox checkout. Tests that need temporary files use
+# pytest's OS-temp facilities; agent runs also supply a fresh external basetemp.
+addopts = "-q -p no:cacheprovider"
 
 # Optional: if/when you switch to setuptools_scm for auto-versioning:
 # [tool.setuptools_scm]

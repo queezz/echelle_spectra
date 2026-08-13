@@ -9,10 +9,8 @@ from __future__ import annotations
 import warnings
 
 import numpy as np
-import pytest
 
 from echelle_spectra.tools.echelle import Spectrum
-
 
 # ---------------------------------------------------------------------------
 # Helpers

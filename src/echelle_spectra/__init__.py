@@ -1,12 +1,21 @@
 import pathlib
 
+from .tools import echelle as echelle
+from .tools import emissionbands as emissionbands
+from .tools import emissiondata as emissiondata
 from .tools.config_loader import load_config
-from .tools import echelle
-from .tools import emissionbands
-from .tools import emissiondata
-from .tools.spectrocube_export import export_spectrocube, to_spectrocube
+from .tools.spectrocube_export import export_spectrocube as export_spectrocube
+from .tools.spectrocube_export import to_spectrocube as to_spectrocube
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
+
+__all__ = [
+    "echelle",
+    "emissionbands",
+    "emissiondata",
+    "export_spectrocube",
+    "to_spectrocube",
+]
 
 _echelle_base = pathlib.Path(__file__).parent.absolute()
 _config = load_config(_echelle_base)

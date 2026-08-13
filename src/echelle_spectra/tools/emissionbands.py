@@ -225,7 +225,6 @@ class EmissionBand(object):
     def make_model(self):
         """Make lmfit model to fit the experimental data"""
         from lmfit.models import GaussianModel
-        from lmfit.lineshapes import gaussian
 
         Np = len(self.cw)
         dlam = [i - self.cw[0] for i in self.cw]
@@ -322,7 +321,7 @@ class FitResult:
         # make a mask for the full frame range, True if intensities
         #  are calculated for the frame
         if self.frames is None:
-            msg = """self.frames are None, but should be an array of frames 
+            msg = """self.frames are None, but should be an array of frames
                      used to calculate intensities"""
             raise ValueError(msg)
 
@@ -332,7 +331,7 @@ class FitResult:
     def init_spectra(self):
         """ """
         if self.frames is None:
-            msg = """self.frames are None, but should be an array of frames 
+            msg = """self.frames are None, but should be an array of frames
                          used to calculate intensities"""
             raise ValueError(msg)
 

@@ -79,6 +79,7 @@ nav:
       - Band data: band-data.md
   - Usage:
       - Basic usage: usage.md
+      - Calibration snapshots: calibration-snapshots.md
       - Pattern extraction: pattern-extraction.md
       - Calibration alignment: calibration-alignment.md
       - Wavelength line validation: line-validation.md

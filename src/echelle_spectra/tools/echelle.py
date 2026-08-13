@@ -2,9 +2,10 @@
 Tools for Echelle spectrometer images
 """
 
-import numpy as np
 import os
 from os.path import join
+
+import numpy as np
 import pandas as pd
 
 # pd.isnull handles NaNs in object arrays where np.isnan can fail
@@ -125,8 +126,8 @@ class EchelleImage:
         aspect: float
             image aspect ratio
         """
-        import matplotlib.pylab as plt
         import matplotlib as mpl
+        import matplotlib.pylab as plt
         import matplotlib.ticker as mticker
 
         # font sizes
@@ -317,8 +318,8 @@ class EchelleImage:
         scale: float
             colormap scale multiplier
         """
-        import matplotlib.pylab as plt
         import matplotlib as mpl
+        import matplotlib.pylab as plt
 
         NORD = self.clbr.pattern.shape[1]
 
@@ -700,8 +701,8 @@ class Calibrations:
         """
         Read the integrating sphere wavelength characteristic
         """
+        from scipy.constants import Planck, speed_of_light
         from scipy.interpolate import interp1d
-        from scipy.constants import speed_of_light, Planck
 
         data = np.loadtxt(join(self.folder, self.filenames["integral"]))
         self.integral = interp1d(data[:, 0] * 1000, data[:, 1], 3)
