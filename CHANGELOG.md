@@ -5,6 +5,28 @@ follows the Fleet convention from 0.3.0 onward: a substantial capability earns
 a minor release, a compatible correction earns a patch, and documentation,
 tests, or internal refactoring alone do not move the number.
 
+## 1.4.0 — 2026-08-13
+
+**The live bench now carries the calibration campaign procedure.** Stable SIFs
+receive non-binding filename suggestions but only explicit sphere, background,
+and lamp-role confirmation completes the self-ticking checklist. Raw-count
+exposure guidance names the next safe acquisition action, and the order view
+maps the shared packaged ThAr, Ne, Hg, and Fulcher H2 catalogs into a dedicated
+line-identification table and overlay.
+
+**Integrating-sphere measurements become an immediate campaign check.** The
+bench runs the established absolute-calibration engine for the new sphere pair,
+compares its factor curve with the previous packaged campaign, and reports
+`insufficient data` as its own honest result when no defensible comparison is
+available.
+
+**A completed bench session becomes portable configuration and a validated
+snapshot.** Campaign, alignment, and SpectroCube-export TOMLs are generated as
+commented ordinary text from explicitly measured inputs. Snapshot save calls
+the existing atomic Packet 0 creation API and then its existing validator;
+replacement refusal, source immutability, failure detail, and corrected-identity
+recovery remain intact.
+
 ## 1.3.0 — 2026-08-13
 
 **A separate live calibration bench now turns stable SIF arrivals into an

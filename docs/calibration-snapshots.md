@@ -67,9 +67,16 @@ Validation checks:
 - presence, byte size, and SHA-256 digest of every artifact;
 - base-snapshot identity and self-reference.
 
-`snapshot.toml` remains ordinary hand-editable TOML. If it is edited, run the
-validator again. A changed artifact needs a new snapshot ID; an already used
-snapshot should never be silently rewritten.
+`snapshot.toml` begins with comments explaining that it remains ordinary
+hand-editable TOML. If it is edited, run the validator again. A changed artifact
+needs a new snapshot ID; an already used snapshot should never be silently
+rewritten.
+
+The live calibration bench can assemble the same request after its procedure is
+complete. It calls this creation API and then this validator directly, so the GUI
+inherits the same atomic construction, digest checks, and replacement refusal.
+Its separately generated campaign, alignment, and export TOMLs remain editable
+configuration evidence; they do not replace `snapshot.toml` as the binder.
 
 ## Historical calibrations
 

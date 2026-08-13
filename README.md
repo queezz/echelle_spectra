@@ -55,11 +55,13 @@ Use the separate pyqtgraph bench while acquiring calibration lamps:
 echelle-calib path/to/acquisition-folder
 ```
 
-It waits for the newest SIF to stop changing, then shows the detector/order
-views. Select an order and click a labeled expected line to fit a centroid,
-check raw-pixel saturation, and add an anchor. With two or more anchors the
-rigid detector alignment, RMS, and residuals update immediately. The existing
-`echelle_spectra` GUI remains unchanged. See the
+It waits for the newest SIF to stop changing, then carries the complete bench
+procedure: explicitly classify sphere/background/lamp measurements, follow the
+self-ticking checklist and exposure advice, identify lines from the shared
+packaged catalogs, fit the live rigid alignment, compare new absolute factors
+with the previous sphere pair, generate commented hand-editable TOMLs, and save
+then validate a complete snapshot through the established snapshot API. The
+existing `echelle_spectra` GUI remains unchanged. See the
 [live calibration bench guide](docs/calibration-bench.md).
 
 ---

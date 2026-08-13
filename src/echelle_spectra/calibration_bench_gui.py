@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import sys
 from collections.abc import Sequence
+from datetime import date
 from pathlib import Path
 
 import numpy as np
@@ -20,6 +21,15 @@ from .calibration_bench import (
     StableFileState,
     StableSifWatcher,
 )
+from .calibration_campaign import (
+    CalibrationCampaignSession,
+    ChecklistState,
+    ComparisonState,
+    MeasurementRole,
+    TomlState,
+    catalog_lines_for_order,
+)
+from .snapshot import SnapshotError
 from .tools.calibration_alignment import load_wavelength_table
 
 _PACKAGE_DIR = Path(__file__).parent
@@ -29,6 +39,11 @@ _DEFAULT_WAVELENGTH = (
     _CALIBRATION_DIR
     / "alignments"
     / "Th_wavelength_CMOS_20240305_aligned_to_20250926.txt"
+)
+_DEFAULT_INTEGRAL = _CALIBRATION_DIR / "integrating_sphere.txt"
+_DEFAULT_PREVIOUS_SPHERE = _CALIBRATION_DIR / "sphere_cmos_20240305.sif"
+_DEFAULT_PREVIOUS_SPHERE_BACKGROUND = (
+    _CALIBRATION_DIR / "sphere_cmos_20240305_bkg.sif"
 )
 
 
@@ -50,6 +65,23 @@ class FrameLoadThread(QtCore.QThread):
             self.failed.emit(str(self.path), str(exc))
 
 
+class CampaignTaskThread(QtCore.QThread):
+    """Run one potentially slow campaign operation away from the event loop."""
+
+    completed = QtCore.pyqtSignal(object)
+    failed = QtCore.pyqtSignal(str)
+
+    def __init__(self, operation, parent=None) -> None:
+        super().__init__(parent)
+        self.operation = operation
+
+    def run(self) -> None:
+        try:
+            self.completed.emit(self.operation())
+        except Exception as exc:  # GUI boundary: domain state retains the detail
+            self.failed.emit(str(exc))
+
+
 class CalibrationBenchWindow(QtWidgets.QMainWindow):
     """Thin Qt adapter over :class:`CalibrationBenchSession`."""
 
@@ -57,18 +89,32 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         self,
         session: CalibrationBenchSession,
         *,
+        campaign: CalibrationCampaignSession | None = None,
         watcher: StableSifWatcher | None = None,
         loader: FrameLoader | None = None,
+        output_root: str | Path = "calibrations",
+        config_root: str | Path = "calibration-configs",
+        snapshot_id: str = "",
+        detector: str = "cmos",
+        base_snapshot: str = "",
         poll_interval_ms: int = 1000,
         start_timer: bool = True,
     ) -> None:
         super().__init__()
         self.session = session
+        self.campaign = campaign
         self.watcher = watcher
         self.loader = loader
+        self.output_root = Path(output_root)
+        self.config_root = Path(config_root)
+        self.initial_snapshot_id = snapshot_id
+        self.initial_detector = detector
+        self.initial_base_snapshot = base_snapshot
         self._load_thread: FrameLoadThread | None = None
+        self._campaign_thread: CampaignTaskThread | None = None
         self._pattern_items: list[pg.PlotDataItem] = []
         self._line_items: list[object] = []
+        self._catalog_items: list[object] = []
         self._anchor_items: list[object] = []
         self._build_ui()
         self._connect_ui()
@@ -83,29 +129,100 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
 
     def _build_ui(self) -> None:
         self.setWindowTitle("Echelle calibration bench")
-        self.resize(1440, 900)
-        self.setMinimumSize(980, 640)
+        self.resize(1540, 940)
+        self.setMinimumSize(1080, 700)
 
         root = QtWidgets.QSplitter(QtCore.Qt.Horizontal)
         root.setChildrenCollapsible(False)
         self.setCentralWidget(root)
 
         controls = QtWidgets.QWidget()
-        controls.setMinimumWidth(300)
-        controls.setMaximumWidth(390)
+        controls.setMinimumWidth(380)
+        controls.setMaximumWidth(480)
         controls_layout = QtWidgets.QVBoxLayout(controls)
         controls_layout.setContentsMargins(18, 18, 14, 18)
-        controls_layout.setSpacing(12)
+        controls_layout.setSpacing(10)
 
         title = QtWidgets.QLabel("LIVE CALIBRATION")
         title.setObjectName("benchTitle")
         subtitle = QtWidgets.QLabel(
-            "Newest stable SIF → detector/order review → click known lines → rigid fit"
+            "Measure → classify → identify → compare → configure → validate"
         )
         subtitle.setWordWrap(True)
         subtitle.setObjectName("benchSubtitle")
         controls_layout.addWidget(title)
         controls_layout.addWidget(subtitle)
+
+        self.control_tabs = QtWidgets.QTabWidget()
+        self._build_procedure_tab()
+        self._build_lamp_tab()
+        self._build_save_tab()
+        controls_layout.addWidget(self.control_tabs, 1)
+        root.addWidget(controls)
+
+        self.view_tabs = QtWidgets.QTabWidget()
+        self._build_alignment_view()
+        self._build_line_help_view()
+        self._build_sphere_view()
+        root.addWidget(self.view_tabs)
+        root.setStretchFactor(1, 1)
+        root.setSizes([460, 1080])
+
+        self.setStyleSheet(
+            """
+            QMainWindow, QWidget { background: #151b22; color: #dce8f2; }
+            QGroupBox { border: 1px solid #334252; border-radius: 7px; margin-top: 9px;
+                        padding-top: 8px; font-weight: 600; }
+            QGroupBox::title { subcontrol-origin: margin; left: 10px; color: #8fd9ff; }
+            #benchTitle { color: #80ddff; font-size: 21px; font-weight: 700;
+                          letter-spacing: 1px; }
+            #benchSubtitle, #benchHelp, #mutedText { color: #93a8b8; }
+            #stateBadge { color: #7ee2b8; font-weight: 700; }
+            #messagePanel { background: #0f141a; border-left: 3px solid #49b5df;
+                            padding: 9px; color: #bed4e1; }
+            QTableWidget, QTreeWidget, QListWidget, QPlainTextEdit {
+                background: #10151b; alternate-background-color: #18212a;
+                gridline-color: #2b3946; }
+            QHeaderView::section { background: #202b36; color: #b9d5e5; padding: 5px; }
+            QPushButton { background: #273746; border: 1px solid #416078; border-radius: 5px;
+                          padding: 7px; }
+            QPushButton:hover { background: #315069; }
+            QPushButton:disabled { color: #657786; border-color: #33404a; }
+            QSpinBox, QComboBox, QLineEdit {
+                background: #0f141a; border: 1px solid #416078; padding: 4px; }
+            QTabWidget::pane { border: 1px solid #334252; }
+            QTabBar::tab { background: #202b36; color: #9fb6c6; padding: 7px 10px; }
+            QTabBar::tab:selected { background: #294052; color: #8fe3ff; }
+            """
+        )
+
+    def _build_procedure_tab(self) -> None:
+        tab = QtWidgets.QWidget()
+        layout = QtWidgets.QVBoxLayout(tab)
+        layout.setContentsMargins(10, 12, 10, 10)
+
+        intro = QtWidgets.QLabel(
+            "Follow top to bottom. Checks come only from explicit measurements, "
+            "computed evidence, generated files, and validator success."
+        )
+        intro.setWordWrap(True)
+        intro.setObjectName("messagePanel")
+        layout.addWidget(intro)
+        checklist_header = QtWidgets.QLabel("Self-ticking procedure · measured evidence")
+        checklist_header.setStyleSheet("background: #202b36; padding: 8px;")
+        layout.addWidget(checklist_header)
+        self.checklist_tree = QtWidgets.QListWidget()
+        self.checklist_tree.setAlternatingRowColors(True)
+        self.checklist_tree.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
+        layout.addWidget(self.checklist_tree, 1)
+        self.control_tabs.addTab(tab, "Procedure")
+
+        self._build_acquisition_tab()
+
+    def _build_acquisition_tab(self) -> None:
+        tab = QtWidgets.QWidget()
+        layout = QtWidgets.QVBoxLayout(tab)
+        layout.setContentsMargins(10, 12, 10, 10)
 
         status_group = QtWidgets.QGroupBox("Acquisition")
         status_form = QtWidgets.QFormLayout(status_group)
@@ -118,7 +235,54 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         status_form.addRow("Folder", self.watch_value)
         status_form.addRow("Newest", self.file_value)
         status_form.addRow("File state", self.file_state_value)
-        controls_layout.addWidget(status_group)
+        layout.addWidget(status_group)
+
+        role_group = QtWidgets.QGroupBox("Confirm measurement role")
+        role_layout = QtWidgets.QVBoxLayout(role_group)
+        self.role_suggestion_value = QtWidgets.QLabel(
+            "Load a SIF; filename help never completes the checklist by itself."
+        )
+        self.role_suggestion_value.setWordWrap(True)
+        self.role_suggestion_value.setObjectName("mutedText")
+        role_layout.addWidget(self.role_suggestion_value)
+        role_row = QtWidgets.QHBoxLayout()
+        self.role_combo = QtWidgets.QComboBox()
+        for label, role in (
+            ("Sphere signal", MeasurementRole.SPHERE),
+            ("Sphere background", MeasurementRole.SPHERE_BACKGROUND),
+            ("Lamp signal", MeasurementRole.LAMP),
+            ("Lamp background", MeasurementRole.LAMP_BACKGROUND),
+        ):
+            self.role_combo.addItem(label, role)
+        self.lamp_family_combo = QtWidgets.QComboBox()
+        self.lamp_family_combo.addItems(["ThAr", "Ne", "Hg", "H2"])
+        role_row.addWidget(self.role_combo, 2)
+        role_row.addWidget(self.lamp_family_combo, 1)
+        role_layout.addLayout(role_row)
+        self.confirm_role_button = QtWidgets.QPushButton("Confirm role for loaded SIF")
+        role_layout.addWidget(self.confirm_role_button)
+        self.exposure_value = QtWidgets.QLabel("Exposure guidance appears after confirmation.")
+        self.exposure_value.setWordWrap(True)
+        self.exposure_value.setObjectName("messagePanel")
+        role_layout.addWidget(self.exposure_value)
+        layout.addWidget(role_group)
+
+        comparison_group = QtWidgets.QGroupBox("Integrating-sphere factors")
+        comparison_layout = QtWidgets.QVBoxLayout(comparison_group)
+        self.comparison_value = QtWidgets.QLabel("NOT RUN — classify the sphere pair first.")
+        self.comparison_value.setWordWrap(True)
+        self.comparison_value.setObjectName("stateBadge")
+        self.compare_button = QtWidgets.QPushButton("Compute and compare factors")
+        comparison_layout.addWidget(self.comparison_value)
+        comparison_layout.addWidget(self.compare_button)
+        layout.addWidget(comparison_group)
+        layout.addStretch(1)
+        self.control_tabs.addTab(tab, "Acquire")
+
+    def _build_lamp_tab(self) -> None:
+        tab = QtWidgets.QWidget()
+        layout = QtWidgets.QVBoxLayout(tab)
+        layout.setContentsMargins(10, 12, 10, 10)
 
         order_group = QtWidgets.QGroupBox("Order interaction")
         order_layout = QtWidgets.QVBoxLayout(order_group)
@@ -128,13 +292,20 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         self.order_spin.setRange(0, self.session.pattern.shape[1] - 1)
         order_row.addWidget(self.order_spin)
         order_layout.addLayout(order_row)
+        family_row = QtWidgets.QHBoxLayout()
+        family_row.addWidget(QtWidgets.QLabel("Line help"))
+        self.line_family_combo = QtWidgets.QComboBox()
+        self.line_family_combo.addItems(["ThAr", "Ne", "Hg", "H2"])
+        family_row.addWidget(self.line_family_combo)
+        order_layout.addLayout(family_row)
         help_text = QtWidgets.QLabel(
-            "Click a labeled row. Saturated raw pixels are refused before fitting."
+            "Blue sticks use shared packaged line knowledge. Gold rows remain the "
+            "curated click-to-fit anchors. Saturated raw pixels are refused."
         )
         help_text.setWordWrap(True)
         help_text.setObjectName("benchHelp")
         order_layout.addWidget(help_text)
-        controls_layout.addWidget(order_group)
+        layout.addWidget(order_group)
 
         fit_group = QtWidgets.QGroupBox("Rigid alignment")
         fit_form = QtWidgets.QFormLayout(fit_group)
@@ -148,7 +319,7 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         fit_form.addRow("Anchors", self.anchor_count_value)
         fit_form.addRow("RMS", self.rms_value)
         fit_form.addRow("dx / dy / θ", self.transform_value)
-        controls_layout.addWidget(fit_group)
+        layout.addWidget(fit_group)
 
         self.anchor_table = QtWidgets.QTableWidget(0, 5)
         self.anchor_table.setHorizontalHeaderLabels(
@@ -163,23 +334,63 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         self.anchor_table.verticalHeader().setDefaultSectionSize(24)
         self.anchor_table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
         self.anchor_table.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
-        controls_layout.addWidget(self.anchor_table, 1)
+        layout.addWidget(self.anchor_table, 1)
 
         button_row = QtWidgets.QHBoxLayout()
         self.remove_button = QtWidgets.QPushButton("Remove selected")
         self.clear_button = QtWidgets.QPushButton("Clear anchors")
         button_row.addWidget(self.remove_button)
         button_row.addWidget(self.clear_button)
-        controls_layout.addLayout(button_row)
+        layout.addLayout(button_row)
 
         self.message_value = QtWidgets.QLabel("Waiting for data.")
         self.message_value.setWordWrap(True)
         self.message_value.setObjectName("messagePanel")
-        controls_layout.addWidget(self.message_value)
-        root.addWidget(controls)
+        layout.addWidget(self.message_value)
+        self.control_tabs.addTab(tab, "Lamp fit")
 
+    def _build_save_tab(self) -> None:
+        tab = QtWidgets.QWidget()
+        layout = QtWidgets.QVBoxLayout(tab)
+        layout.setContentsMargins(10, 12, 10, 10)
+
+        identity_group = QtWidgets.QGroupBox("Snapshot identity")
+        form = QtWidgets.QFormLayout(identity_group)
+        self.snapshot_id_edit = QtWidgets.QLineEdit(self.initial_snapshot_id)
+        self.detector_edit = QtWidgets.QLineEdit(self.initial_detector)
+        self.base_snapshot_edit = QtWidgets.QLineEdit(self.initial_base_snapshot)
+        self.notes_edit = QtWidgets.QLineEdit()
+        form.addRow("ID", self.snapshot_id_edit)
+        form.addRow("Detector", self.detector_edit)
+        form.addRow("Base snapshot", self.base_snapshot_edit)
+        form.addRow("Notes", self.notes_edit)
+        layout.addWidget(identity_group)
+
+        destination = QtWidgets.QLabel(
+            f"Snapshots: {self.output_root.name}\nConfigs: {self.config_root.name}"
+        )
+        destination.setObjectName("mutedText")
+        destination.setWordWrap(True)
+        layout.addWidget(destination)
+        self.generate_tomls_button = QtWidgets.QPushButton("Generate commented TOMLs")
+        self.save_snapshot_button = QtWidgets.QPushButton("Save and validate snapshot")
+        layout.addWidget(self.generate_tomls_button)
+        layout.addWidget(self.save_snapshot_button)
+        self.save_state_value = QtWidgets.QLabel("NOT READY")
+        self.save_state_value.setObjectName("stateBadge")
+        layout.addWidget(self.save_state_value)
+        self.toml_preview = QtWidgets.QPlainTextEdit()
+        self.toml_preview.setReadOnly(True)
+        self.toml_preview.setPlaceholderText(
+            "Generated campaign.toml appears here; all files remain ordinary and editable."
+        )
+        layout.addWidget(self.toml_preview, 1)
+        self.control_tabs.addTab(tab, "Save")
+
+    def _build_alignment_view(self) -> None:
         graphics = pg.GraphicsLayoutWidget()
         graphics.setBackground("#10151b")
+
         self.detector_plot = graphics.addPlot(row=0, col=0, title="Detector + order traces")
         self.detector_plot.setLabel("bottom", "detector column", units="px")
         self.detector_plot.setLabel("left", "detector row", units="px")
@@ -204,36 +415,175 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         self.residual_plot.getAxis("bottom").setHeight(62)
         self.residual_plot.getAxis("left").enableAutoSIPrefix(False)
         self.residual_plot.addLine(y=0, pen=pg.mkPen("#64748b", style=QtCore.Qt.DashLine))
-        root.addWidget(graphics)
-        root.setStretchFactor(1, 1)
+        self.view_tabs.addTab(graphics, "Lamp alignment")
 
-        self.setStyleSheet(
-            """
-            QMainWindow, QWidget { background: #151b22; color: #dce8f2; }
-            QGroupBox { border: 1px solid #334252; border-radius: 7px; margin-top: 9px;
-                        padding-top: 8px; font-weight: 600; }
-            QGroupBox::title { subcontrol-origin: margin; left: 10px; color: #8fd9ff; }
-            #benchTitle { color: #80ddff; font-size: 21px; font-weight: 700; letter-spacing: 1px; }
-            #benchSubtitle, #benchHelp { color: #93a8b8; }
-            #stateBadge { color: #7ee2b8; font-weight: 700; }
-            #messagePanel { background: #0f141a; border-left: 3px solid #49b5df;
-                            padding: 9px; color: #bed4e1; }
-            QTableWidget { background: #10151b; alternate-background-color: #18212a;
-                           gridline-color: #2b3946; }
-            QHeaderView::section { background: #202b36; color: #b9d5e5; padding: 5px; }
-            QPushButton { background: #273746; border: 1px solid #416078; border-radius: 5px;
-                          padding: 7px; }
-            QPushButton:hover { background: #315069; }
-            QPushButton:disabled { color: #657786; border-color: #33404a; }
-            QSpinBox { background: #0f141a; border: 1px solid #416078; padding: 4px; }
-            """
+    def _build_line_help_view(self) -> None:
+        widget = QtWidgets.QWidget()
+        layout = QtWidgets.QVBoxLayout(widget)
+        intro = QtWidgets.QLabel(
+            "Expected lines come from the same packaged ThAr, Ne, Hg, and Fulcher H2 "
+            "catalogs used by the main GUI and validation tools. Pixel positions are "
+            "interpolated from the current wavelength table for identification help."
         )
+        intro.setWordWrap(True)
+        intro.setObjectName("messagePanel")
+        layout.addWidget(intro)
+        self.line_help_table = QtWidgets.QTableWidget(0, 5)
+        self.line_help_table.setHorizontalHeaderLabels(
+            ["Label", "λ (nm)", "Pixel", "Rel. I", "Packaged source"]
+        )
+        self.line_help_table.horizontalHeader().setSectionResizeMode(
+            0, QtWidgets.QHeaderView.ResizeToContents
+        )
+        self.line_help_table.horizontalHeader().setSectionResizeMode(
+            4, QtWidgets.QHeaderView.Stretch
+        )
+        self.line_help_table.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
+        self.line_help_table.setAlternatingRowColors(True)
+        layout.addWidget(self.line_help_table)
+        self.view_tabs.addTab(widget, "Line identification")
+
+    def _build_sphere_view(self) -> None:
+        widget = QtWidgets.QWidget()
+        layout = QtWidgets.QVBoxLayout(widget)
+        self.sphere_view_message = QtWidgets.QLabel(
+            "Classify the integrating-sphere signal/background pair, then compute factors."
+        )
+        self.sphere_view_message.setWordWrap(True)
+        self.sphere_view_message.setObjectName("messagePanel")
+        layout.addWidget(self.sphere_view_message)
+        self.sphere_plot = pg.PlotWidget(title="Absolute calibration factors")
+        self.sphere_plot.setBackground("#10151b")
+        self.sphere_plot.setLabel("bottom", "wavelength", units="nm")
+        self.sphere_plot.setLabel("left", "factor", units="W m⁻² sr⁻¹ nm⁻¹ count⁻¹")
+        self.sphere_plot.addLegend()
+        layout.addWidget(self.sphere_plot)
+        self.view_tabs.addTab(widget, "Sphere factors")
 
     def _connect_ui(self) -> None:
         self.order_spin.valueChanged.connect(self._order_changed)
+        self.line_family_combo.currentTextChanged.connect(self._line_family_changed)
         self.order_plot.scene().sigMouseClicked.connect(self._order_plot_clicked)
         self.remove_button.clicked.connect(self._remove_selected_anchor)
         self.clear_button.clicked.connect(self._clear_anchors)
+        self.role_combo.currentIndexChanged.connect(self._role_selection_changed)
+        self.confirm_role_button.clicked.connect(self._confirm_measurement_role)
+        self.compare_button.clicked.connect(self._start_sphere_comparison)
+        self.generate_tomls_button.clicked.connect(self._generate_tomls)
+        self.save_snapshot_button.clicked.connect(self._save_snapshot)
+        self.snapshot_id_edit.textChanged.connect(self.refresh_campaign)
+
+    def _role_selection_changed(self) -> None:
+        role = self.role_combo.currentData()
+        self.lamp_family_combo.setEnabled(
+            role in {MeasurementRole.LAMP, MeasurementRole.LAMP_BACKGROUND}
+        )
+
+    def _line_family_changed(self) -> None:
+        self.lamp_family_combo.setCurrentText(self.line_family_combo.currentText())
+        self.refresh_plots()
+
+    def _confirm_measurement_role(self) -> None:
+        if self.campaign is None or self.session.frame is None:
+            return
+        try:
+            record = self.campaign.classify_file(
+                self.session.frame.path,
+                self.role_combo.currentData(),
+                lamp_family=self.lamp_family_combo.currentText(),
+                frame=self.session.frame,
+                saturation_level=self.session.saturation_level,
+            )
+        except (FileNotFoundError, ValueError) as exc:
+            self.message_value.setText(f"Could not classify measurement: {exc}")
+            return
+        self.message_value.setText(
+            f"Confirmed {record.role.value}: {record.path.name}. "
+            "Dependent comparison/configuration state was reset."
+        )
+        self.refresh()
+
+    def _start_campaign_task(self, operation) -> None:
+        if self._campaign_thread is not None:
+            return
+        thread = CampaignTaskThread(operation, self)
+        thread.completed.connect(self._campaign_task_completed)
+        thread.failed.connect(self._campaign_task_failed)
+        thread.finished.connect(self._campaign_task_finished)
+        self._campaign_thread = thread
+        self.refresh_campaign()
+        thread.start()
+
+    def _start_sphere_comparison(self) -> None:
+        if self.campaign is None:
+            return
+        self.comparison_value.setText("COMPUTING — using the established absolute engine…")
+        self._start_campaign_task(self.campaign.compute_sphere_comparison)
+
+    @QtCore.pyqtSlot(object)
+    def _campaign_task_completed(self, result) -> None:
+        state = getattr(result, "state", None)
+        if state is ComparisonState.READY:
+            self.message_value.setText("Sphere factors computed and compared.")
+        elif state is ComparisonState.INSUFFICIENT_DATA:
+            self.message_value.setText(
+                "Candidate factors computed; previous comparison is insufficient data."
+            )
+        elif hasattr(result, "snapshot_id"):
+            self.message_value.setText(
+                f"Snapshot {result.snapshot_id} saved and validated through Packet 0."
+            )
+        self.refresh()
+
+    @QtCore.pyqtSlot(str)
+    def _campaign_task_failed(self, reason: str) -> None:
+        self.message_value.setText(f"Campaign action failed safely: {reason}")
+        self.refresh()
+
+    @QtCore.pyqtSlot()
+    def _campaign_task_finished(self) -> None:
+        if self._campaign_thread is not None:
+            self._campaign_thread.deleteLater()
+        self._campaign_thread = None
+        self.refresh_campaign()
+
+    def _generate_tomls(self) -> None:
+        if self.campaign is None:
+            return
+        try:
+            paths = self.campaign.write_tomls(
+                self.config_root,
+                self.snapshot_id_edit.text().strip(),
+                self.session,
+            )
+        except (OSError, SnapshotError, ValueError) as exc:
+            self.message_value.setText(f"TOMLs were not generated: {exc}")
+        else:
+            self.message_value.setText(
+                "Generated commented campaign, alignment, and export TOMLs."
+            )
+            self.toml_preview.setPlainText(
+                paths["campaign"].read_text(encoding="utf-8")
+            )
+        self.refresh_campaign()
+
+    def _save_snapshot(self) -> None:
+        if self.campaign is None:
+            return
+        snapshot_id = self.snapshot_id_edit.text().strip()
+        detector = self.detector_edit.text().strip()
+        base_snapshot = self.base_snapshot_edit.text().strip() or None
+        notes = self.notes_edit.text().strip()
+        self._start_campaign_task(
+            lambda: self.campaign.save_snapshot(
+                self.output_root,
+                snapshot_id=snapshot_id,
+                detector=detector,
+                alignment=self.session,
+                notes=notes,
+                base_snapshot=base_snapshot,
+            )
+        )
 
     def poll_watch_folder(self) -> None:
         """Poll once; loading begins only for a newly emitted stable file."""
@@ -271,6 +621,13 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
     @QtCore.pyqtSlot(object)
     def _frame_loaded(self, frame: BenchFrame) -> None:
         self.session.accept_frame(frame)
+        if self.campaign is not None:
+            suggestion = self.campaign.observe_file(frame.path)
+            self.role_suggestion_value.setText(suggestion.reason)
+            if suggestion.is_unambiguous:
+                index = self.role_combo.findData(suggestion.roles[0])
+                if index >= 0:
+                    self.role_combo.setCurrentIndex(index)
         self.refresh()
 
     @QtCore.pyqtSlot(str, str)
@@ -315,7 +672,7 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         """Render the current domain state without changing it."""
 
         if self.watcher is not None:
-            self.watch_value.setText(str(self.watcher.folder))
+            self.watch_value.setText(self.watcher.folder.name or ".")
         if self.session.frame is not None:
             self.file_value.setText(self.session.frame.path.name)
         elif self.session.loading_path is not None:
@@ -354,6 +711,141 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
             self.message_value.setText(f"Alignment failed: {self.session.last_error}")
         self._refresh_anchor_table()
         self.refresh_plots()
+        self.refresh_campaign()
+
+    def refresh_campaign(self) -> None:
+        """Render campaign memory without inferring or mutating measurement roles."""
+
+        enabled = self.campaign is not None
+        busy = self._campaign_thread is not None
+        self.confirm_role_button.setEnabled(
+            enabled and self.session.frame is not None and not busy
+        )
+        self.compare_button.setEnabled(enabled and not busy)
+        self.generate_tomls_button.setEnabled(enabled and not busy)
+        if not enabled:
+            self.checklist_tree.clear()
+            self.comparison_value.setText("Campaign memory was not configured.")
+            self.generate_tomls_button.setEnabled(False)
+            self.save_snapshot_button.setEnabled(False)
+            return
+
+        assert self.campaign is not None
+        self._refresh_current_measurement()
+        self._refresh_comparison_summary()
+        self._refresh_checklist()
+        self.save_state_value.setText(
+            self.campaign.save_state.value.replace("-", " ").upper()
+        )
+        self.save_snapshot_button.setEnabled(
+            not busy
+            and self.campaign.ready_for_snapshot(
+                self.snapshot_id_edit.text().strip(), self.session
+            )
+        )
+        if self.campaign.toml_state is TomlState.GENERATED and not self.toml_preview.toPlainText():
+            campaign_path = self.campaign.toml_paths.get("campaign")
+            if campaign_path is not None and campaign_path.is_file():
+                self.toml_preview.setPlainText(
+                    campaign_path.read_text(encoding="utf-8")
+                )
+        self._refresh_sphere_plot()
+
+    def _refresh_current_measurement(self) -> None:
+        assert self.campaign is not None
+        if self.session.frame is not None:
+            suggestion = self.campaign.observed.get(self.session.frame.path)
+            if suggestion is not None:
+                self.role_suggestion_value.setText(suggestion.reason)
+            record = self.campaign.measurements.get(self.session.frame.path)
+            if record is not None:
+                index = self.role_combo.findData(record.role)
+                if index >= 0:
+                    self.role_combo.setCurrentIndex(index)
+                if record.lamp_family:
+                    self.lamp_family_combo.setCurrentText(record.lamp_family)
+                    self.line_family_combo.setCurrentText(record.lamp_family)
+                guidance = record.exposure
+                if guidance is not None:
+                    peak = (
+                        "—" if guidance.peak_value is None else f"{guidance.peak_value:.0f} counts"
+                    )
+                    self.exposure_value.setText(
+                        f"{guidance.state.value.upper()} · peak {peak}. {guidance.next_action}"
+                    )
+
+    def _refresh_comparison_summary(self) -> None:
+        assert self.campaign is not None
+        comparison = self.campaign.comparison
+        if comparison.state is ComparisonState.READY:
+            self.comparison_value.setText(
+                "READY · new/previous median "
+                f"{comparison.median_ratio:.3f}; 5–95% "
+                f"{comparison.p05_ratio:.3f}–{comparison.p95_ratio:.3f} "
+                f"({comparison.sample_count} samples)."
+            )
+        else:
+            self.comparison_value.setText(
+                f"{comparison.state.value.replace('-', ' ').upper()} · {comparison.reason}"
+            )
+
+    def _refresh_checklist(self) -> None:
+        assert self.campaign is not None
+        self.checklist_tree.clear()
+        symbols = {
+            ChecklistState.DONE: "✓",
+            ChecklistState.WAITING: "○",
+            ChecklistState.ATTENTION: "!",
+        }
+        colors = {
+            ChecklistState.DONE: QtGui.QColor("#70d6ae"),
+            ChecklistState.WAITING: QtGui.QColor("#8fa5b5"),
+            ChecklistState.ATTENTION: QtGui.QColor("#ffb86b"),
+        }
+        for item in self.campaign.checklist(self.session):
+            text = f"{symbols[item.state]}  {item.label} — {item.detail}"
+            row = QtWidgets.QListWidgetItem()
+            row.setToolTip(f"{item.label}\n{item.detail}")
+            label = QtWidgets.QLabel(text)
+            label.setWordWrap(True)
+            label.setContentsMargins(8, 6, 8, 6)
+            label.setStyleSheet(f"color: {colors[item.state].name()};")
+            label.setFixedWidth(max(280, self.checklist_tree.viewport().width() - 18))
+            row.setSizeHint(QtCore.QSize(0, label.sizeHint().height() + 8))
+            self.checklist_tree.addItem(row)
+            self.checklist_tree.setItemWidget(row, label)
+
+    def _refresh_sphere_plot(self) -> None:
+        self.sphere_plot.clear()
+        if self.campaign is None:
+            return
+        comparison = self.campaign.comparison
+        if comparison.candidate is not None:
+            size = min(
+                comparison.candidate.wavelength_nm.size,
+                comparison.candidate.factors_wmsr.size,
+            )
+            self.sphere_plot.plot(
+                comparison.candidate.wavelength_nm[:size],
+                comparison.candidate.factors_wmsr[:size],
+                pen=pg.mkPen("#70d6ae", width=2),
+                name="new measured pair",
+            )
+        if comparison.previous is not None:
+            size = min(
+                comparison.previous.wavelength_nm.size,
+                comparison.previous.factors_wmsr.size,
+            )
+            self.sphere_plot.plot(
+                comparison.previous.wavelength_nm[:size],
+                comparison.previous.factors_wmsr[:size],
+                pen=pg.mkPen("#f5b95f", width=1.5),
+                name="previous campaign",
+            )
+        self.sphere_plot.setLogMode(y=True)
+        self.sphere_view_message.setText(
+            f"{comparison.state.value.replace('-', ' ').upper()} — {comparison.reason}"
+        )
 
     def _refresh_anchor_table(self) -> None:
         anchors = self.session.anchor_rows()
@@ -396,6 +888,7 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         self.order_curve.setData(np.arange(spectrum.size), spectrum)
         self.order_plot.setTitle(f"Order {order_idx}: click a labeled expected line")
         self._clear_items(self.order_plot, self._line_items)
+        self._clear_items(self.order_plot, self._catalog_items)
         self._clear_items(self.order_plot, self._anchor_items)
         top = float(np.nanmax(spectrum)) if np.any(np.isfinite(spectrum)) else 1.0
         line_rows = self.session.lines_for_order(order_idx)
@@ -416,6 +909,30 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
             self.order_plot.addItem(marker, ignoreBounds=True)
             self.order_plot.addItem(label, ignoreBounds=True)
             self._line_items.extend([marker, label])
+        catalog_rows = catalog_lines_for_order(
+            self.session.lines,
+            order_idx,
+            self.line_family_combo.currentText(),
+            maximum_lines=16,
+        )
+        for index, row in enumerate(catalog_rows):
+            marker = pg.InfiniteLine(
+                row.detector_pixel,
+                angle=90,
+                movable=False,
+                pen=pg.mkPen("#6aa7ff", width=0.9, style=QtCore.Qt.DotLine),
+            )
+            self.order_plot.addItem(marker, ignoreBounds=True)
+            self._catalog_items.append(marker)
+            if index % 3 == 0:
+                label = pg.TextItem(
+                    row.line.label,
+                    color="#8ebcff",
+                    anchor=(0.5, 0.5),
+                )
+                label.setPos(row.detector_pixel, top * (0.22 + 0.09 * (index % 3)))
+                self.order_plot.addItem(label, ignoreBounds=True)
+                self._catalog_items.append(label)
         for anchor in self.session.anchor_rows():
             if anchor.line.order_idx != order_idx:
                 continue
@@ -428,7 +945,25 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
             )
             self.order_plot.addItem(marker)
             self._anchor_items.append(marker)
+        self._refresh_line_help_table(catalog_rows)
         self._refresh_residual_plot()
+
+    def _refresh_line_help_table(self, rows) -> None:
+        self.line_help_table.setRowCount(len(rows))
+        for index, row in enumerate(rows):
+            intensity = row.line.relative_intensity
+            source = row.line.source_resource.replace("\\", "/").rsplit("/", 1)[-1]
+            values = (
+                row.line.label,
+                f"{row.line.wavelength_nm:.4f}",
+                f"{row.detector_pixel:.1f}",
+                "—" if intensity is None else f"{intensity:.2f}",
+                source,
+            )
+            for column, value in enumerate(values):
+                self.line_help_table.setItem(
+                    index, column, QtWidgets.QTableWidgetItem(value)
+                )
 
     def _refresh_pattern_traces(self) -> None:
         while self._pattern_items:
@@ -490,6 +1025,38 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--file", type=Path, help="load one SIF immediately and keep watching")
     parser.add_argument("--pattern", type=Path, default=_DEFAULT_PATTERN)
     parser.add_argument("--wavelength", type=Path, default=_DEFAULT_WAVELENGTH)
+    parser.add_argument("--integral", type=Path, default=_DEFAULT_INTEGRAL)
+    parser.add_argument("--previous-sphere", type=Path, default=_DEFAULT_PREVIOUS_SPHERE)
+    parser.add_argument(
+        "--previous-sphere-background",
+        type=Path,
+        default=_DEFAULT_PREVIOUS_SPHERE_BACKGROUND,
+    )
+    parser.add_argument(
+        "--lamp",
+        action="append",
+        choices=("ThAr", "Ne", "Hg", "H2"),
+        help="required lamp family; repeat for several (default: ThAr)",
+    )
+    parser.add_argument(
+        "--snapshot-id",
+        default=f"{date.today():%Y%m%d}_cmos",
+        help="planned snapshot identity (default: today's CMOS identity)",
+    )
+    parser.add_argument("--detector", default="cmos")
+    parser.add_argument("--base-snapshot", default="20250926_cmos")
+    parser.add_argument(
+        "--output-root",
+        type=Path,
+        default=Path.cwd() / "calibrations",
+        help="snapshot parent directory",
+    )
+    parser.add_argument(
+        "--config-root",
+        type=Path,
+        default=Path.cwd() / "calibration-configs",
+        help="parent for generated commented TOML bundles",
+    )
     parser.add_argument("--poll-ms", type=int, default=1000)
     parser.add_argument("--stable-polls", type=int, default=2)
     parser.add_argument("--minimum-age-s", type=float, default=1.0)
@@ -508,6 +1075,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         raise SystemExit(f"pattern file not found: {args.pattern}")
     if not args.wavelength.is_file():
         raise SystemExit(f"wavelength table not found: {args.wavelength}")
+    if not args.integral.is_file():
+        raise SystemExit(f"integrating-sphere reference not found: {args.integral}")
     if args.poll_ms < 50:
         raise SystemExit("--poll-ms must be at least 50")
 
@@ -518,6 +1087,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         lines,
         saturation_level=args.saturation_level,
         minimum_snr=args.minimum_snr,
+    )
+    campaign = CalibrationCampaignSession(
+        pattern_source=args.pattern,
+        wavelength_source=args.wavelength,
+        integral_source=args.integral,
+        required_lamps=args.lamp or ("ThAr",),
+        previous_sphere=args.previous_sphere,
+        previous_sphere_background=args.previous_sphere_background,
     )
     watcher = StableSifWatcher(
         args.watch_folder,
@@ -531,8 +1108,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     application.setWindowIcon(QtGui.QIcon(str(_PACKAGE_DIR / "resources" / "graphics" / "echelle.png")))
     window = CalibrationBenchWindow(
         session,
+        campaign=campaign,
         watcher=watcher,
         loader=loader,
+        output_root=args.output_root,
+        config_root=args.config_root,
+        snapshot_id=args.snapshot_id,
+        detector=args.detector,
+        base_snapshot=args.base_snapshot,
         poll_interval_ms=args.poll_ms,
     )
     window.show()
