@@ -2,10 +2,15 @@
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
 import pytest
+
+# Packet 6 imports repository-local release scripts during tests. Keep their
+# bytecode beside neither those scripts nor the synced source package.
+sys.dont_write_bytecode = True
 
 
 @pytest.hookimpl(tryfirst=True)

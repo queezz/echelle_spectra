@@ -1,4 +1,9 @@
 include CHANGELOG.md
+include README-KIT.md
+include .python-version
+include uv.lock
+recursive-include kit *.toml *.txt *.ps1 *.sh
+recursive-include scripts *.py
 include src/echelle_spectra/examples/*
 include src/echelle_spectra/resources/*
 include src/echelle_spectra/resources/calibration_files/*

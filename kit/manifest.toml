@@ -1,0 +1,115 @@
+schema = 1
+
+[application]
+name = "echelle_spectra"
+version = "1.4.0"
+wheel_prefix = "echelle_spectra-"
+runtime_extra = "spectrocube"
+
+[[companion]]
+name = "spectrocube"
+version = "0.1.0"
+wheel_prefix = "spectrocube-"
+source_kind = "git"
+source_url = "https://github.com/queezz/spectrocube.git"
+source_ref = "c46b0c4621ec8d56d7d7209d122b571fb109405e"
+
+[[companion]]
+name = "sif_parser"
+version = "0.3.6"
+wheel_prefix = "sif_parser-"
+source_kind = "sdist"
+source_url = "https://files.pythonhosted.org/packages/86/ee/3791a3305b0c5c50e0f0330e10a11e368eeffc34feb1299f357ce15df39c/sif_parser-0.3.6.tar.gz"
+source_ref = "sha256:5faf1e156b1aef7835968bc3df651ad828c4d42f1c2c60a5bd26784519c2a111"
+source_size = 18722
+
+[toolchain]
+python = "3.12.13"
+python_tag = "cp312"
+uv = "0.11.31"
+pip = "25.2"
+build = "1.5.0"
+setuptools = "84.0.0"
+wheel = "0.48.0"
+twine = "7.0.0"
+source_date_epoch = 1786579200
+
+[platform.windows-x86_64]
+os = "windows"
+arch = "x86_64"
+minimum_os_version = "10.0"
+uv_python_platform = "x86_64-pc-windows-msvc"
+pip_platforms = ["win_amd64"]
+uv_archive = "uv-x86_64-pc-windows-msvc.zip"
+uv_url = "https://github.com/astral-sh/uv/releases/download/0.11.31/uv-x86_64-pc-windows-msvc.zip"
+uv_size = 25653699
+uv_sha256 = "410c2fd3126ff621c9450a21cfc200002c7540dc48d130069a8f619cdb0a811b"
+uv_binary = "uv.exe"
+python_archive = "cpython-3.12.13+20260718-x86_64-pc-windows-msvc-install_only_stripped.tar.gz"
+python_url = "https://github.com/astral-sh/python-build-standalone/releases/download/20260718/cpython-3.12.13%2B20260718-x86_64-pc-windows-msvc-install_only_stripped.tar.gz"
+python_size = 21932298
+python_sha256 = "0d422a1439ec308e03f47df551bc30f5994727c456e414b026d202bcda9b7c1c"
+python_executable = ".runtime/python/python.exe"
+installer = "install.ps1"
+launcher = "echelle.ps1"
+
+[platform.macos-aarch64]
+os = "macos"
+arch = "aarch64"
+minimum_os_version = "14.0"
+uv_python_platform = "aarch64-apple-darwin"
+pip_platforms = [
+  "macosx_14_0_arm64",
+  "macosx_14_0_universal2",
+  "macosx_13_0_arm64",
+  "macosx_13_0_universal2",
+  "macosx_12_0_arm64",
+  "macosx_12_0_universal2",
+  "macosx_11_0_arm64",
+  "macosx_11_0_universal2",
+  "macosx_10_9_universal2",
+]
+uv_archive = "uv-aarch64-apple-darwin.tar.gz"
+uv_url = "https://github.com/astral-sh/uv/releases/download/0.11.31/uv-aarch64-apple-darwin.tar.gz"
+uv_size = 22411216
+uv_sha256 = "b2b93e82a6786f9c7cb89fd4ca0e859a147b292ae8f6f95784f9742f0efec39e"
+uv_binary = "uv"
+python_archive = "cpython-3.12.13+20260718-aarch64-apple-darwin-install_only_stripped.tar.gz"
+python_url = "https://github.com/astral-sh/python-build-standalone/releases/download/20260718/cpython-3.12.13%2B20260718-aarch64-apple-darwin-install_only_stripped.tar.gz"
+python_size = 25000146
+python_sha256 = "9a1e9e06175c10efd8378b904b07fa21bd791ab3345d7cdffeb4a76c9ff55903"
+python_executable = ".runtime/python/bin/python3"
+installer = "install.sh"
+launcher = "echelle"
+
+[platform.macos-x86_64]
+os = "macos"
+arch = "x86_64"
+minimum_os_version = "13.0"
+uv_python_platform = "x86_64-apple-darwin"
+pip_platforms = [
+  "macosx_14_0_x86_64",
+  "macosx_13_0_x86_64",
+  "macosx_12_0_x86_64",
+  "macosx_11_0_x86_64",
+  "macosx_10_15_x86_64",
+  "macosx_10_14_x86_64",
+  "macosx_10_13_x86_64",
+  "macosx_10_12_x86_64",
+  "macosx_10_11_x86_64",
+  "macosx_10_10_x86_64",
+  "macosx_10_9_x86_64",
+  "macosx_10_9_universal2",
+]
+uv_archive = "uv-x86_64-apple-darwin.tar.gz"
+uv_url = "https://github.com/astral-sh/uv/releases/download/0.11.31/uv-x86_64-apple-darwin.tar.gz"
+uv_size = 24112641
+uv_sha256 = "33ee6bd62b57fcd77a499deb54e4432dc1e1a2f3d34930ba987ad8b43f9c7bc7"
+uv_binary = "uv"
+python_archive = "cpython-3.12.13+20260718-x86_64-apple-darwin-install_only_stripped.tar.gz"
+python_url = "https://github.com/astral-sh/python-build-standalone/releases/download/20260718/cpython-3.12.13%2B20260718-x86_64-apple-darwin-install_only_stripped.tar.gz"
+python_size = 24685843
+python_sha256 = "8e6b7e6533bdf746287008edf91102e7bee0a6ca1d24f16c4514237cafd706c5"
+python_executable = ".runtime/python/bin/python3"
+installer = "install.sh"
+launcher = "echelle"

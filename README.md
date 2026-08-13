@@ -45,6 +45,11 @@ echelle_spectra          # launch GUI
 
 See the [documentation](https://queezz.github.io/echelle_spectra) for full details.
 
+For the pinned, no-admin travel payload, see the
+[portable NIFS kit instructions](README-KIT.md). The kit remains a Packet 6
+development surface until its clean Windows, clean macOS, and offline gates are
+all exercised.
+
 ---
 
 ## Live calibration bench

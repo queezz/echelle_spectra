@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=69", "wheel"]
+requires = ["setuptools==84.0.0", "wheel==0.48.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -90,6 +90,35 @@ docs = [
 spectrocube = [
   "spectrocube>=0.1.0",
 ]
+
+[dependency-groups]
+# Packet 6 release tooling is exact because these versions become part of the
+# distribution reproducibility contract. Runtime resolution remains universal
+# and hash-pinned in uv.lock plus kit/requirements-runtime.txt.
+release = [
+  "build==1.5.0",
+  "twine==7.0.0",
+]
+
+[tool.uv]
+# The committed lock is the Packet 6 kit lock, deliberately narrower than the
+# package's public Python support. It must resolve the one cached interpreter on
+# the three explicitly supported travel targets.
+environments = [
+  "python_full_version == '3.12.13' and sys_platform == 'win32'",
+  "python_full_version == '3.12.13' and sys_platform == 'darwin'",
+]
+required-environments = [
+  "sys_platform == 'win32' and platform_machine == 'AMD64'",
+  "sys_platform == 'darwin' and platform_machine == 'arm64'",
+  "sys_platform == 'darwin' and platform_machine == 'x86_64'",
+]
+
+[tool.uv.sources]
+# SpectroCube is not published on the configured package index. The universal
+# lock therefore names the exact existing sibling commit; generated kits carry
+# its separately built and verified wheel instead of depending on a checkout.
+spectrocube = { git = "https://github.com/queezz/spectrocube.git", rev = "c46b0c4621ec8d56d7d7209d122b571fb109405e" }
 
 [tool.black]
 line-length = 100

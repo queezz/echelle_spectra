@@ -160,6 +160,15 @@ cython_debug/
 /local/
 *pptx
 
+# Portable-kit payloads and their high-churn inputs are always assembled in
+# OS-local external scratch. These names are ignored as a final safety net.
+/nifs-kits/
+/wheelhouse/
+/.uv-cache/
+/.python-runtimes/
+*.kit.zip
+*.kit.tar.gz
+
 # Large generated files — regenerate with 02_pattern_calibration.ipynb
 examples/pattern_image_synthetic.txt
 examples/obsolete/pattern_image_synthetic.txt
