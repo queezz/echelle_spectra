@@ -1,5 +1,3 @@
-import shutil
-
 try:
     import tomllib
 except ImportError:
@@ -12,13 +10,15 @@ def get_config_from_file(config_path):
 
 
 def load_config(base_path):
+    config_path = base_path / "config.toml"
+    defaults_path = base_path / "resources/defaults.toml"
     try:
-        config = get_config_from_file(base_path / "config.toml")
-    except (tomllib.TOMLDecodeError, OSError):
-        print("TOMLDecodError in config_loader.py")
-        print("Warning: restoring default config file")
-        shutil.copy(base_path / "resources/defaults.toml", base_path / "config.toml")
-        config = get_config_from_file(base_path / "config.toml")
+        config = get_config_from_file(config_path)
+    except tomllib.TOMLDecodeError:
+        print(f"Warning: invalid TOML in {config_path}; using packaged defaults")
+        config = get_config_from_file(defaults_path)
+    except OSError:
+        config = get_config_from_file(defaults_path)
     config["base_path"] = base_path
     return config
 

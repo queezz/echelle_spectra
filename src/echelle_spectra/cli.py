@@ -6,6 +6,7 @@ import argparse
 import sys
 from pathlib import Path
 
+from .campaign_run import list_run_summaries
 from .snapshot import SnapshotValidationError, load_snapshot
 
 
@@ -33,6 +34,12 @@ def _build_parser() -> argparse.ArgumentParser:
         metavar="FILE",
         help="Epoch registry to report (default: calibration_registry.toml).",
     )
+    status.add_argument(
+        "--runs",
+        default="local/runs",
+        metavar="DIR",
+        help="Run receipts to inspect (default: local/runs).",
+    )
     commands.add_parser("snapshot", help="Create, validate, or inspect a calibration snapshot.")
     commands.add_parser("process", help="Export SIF files through the existing batch processor.")
     return parser
@@ -42,6 +49,7 @@ def _status(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(prog="echelle status")
     parser.add_argument("--calibrations", default="calibrations", metavar="DIR")
     parser.add_argument("--registry", default="calibration_registry.toml", metavar="FILE")
+    parser.add_argument("--runs", default="local/runs", metavar="DIR")
     args = parser.parse_args(argv)
     root = Path(args.calibrations)
     valid = []
@@ -69,7 +77,21 @@ def _status(argv: list[str]) -> int:
         print(f"  registry:  {registry}")
     else:
         print(f"  registry:  not found ({registry})")
-    print("  runs:      receipts are not implemented yet")
+    runs = list_run_summaries(Path(args.runs))
+    if runs:
+        latest = runs[0]
+        counts = latest["counts"]
+        accounted = sum(counts.values())
+        details = (
+            ", ".join(f"{count} {status}" for status, count in counts.items() if count)
+            or "no terminal records"
+        )
+        print(f"  runs:      {len(runs)} receipt(s) under {args.runs}")
+        print(f"  latest:    {latest['id']} [{latest['state']}]")
+        print(f"  progress:  {accounted}/{latest['expected_files']} ({details})")
+        print(f"  snapshot:  {latest['snapshot_id']}")
+    else:
+        print(f"  runs:      none found under {args.runs}")
     return 1 if invalid else 0
 
 
@@ -94,7 +116,7 @@ def main(argv: list[str] | None = None) -> int:
     if command == "process":
         from .spectrocube_cli import main as process_main
 
-        result = process_main(remainder)
+        result = process_main(remainder, prog="echelle process")
         return 0 if result is None else int(result)
     parser.error(f"unknown command: {command}")
     return 2

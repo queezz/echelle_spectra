@@ -49,26 +49,29 @@ def test_snapshot_cli_create_validate_and_show(tmp_path: Path, capsys) -> None:
 
 def test_umbrella_status_reports_current_snapshot(tmp_path: Path, capsys) -> None:
     root = tmp_path / "calibrations"
-    assert snapshot_cli.main(
-        [
-            "create",
-            "20260813_cmos",
-            "--output-root",
-            str(root),
-            "--detector",
-            "cmos",
-            "--lamp-used",
-            "H2",
-            *_source_args(tmp_path),
-        ]
-    ) == 0
+    assert (
+        snapshot_cli.main(
+            [
+                "create",
+                "20260813_cmos",
+                "--output-root",
+                str(root),
+                "--detector",
+                "cmos",
+                "--lamp-used",
+                "H2",
+                *_source_args(tmp_path),
+            ]
+        )
+        == 0
+    )
     capsys.readouterr()
 
     assert cli.main(["status", "--calibrations", str(root)]) == 0
     output = capsys.readouterr().out
     assert "snapshots: 1 valid" in output
     assert "current:   20260813_cmos (H2)" in output
-    assert "receipts are not implemented yet" in output
+    assert "runs:      none found" in output
 
 
 def test_bare_umbrella_command_explains_the_next_steps(capsys) -> None:

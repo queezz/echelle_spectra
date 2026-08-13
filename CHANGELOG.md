@@ -5,6 +5,34 @@ follows the Fleet convention from 0.3.0 onward: a substantial capability earns
 a minor release, a compatible correction earns a patch, and documentation,
 tests, or internal refactoring alone do not move the number.
 
+## 1.0.0 — 2026-08-13
+
+**Campaign processing becomes dependable automation.** Every non-dry folder
+run writes an atomic `run.toml` summary and append-only `records.jsonl` ledger.
+Each source attempt records content identity, output, snapshot ID, volume label,
+terminal status, reason, and timing; completed outputs also carry size and
+SHA-256 identity.
+
+**Interruptions are safe and resumable.** SpectroCubes are published through a
+temporary sibling and atomic replace, Ctrl-C records an interrupted run, and
+rerunning the same source/destination resumes automatically. Previously
+completed work is skipped only after both source and output still match their
+recorded sizes and digests. Ordinary source failures remain isolated and the
+batch accounts for later files before exiting nonzero.
+
+**Progress and status come from evidence.** Batch output reports count, measured
+rate, and ETA. `echelle status --runs` reads durable receipts to show the latest
+run, its state, result counts, and selected calibration snapshot instead of
+guessing from output filenames.
+
+The installed CLI now keeps help/progress text compatible with the ordinary
+Windows console and reads packaged GUI defaults without trying to create a
+configuration file inside the installed package.
+
+Version 1 begins the deliberate campaign-automation epoch. It does not imply
+that every later live-bench, registry, recalibration, drift, and catalog feature
+is already present; those continue as compatible 1.x releases.
+
 ## 0.3.0 — 2026-08-13
 
 **Calibration snapshots become first-class artifacts.** `echelle snapshot

@@ -80,6 +80,7 @@ nav:
   - Usage:
       - Basic usage: usage.md
       - Calibration snapshots: calibration-snapshots.md
+      - Durable campaign runs: campaign-runs.md
       - Pattern extraction: pattern-extraction.md
       - Calibration alignment: calibration-alignment.md
       - Wavelength line validation: line-validation.md

@@ -114,20 +114,29 @@ Real dataset run with CLI path overrides:
 ```
 
 The batch terminal output starts with the source and destination, then reports
-only the current file in verbose mode:
+the receipt location and live count/rate/ETA. Add `--snapshot-id` and
+`--volume-label` so every source record carries the campaign provenance:
 
 ```text
-📦 SpectroCube batch
-📂 Source:      C:\path\to\20250926
-🎯 Destination: C:\path\to\20250926\spectrocubes_wmsr_403nm
-🔎 Pattern:     *.SIF
-🧮 Files:       53 (export)
-⚙️  Loading CMOS calibration...
-✅ Calibration ready.
-🔄 [1/53] 193778_Echelle.SIF
-🔄 [2/53] 193779_Echelle.SIF
-✅ Done. 53/53 exported successfully.
+SpectroCube batch
+Source:      C:\path\to\20250926
+Destination: C:\path\to\20250926\spectrocubes_wmsr_403nm
+Pattern:     *.SIF
+Files:       53 (export)
+Receipt:     local/runs/2026-08-13_12-00-00-20250926
+Loading CMOS calibration...
+Calibration ready.
+[1/53] 193778_Echelle.SIF
+[1/53] exported | 0.20 file/s | ETA 260.0s
+[2/53] 193779_Echelle.SIF
+Done. 53/53 exported successfully.
 ```
+
+Ctrl-C marks the receipt interrupted. Running the same source/destination again
+resumes the newest unfinished receipt and skips a completed output only after
+its recorded source and output digests still match. See
+[Durable campaign runs](campaign-runs.md) for the receipt schema and explicit
+`--run-dir` workflow.
 
 To preview a config-driven batch without a plan:
 

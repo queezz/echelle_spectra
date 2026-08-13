@@ -59,7 +59,11 @@ echelle process --help
 
 Calibration files can be assembled into an immutable, digested snapshot with
 `echelle snapshot create`. Existing `echelle-*` commands remain available for
-compatibility. See the [calibration snapshot guide](docs/calibration-snapshots.md).
+compatibility. Batch processing writes durable per-source receipts, continues
+after ordinary failures, reports rate and ETA, and safely resumes an interrupted
+run after verifying completed source and output digests. See the
+[calibration snapshot guide](docs/calibration-snapshots.md) and
+[campaign run guide](docs/campaign-runs.md).
 
 ---
 
