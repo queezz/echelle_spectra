@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "echelle_spectra"
-version = "1.1.0"                       # Consider setuptools_scm later for auto-versioning
+version = "1.2.0"                       # Consider setuptools_scm later for auto-versioning
 description = "Graphical tool for the extraction and analysis of calibrated spectra from 2D Echelle spectrometer images"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -122,6 +122,7 @@ where = ["src"]
   "resources/*.toml",
   "resources/*.txt",
   "resources/*.py",
+  "resources/line_catalogs/*.toml",
   "resources/graphics/*",
   "resources/calibration_files/*",
   "resources/calibration_files/alignments/*",

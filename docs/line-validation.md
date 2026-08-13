@@ -86,12 +86,11 @@ echelle-validate-lines \
   --max-abs-residual-nm 0.08
 ```
 
-The Fulcher targets are loaded from the `fulcheranalyzer` H2 Q-branch wavelength
-table:
-
-```text
-fulcheranalyzer/src/fulcher_analyzer/data_molecular/fulcher-α_band_wavelength.txt
-```
+The default Fulcher targets come from the package's shared line catalog, copied
+without numerical changes from the Fulcher Extractor table and carrying its
+source reference. This keeps validation reproducible without a sibling checkout
+and makes the GUI and CLI consume exactly the same records. A legacy external
+matrix can still be supplied with `--fulcher-table`.
 
 Treat this as a visual and positional validation aid. In the LHD data, many
 Fulcher features are blended at the instrumental width, and some table entries
@@ -261,5 +260,6 @@ Each result contains:
 - `peak_snr`
 - `notes`
 
-The API deliberately accepts external line lists so molecule-specific knowledge
-does not have to live inside `echelle_spectra`.
+The fitting API still accepts caller-supplied targets. The default target
+positions now come through the shared catalog; molecule-specific fitting and
+interpretation remain outside `echelle_spectra`.

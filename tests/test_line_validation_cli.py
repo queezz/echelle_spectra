@@ -13,6 +13,7 @@ def test_parser_defaults_to_accepted_20250926_calibration():
     assert args.wavelength == "alignments/Th_wavelength_CMOS_20240305_aligned_to_20250926.txt"
     assert args.line_set == "balmer-fulcher"
     assert args.wavelength_medium == "air"
+    assert args.fulcher_table is None
 
 
 def test_vacuum_convention_is_rejected_until_explicit_conversion():

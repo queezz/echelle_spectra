@@ -7,6 +7,7 @@ import numpy as np
 from echelle_spectra.tools.line_validation import (
     LineValidationTarget,
     balmer_air_targets,
+    bundled_fulcher_h2_q_branch_targets,
     fit_validation_line,
     load_fulcher_h2_q_branch_targets,
     summarize_validation,
@@ -38,6 +39,14 @@ def test_fulcher_table_loader_labels_q_branch_rows(tmp_path):
         "Fulcher H2 Q1(3-3)",
         "Fulcher H2 Q2(3-3)",
     ]
+
+
+def test_bundled_fulcher_targets_use_shared_catalog():
+    targets = bundled_fulcher_h2_q_branch_targets()
+    assert len(targets) == 42
+    assert targets[0].label == "Fulcher H2 Q1(0-0)"
+    assert targets[0].wavelength_nm == 601.8299
+    assert {target.wavelength_medium for target in targets} == {"air"}
 
 
 def test_fit_validation_line_recovers_wavelength_centroid():

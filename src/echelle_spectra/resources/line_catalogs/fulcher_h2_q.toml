@@ -1,0 +1,15 @@
+schema_version = 1
+wavelength_medium = "air"
+data_origin_medium = "unspecified"
+description = "H2 Fulcher-alpha Q-branch anchors used by the Fulcher analysis stack."
+source_name = "Fulcher Extractor line database"
+source_reference = "https://doi.org/10.5281/zenodo.21372039"
+source_resource = "fulcher_extractor/resources/fulcher_alpha_lines.toml"
+upstream_source_table = "early-fulcher-manual-extraction/reference/fulcher-alpha-H2.csv"
+adaptation_note = "Copied without numerical changes from the Fulcher work; interpreted as air wavelengths to match the established Echelle validation convention. The upstream table does not identify a primary publication."
+
+[bands]
+"0-0" = [601.8299, 602.3757, 603.1909, 604.2716, 605.6091, 607.1996, 609.0374, 611.1088, 613.4077, 615.9269, 618.6530]
+"1-1" = [612.1787, 612.7246, 613.5395, 614.6186, 615.9565, 617.5462, 619.3812, 621.4507, 623.7457, 626.2495, 628.9709]
+"2-2" = [622.4815, 623.0258, 623.8391, 624.9150, 626.2495, 627.8369, 629.6622, 631.7233, 634.0085, 636.5051, 639.1882]
+"3-3" = [632.7060, 633.2482, 634.0575, 635.1282, 636.4618, 638.0317, 639.8452, 641.8908, 644.1498]

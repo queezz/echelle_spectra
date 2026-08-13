@@ -12,6 +12,7 @@ from .tools.echelle import Calibrations, EchelleImage, Spectrum
 from .tools.line_validation import (
     balmer_air_targets,
     build_stitched_order_index,
+    bundled_fulcher_h2_q_branch_targets,
     load_fulcher_h2_q_branch_targets,
     summarize_validation,
     validate_lines,
@@ -20,17 +21,6 @@ from .tools.line_validation import (
 
 def _default_calibration_dir() -> Path:
     return _config["base_path"] / "resources" / "calibration_files"
-
-
-def _default_fulcher_table() -> Path:
-    return (
-        _config["base_path"].parents[2]
-        / "fulcheranalyzer"
-        / "src"
-        / "fulcher_analyzer"
-        / "data_molecular"
-        / "fulcher-α_band_wavelength.txt"
-    )
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -65,8 +55,8 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--fulcher-table",
-        default=str(_default_fulcher_table()),
-        help="Fulcher H2 Q-branch wavelength table.",
+        default=None,
+        help="Optional external Fulcher H2 Q-branch table; the packaged Fulcher-work table is the default.",
     )
     parser.add_argument(
         "--wavelength-medium",
@@ -123,7 +113,7 @@ def main(argv: list[str] | None = None) -> None:
 
     sif = Path(args.sif).resolve()
     calibration_dir = Path(args.calibration_dir).resolve()
-    fulcher_table = Path(args.fulcher_table).resolve()
+    fulcher_table = Path(args.fulcher_table).resolve() if args.fulcher_table else None
     for label, path in [
         ("SIF", sif),
         ("calibration dir", calibration_dir),
@@ -142,8 +132,11 @@ def main(argv: list[str] | None = None) -> None:
 
     targets = balmer_air_targets()
     if args.line_set == "balmer-fulcher":
-        _require_file(fulcher_table, "Fulcher table")
-        targets.extend(load_fulcher_h2_q_branch_targets(fulcher_table))
+        if fulcher_table is None:
+            targets.extend(bundled_fulcher_h2_q_branch_targets())
+        else:
+            _require_file(fulcher_table, "Fulcher table")
+            targets.extend(load_fulcher_h2_q_branch_targets(fulcher_table))
 
     filenames = {
         "orders": args.pattern,

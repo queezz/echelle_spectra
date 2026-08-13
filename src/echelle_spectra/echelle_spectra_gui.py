@@ -13,6 +13,7 @@ from .resources import window_layout
 from .tools import echelle as ech
 from .tools import emissionbands as eb
 from .tools import emissiondata as ebd
+from .tools.line_overlay import LineOverlayManager
 
 
 class EchelleSpectraGUI(QMainWindow, window_layout.Ui_MainWindow):
@@ -27,6 +28,9 @@ class EchelleSpectraGUI(QMainWindow, window_layout.Ui_MainWindow):
         self.CameraCMOS.setChecked(True)
         self.spec_counts = self.p2.plot(pen="#6ac600")
         self.spec_wm = self.p3.plot(pen="r")
+        self.line_overlays = LineOverlayManager(max_labels=14)
+        self.line_overlays.register_plot("counts", self.p2, labels=False)
+        self.line_overlays.register_plot("calibrated", self.p3, labels=True)
 
         # define initial class attributes
         self.config = config
@@ -102,6 +106,16 @@ class EchelleSpectraGUI(QMainWindow, window_layout.Ui_MainWindow):
         self.start_register.clicked.connect(self.start_loop)
         self.abort_register.clicked.connect(self.abort_loop)
         self.btn_save_cube.clicked.connect(self.save_spectrocube)
+        for family, checkbox in self.line_overlay_checks.items():
+            checkbox.toggled.connect(
+                lambda visible, key=family: self.set_line_overlay(key, visible)
+            )
+
+    def set_line_overlay(self, family, visible):
+        """Toggle one shared known-line family on the main spectrum plots."""
+        self.line_overlays.set_family_visible(family, visible)
+        state = "shown" if visible else "hidden"
+        self.statusBar().showMessage(f"{self.line_overlay_checks[family].text()} lines {state}.")
 
     def update_paths(self):
         """Set-up file paths for calibration, data folder, output folder etc."""
@@ -710,6 +724,7 @@ class EchelleSpectraGUI(QMainWindow, window_layout.Ui_MainWindow):
         self.spec_wm.setData(
             x=self.spectra.wavelength, y=self.spectra.spectra_to_save[units][frame]
         )
+        self.line_overlays.refresh()
 
     def show_balmer_frame(self):
         """Update the plots for H-balmer series experimental spectra"""

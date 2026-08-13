@@ -5,6 +5,19 @@ follows the Fleet convention from 0.3.0 onward: a substantial capability earns
 a minor release, a compatible correction earns a patch, and documentation,
 tests, or internal refactoring alone do not move the number.
 
+## 1.2.0 — 2026-08-13
+
+**Known spectral lines become shared package knowledge.** One tested API now
+serves provenance-carrying Balmer, Fulcher H2, ThAr, Ne, and Hg tables. The
+Fulcher Q-branch anchors are bundled from the Fulcher extraction work, while
+lamp rows come from the existing package-cached NIST ASD exports. Default line
+validation no longer depends on a sibling `fulcheranalyzer` checkout.
+
+**The existing GUI gains optional labeled overlays.** Independent Balmer,
+Fulcher, ThAr, Ne, and Hg toggles draw wavelength markers on the main spectrum
+plots. Every family starts disabled; labels thin in broad views, expand on zoom,
+and disappear immediately when switched off, preserving uncluttered normal use.
+
 ## 1.1.0 — 2026-08-13
 
 **Campaign processing now spans several drives safely.** `echelle process`

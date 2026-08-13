@@ -14,6 +14,8 @@ from typing import Iterable, Sequence
 import numpy as np
 from scipy.optimize import curve_fit
 
+from .line_catalog import load_line_table
+
 try:
     import pandas as pd
 except ModuleNotFoundError:  # pragma: no cover - pandas is a package dependency
@@ -24,6 +26,7 @@ __all__ = [
     "LineValidationResult",
     "LineValidationSummary",
     "balmer_air_targets",
+    "bundled_fulcher_h2_q_branch_targets",
     "build_stitched_order_index",
     "fit_validation_line",
     "load_fulcher_h2_q_branch_targets",
@@ -100,10 +103,29 @@ def _robust_noise(values: np.ndarray) -> tuple[float, float]:
 
 def balmer_air_targets() -> list[LineValidationTarget]:
     """Return common Balmer validation targets in air wavelengths."""
+    by_label = {line.label: line for line in load_line_table("balmer")}
     return [
-        LineValidationTarget("H-alpha", 656.279, "air"),
-        LineValidationTarget("H-beta", 486.135, "air"),
-        LineValidationTarget("H-gamma", 434.047, "air"),
+        LineValidationTarget(
+            line.label,
+            line.wavelength_nm,
+            line.wavelength_medium,
+            line.notes,
+        )
+        for line in (by_label["H-alpha"], by_label["H-beta"], by_label["H-gamma"])
+    ]
+
+
+def bundled_fulcher_h2_q_branch_targets() -> list[LineValidationTarget]:
+    """Return the packaged Fulcher-work H2 Q-branch anchors."""
+
+    return [
+        LineValidationTarget(
+            label=f"Fulcher H2 {line.label}",
+            wavelength_nm=line.wavelength_nm,
+            wavelength_medium=line.wavelength_medium,
+            notes=line.notes,
+        )
+        for line in load_line_table("fulcher")
     ]
 
 

@@ -154,6 +154,25 @@ class Ui_MainWindow(object):
         )
         self.w3.addWidget(self.btn_save_cube, 11, 0, 1, 2)
 
+        self.line_overlay_label = QtWidgets.QLabel("Known-line overlays:")
+        self.w3.addWidget(self.line_overlay_label, 12, 0, 1, 2)
+        overlay_labels = {
+            "balmer": "Balmer",
+            "fulcher": "Fulcher H2",
+            "thar": "ThAr",
+            "ne": "Ne",
+            "hg": "Hg",
+        }
+        self.line_overlay_checks = {}
+        for index, (family, label) in enumerate(overlay_labels.items()):
+            checkbox = QtWidgets.QCheckBox(label)
+            checkbox.setObjectName(f"overlay_{family}")
+            checkbox.setToolTip(
+                "Show labeled wavelength markers from the shared, provenance-carrying line table"
+            )
+            self.line_overlay_checks[family] = checkbox
+            self.w3.addWidget(checkbox, 13 + index // 2, index % 2)
+
         self.controls_open = [
             self.btn_open,
             self.shot_number,

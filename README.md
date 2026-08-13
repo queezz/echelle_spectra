@@ -108,6 +108,12 @@ echelle-align \
 
 ![UI](images/gui.png)
 
+The Image tab can overlay separately toggleable Balmer, Fulcher H2, ThAr, Ne,
+and Hg line markers on the calibrated spectrum. All overlays start disabled;
+labels thin automatically in broad views and reveal local lines as you zoom.
+The GUI and `echelle-validate-lines` use the same provenance-carrying tables.
+See the [known-line guide](docs/known-line-overlays.md).
+
 ---
 
 ## Venv

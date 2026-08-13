@@ -84,6 +84,7 @@ nav:
       - Pattern extraction: pattern-extraction.md
       - Calibration alignment: calibration-alignment.md
       - Wavelength line validation: line-validation.md
+      - Known-line overlays: known-line-overlays.md
       - Exporting to SpectroCube: spectrocube-export.md
       - Batch SpectroCube workflow: spectrocube-batch-workflow.md
   - API:
