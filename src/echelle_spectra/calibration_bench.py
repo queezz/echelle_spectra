@@ -1,0 +1,533 @@
+"""UI-independent state and loading helpers for the live calibration bench.
+
+The Qt bench is intentionally an adapter over this module.  Folder polling,
+file-stability decisions, anchor mutation, centroid fitting, saturation
+verdicts, rigid alignment, failure, and recovery can therefore be exercised
+without an event loop.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Sequence
+from dataclasses import dataclass
+from enum import Enum
+from pathlib import Path
+from time import time_ns
+from typing import Callable
+
+import numpy as np
+
+from .tools.calibration_alignment import (
+    CalibrationTableLine,
+    DetectorWindowSaturation,
+    LineCentroidFit,
+    RigidTransform,
+    detector_points_from_lines,
+    fit_rigid_transform,
+    fit_single_gaussian_centroid,
+    measure_detector_window_saturation,
+)
+
+__all__ = [
+    "AlignmentState",
+    "Anchor",
+    "AnchorFitResult",
+    "BenchFrame",
+    "CalibrationBenchSession",
+    "FileFingerprint",
+    "FileLoadState",
+    "FrameLoader",
+    "Residual",
+    "SaturationState",
+    "StableFileResult",
+    "StableFileState",
+    "StableSifWatcher",
+]
+
+
+class StableFileState(Enum):
+    """Folder-watcher verdict for the newest SIF candidate."""
+
+    EMPTY = "empty"
+    CHANGING = "changing"
+    STABLE = "stable"
+    ALREADY_EMITTED = "already-emitted"
+    FAILED = "failed"
+
+
+class FileLoadState(Enum):
+    """Lifecycle of a stable file after the watcher emits it."""
+
+    WAITING = "waiting"
+    LOADING = "loading"
+    LOADED = "loaded"
+    FAILED = "failed"
+
+
+class AlignmentState(Enum):
+    """Alignment lifecycle derived solely from frame and anchor state."""
+
+    WAITING_FOR_FRAME = "waiting-for-frame"
+    EMPTY = "empty"
+    COLLECTING = "collecting"
+    ALIGNED = "aligned"
+    FAILED = "failed"
+
+
+class SaturationState(Enum):
+    """Raw-detector saturation verdict for a fitted anchor."""
+
+    CLEAR = "clear"
+    SATURATED = "saturated"
+    UNAVAILABLE = "unavailable"
+
+
+@dataclass(frozen=True)
+class FileFingerprint:
+    """Identity used to decide whether a candidate file stopped changing."""
+
+    size: int
+    modified_ns: int
+
+
+@dataclass(frozen=True)
+class StableFileResult:
+    """One deterministic folder poll."""
+
+    state: StableFileState
+    path: Path | None = None
+    fingerprint: FileFingerprint | None = None
+    unchanged_polls: int = 0
+    reason: str = ""
+    ready_path: Path | None = None
+
+
+class StableSifWatcher:
+    """Poll a folder and emit the newest SIF after repeated identical stats.
+
+    Stability is intentionally defined by observations, not sleeps: the same
+    newest path must have the same byte size and modification timestamp for
+    ``required_unchanged_polls`` consecutive polls and meet ``minimum_age_s``.
+    The latter defaults to zero so tests and callers can control the policy.
+    """
+
+    def __init__(
+        self,
+        folder: str | Path,
+        *,
+        required_unchanged_polls: int = 2,
+        minimum_age_s: float = 0.0,
+    ) -> None:
+        if required_unchanged_polls < 1:
+            raise ValueError("required_unchanged_polls must be at least 1")
+        if minimum_age_s < 0:
+            raise ValueError("minimum_age_s must not be negative")
+        self.folder = Path(folder)
+        self.required_unchanged_polls = int(required_unchanged_polls)
+        self.minimum_age_ns = int(float(minimum_age_s) * 1_000_000_000)
+        self._candidate: Path | None = None
+        self._fingerprint: FileFingerprint | None = None
+        self._unchanged_polls = 0
+        self._emitted: tuple[Path, FileFingerprint] | None = None
+
+    def poll(self, *, now_ns: int | None = None) -> StableFileResult:
+        """Inspect the folder once and return a complete watcher verdict."""
+
+        try:
+            candidates = []
+            for path in self.folder.iterdir():
+                if path.suffix.lower() != ".sif":
+                    continue
+                try:
+                    stat = path.stat()
+                except OSError:
+                    continue
+                if path.is_file():
+                    candidates.append(
+                        (int(stat.st_mtime_ns), path.name.casefold(), path, stat)
+                    )
+        except OSError as exc:
+            self._reset_candidate()
+            return StableFileResult(StableFileState.FAILED, reason=str(exc))
+
+        if not candidates:
+            self._reset_candidate()
+            return StableFileResult(StableFileState.EMPTY)
+
+        _modified, _name, path, stat = max(candidates, key=lambda item: item[:2])
+        fingerprint = FileFingerprint(int(stat.st_size), int(stat.st_mtime_ns))
+        if path == self._candidate and fingerprint == self._fingerprint:
+            self._unchanged_polls += 1
+        else:
+            self._candidate = path
+            self._fingerprint = fingerprint
+            self._unchanged_polls = 1
+
+        age_ns = max(0, int(now_ns if now_ns is not None else time_ns()) - fingerprint.modified_ns)
+        stable = (
+            self._unchanged_polls >= self.required_unchanged_polls
+            and age_ns >= self.minimum_age_ns
+        )
+        if not stable:
+            return StableFileResult(
+                StableFileState.CHANGING,
+                path,
+                fingerprint,
+                self._unchanged_polls,
+                "waiting for repeated unchanged observations",
+            )
+
+        identity = (path, fingerprint)
+        if identity == self._emitted:
+            return StableFileResult(
+                StableFileState.ALREADY_EMITTED,
+                path,
+                fingerprint,
+                self._unchanged_polls,
+            )
+        self._emitted = identity
+        return StableFileResult(
+            StableFileState.STABLE,
+            path,
+            fingerprint,
+            self._unchanged_polls,
+            ready_path=path,
+        )
+
+    def _reset_candidate(self) -> None:
+        self._candidate = None
+        self._fingerprint = None
+        self._unchanged_polls = 0
+
+
+@dataclass(frozen=True)
+class BenchFrame:
+    """Detector and extracted-order data consumed by the state machine."""
+
+    path: Path
+    images: np.ndarray
+    detector_image: np.ndarray
+    order_spectra: tuple[np.ndarray, ...]
+    metadata: dict[str, object]
+
+
+class FrameLoader:
+    """Load SIF detector/order data while reusing the established extractor."""
+
+    def __init__(self, pattern: np.ndarray, *, half_width_px: int = 8) -> None:
+        pattern_array = np.asarray(pattern, dtype=int)
+        if pattern_array.ndim != 2 or not pattern_array.size:
+            raise ValueError("pattern must have shape (detector columns, orders)")
+        self.pattern = pattern_array
+        self.half_width_px = int(half_width_px)
+
+    def __call__(self, path: str | Path) -> BenchFrame:
+        """Read one SIF and extract every order without absolute calibration."""
+
+        from .tools.echelle import Calibrations, EchelleImage
+
+        source = Path(path)
+        if not source.is_file():
+            raise FileNotFoundError(f"SIF file not found: {source}")
+        calibration = Calibrations(dv=self.half_width_px)
+        calibration.pattern = self.pattern
+        image = EchelleImage(str(source), clbr=calibration)
+        images = np.asarray(image.images, dtype=float)
+        if images.ndim != 3:
+            raise ValueError("SIF reader returned data outside (frames, rows, columns)")
+        calibration.DIMO = images.shape[1]
+        calibration.DIMW = images.shape[2]
+        if self.pattern.shape[0] != calibration.DIMW:
+            raise ValueError(
+                "pattern width does not match SIF detector width: "
+                f"{self.pattern.shape[0]} != {calibration.DIMW}"
+            )
+        calibration.make_cutting_masks()
+        image.calculate_order_spectra()
+
+        order_spectra = []
+        for order_idx in range(self.pattern.shape[1]):
+            frames = [
+                np.asarray(image.order_spectra[frame_idx][order_idx], dtype=float).reshape(-1)
+                for frame_idx in range(images.shape[0])
+            ]
+            common_size = min(frame.size for frame in frames)
+            with np.errstate(invalid="ignore"):
+                order_spectra.append(
+                    np.nanmean(np.vstack([frame[:common_size] for frame in frames]), axis=0)
+                )
+        with np.errstate(invalid="ignore"):
+            detector_image = np.nanmean(images, axis=0)
+        return BenchFrame(
+            path=source,
+            images=images,
+            detector_image=detector_image,
+            order_spectra=tuple(order_spectra),
+            metadata=dict(image.info),
+        )
+
+
+@dataclass(frozen=True)
+class Anchor:
+    """One accepted known-line/centroid pair with raw-detector QC."""
+
+    line: CalibrationTableLine
+    fit: LineCentroidFit
+    saturation: DetectorWindowSaturation
+
+    @property
+    def key(self) -> tuple[int, float, float]:
+        return (self.line.order_idx, self.line.center_pixel, self.line.wavelength_nm)
+
+
+@dataclass(frozen=True)
+class Residual:
+    """Rigid-fit residual for one accepted anchor."""
+
+    key: tuple[int, float, float]
+    order_idx: int
+    wavelength_nm: float
+    dx_px: float
+    dy_px: float
+    magnitude_px: float
+
+
+@dataclass(frozen=True)
+class AnchorFitResult:
+    """Result of one click-to-fit attempt, accepted or safely rejected."""
+
+    accepted: bool
+    reason: str
+    anchor: Anchor | None = None
+    saturation_state: SaturationState = SaturationState.UNAVAILABLE
+
+
+class CalibrationBenchSession:
+    """Explicit live-bench state transitions with no Qt dependency."""
+
+    def __init__(
+        self,
+        pattern: np.ndarray,
+        lines: Sequence[CalibrationTableLine],
+        *,
+        saturation_level: float = 0.98 * 65535,
+        minimum_snr: float = 5.0,
+        fit_window_radius_px: int = 18,
+        click_match_radius_px: float = 30.0,
+    ) -> None:
+        pattern_array = np.asarray(pattern, dtype=float)
+        if pattern_array.ndim != 2 or not pattern_array.size:
+            raise ValueError("pattern must have shape (detector columns, orders)")
+        self.pattern = pattern_array
+        self.lines = tuple(lines)
+        self.saturation_level = float(saturation_level)
+        self.minimum_snr = float(minimum_snr)
+        self.fit_window_radius_px = int(fit_window_radius_px)
+        self.click_match_radius_px = float(click_match_radius_px)
+        self.file_state = FileLoadState.WAITING
+        self.alignment_state = AlignmentState.WAITING_FOR_FRAME
+        self.loading_path: Path | None = None
+        self.frame: BenchFrame | None = None
+        self.selected_order = 0
+        self.anchors: dict[tuple[int, float, float], Anchor] = {}
+        self.transform: RigidTransform | None = None
+        self.rms_px: float | None = None
+        self.residuals: tuple[Residual, ...] = ()
+        self.last_error = ""
+
+    def begin_file_load(self, path: str | Path) -> None:
+        """Enter the loading state without discarding the last good frame."""
+
+        self.loading_path = Path(path)
+        self.file_state = FileLoadState.LOADING
+        self.last_error = ""
+
+    def accept_frame(self, frame: BenchFrame) -> None:
+        """Commit a successfully loaded frame and reset frame-bound anchors."""
+
+        if frame.detector_image.ndim != 2:
+            raise ValueError("detector_image must be two-dimensional")
+        if frame.detector_image.shape[1] != self.pattern.shape[0]:
+            raise ValueError("loaded frame and pattern have different detector widths")
+        if len(frame.order_spectra) != self.pattern.shape[1]:
+            raise ValueError("loaded frame and pattern have different order counts")
+        self.frame = frame
+        self.loading_path = None
+        self.file_state = FileLoadState.LOADED
+        self.selected_order = min(self.selected_order, len(frame.order_spectra) - 1)
+        self.anchors.clear()
+        self.transform = None
+        self.rms_px = None
+        self.residuals = ()
+        self.alignment_state = AlignmentState.EMPTY
+        self.last_error = ""
+
+    def fail_file_load(self, path: str | Path, error: BaseException | str) -> None:
+        """Record a load failure while preserving the previous usable frame."""
+
+        self.loading_path = Path(path)
+        self.file_state = FileLoadState.FAILED
+        self.last_error = str(error)
+
+    def load_file(self, path: str | Path, loader: Callable[[Path], BenchFrame]) -> bool:
+        """Synchronous convenience transition used by tests and scripts."""
+
+        source = Path(path)
+        self.begin_file_load(source)
+        try:
+            frame = loader(source)
+            self.accept_frame(frame)
+        except Exception as exc:  # state boundary: surface loader failures uniformly
+            self.fail_file_load(source, exc)
+            return False
+        return True
+
+    def set_selected_order(self, order_idx: int) -> None:
+        if order_idx < 0 or order_idx >= self.pattern.shape[1]:
+            raise IndexError(f"order {order_idx} is outside the loaded pattern")
+        self.selected_order = int(order_idx)
+
+    def lines_for_order(self, order_idx: int | None = None) -> tuple[CalibrationTableLine, ...]:
+        selected = self.selected_order if order_idx is None else int(order_idx)
+        return tuple(line for line in self.lines if line.order_idx == selected)
+
+    def fit_anchor_at(self, order_idx: int, clicked_pixel: float) -> AnchorFitResult:
+        """Fit the nearest known line around the clicked detector pixel."""
+
+        if self.frame is None:
+            return AnchorFitResult(False, "no SIF frame loaded")
+        candidates = self.lines_for_order(order_idx)
+        if not candidates:
+            return AnchorFitResult(False, "no calibration rows for this order")
+        line = min(candidates, key=lambda item: abs(item.center_pixel - clicked_pixel))
+        if abs(line.center_pixel - clicked_pixel) > self.click_match_radius_px:
+            return AnchorFitResult(False, "click is not near a known calibration row")
+
+        probe_line = CalibrationTableLine(
+            line.order_idx,
+            clicked_pixel - self.fit_window_radius_px,
+            clicked_pixel + self.fit_window_radius_px,
+            float(clicked_pixel),
+            line.wavelength_nm,
+            line.species,
+            line.comment,
+        )
+        detector_qc = measure_detector_window_saturation(
+            self.frame.images,
+            self.pattern,
+            [probe_line],
+            x_radius_px=self.fit_window_radius_px,
+            saturation_level=self.saturation_level,
+        )[0]
+        detector_qc = DetectorWindowSaturation(
+            line,
+            detector_qc.peak_value,
+            detector_qc.finite_pixels,
+            detector_qc.saturated_pixels,
+            detector_qc.saturated_fraction,
+            detector_qc.reason,
+            detector_qc.saturation_level,
+        )
+        if detector_qc.is_saturated:
+            return AnchorFitResult(
+                False,
+                "raw detector pixels are saturated; lower exposure before fitting",
+                saturation_state=SaturationState.SATURATED,
+            )
+
+        success, center, sigma, amplitude, baseline, snr, reason = fit_single_gaussian_centroid(
+            self.frame.order_spectra[order_idx],
+            expected_center_px=float(clicked_pixel),
+            window_radius_px=self.fit_window_radius_px,
+            min_snr=self.minimum_snr,
+        )
+        fit = LineCentroidFit(
+            line,
+            center,
+            sigma,
+            amplitude,
+            baseline,
+            snr,
+            success,
+            reason,
+        )
+        if not fit.success:
+            return AnchorFitResult(
+                False,
+                fit.reason or "centroid fit failed",
+                saturation_state=SaturationState.CLEAR,
+            )
+        anchor = Anchor(line, fit, detector_qc)
+        self.upsert_anchor(anchor)
+        return AnchorFitResult(True, "anchor accepted", anchor, SaturationState.CLEAR)
+
+    def upsert_anchor(self, anchor: Anchor) -> None:
+        """Add or replace an anchor, then deterministically recompute alignment."""
+
+        if not anchor.fit.success:
+            raise ValueError("cannot add an unsuccessful centroid fit")
+        if anchor.saturation.is_saturated:
+            raise ValueError("cannot add a saturated anchor")
+        self.anchors[anchor.key] = anchor
+        self._recompute_alignment()
+
+    def remove_anchor(self, key: tuple[int, float, float]) -> bool:
+        """Remove an anchor and recompute; return whether it existed."""
+
+        existed = self.anchors.pop(key, None) is not None
+        if existed:
+            self._recompute_alignment()
+        return existed
+
+    def clear_anchors(self) -> None:
+        self.anchors.clear()
+        self._recompute_alignment()
+
+    def _recompute_alignment(self) -> None:
+        self.transform = None
+        self.rms_px = None
+        self.residuals = ()
+        if self.frame is None:
+            self.alignment_state = AlignmentState.WAITING_FOR_FRAME
+            return
+        ordered = sorted(self.anchors.values(), key=lambda item: item.key)
+        if not ordered:
+            self.alignment_state = AlignmentState.EMPTY
+            self.last_error = ""
+            return
+        if len(ordered) < 2:
+            self.alignment_state = AlignmentState.COLLECTING
+            self.last_error = ""
+            return
+        lines = [anchor.line for anchor in ordered]
+        centers = [anchor.fit.center_pixel for anchor in ordered]
+        try:
+            expected = detector_points_from_lines(lines, self.pattern)
+            measured = detector_points_from_lines(lines, self.pattern, centers)
+            transform, rms_px = fit_rigid_transform(expected, measured)
+            predicted = transform.apply(expected)
+            delta = predicted - measured
+        except (IndexError, ValueError, np.linalg.LinAlgError) as exc:
+            self.alignment_state = AlignmentState.FAILED
+            self.last_error = str(exc)
+            return
+        residuals = []
+        for anchor, (dx_px, dy_px) in zip(ordered, delta):
+            residuals.append(
+                Residual(
+                    anchor.key,
+                    anchor.line.order_idx,
+                    anchor.line.wavelength_nm,
+                    float(dx_px),
+                    float(dy_px),
+                    float(np.hypot(dx_px, dy_px)),
+                )
+            )
+        self.transform = transform
+        self.rms_px = rms_px
+        self.residuals = tuple(residuals)
+        self.alignment_state = AlignmentState.ALIGNED
+        self.last_error = ""
+
+    def anchor_rows(self) -> tuple[Anchor, ...]:
+        return tuple(sorted(self.anchors.values(), key=lambda item: item.key))

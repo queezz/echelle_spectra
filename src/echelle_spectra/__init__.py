@@ -8,7 +8,7 @@ from .tools.line_catalog import SpectralLine, load_line_table
 from .tools.spectrocube_export import export_spectrocube as export_spectrocube
 from .tools.spectrocube_export import to_spectrocube as to_spectrocube
 
-__version__ = "1.2.0"
+__version__ = "1.3.0"
 
 __all__ = [
     "echelle",

@@ -83,6 +83,7 @@ nav:
       - Durable campaign runs: campaign-runs.md
       - Pattern extraction: pattern-extraction.md
       - Calibration alignment: calibration-alignment.md
+      - Live calibration bench: calibration-bench.md
       - Wavelength line validation: line-validation.md
       - Known-line overlays: known-line-overlays.md
       - Exporting to SpectroCube: spectrocube-export.md

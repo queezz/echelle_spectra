@@ -5,6 +5,22 @@ follows the Fleet convention from 0.3.0 onward: a substantial capability earns
 a minor release, a compatible correction earns a patch, and documentation,
 tests, or internal refactoring alone do not move the number.
 
+## 1.3.0 — 2026-08-13
+
+**A separate live calibration bench now turns stable SIF arrivals into an
+interactive rigid fit.** `echelle-calib` watches an acquisition folder with an
+explicit repeated-size/mtime stability rule, preserves the last good frame
+through a failed load, and presents the detector with order traces beside the
+selected-order spectrum.
+
+**Calibration interaction is deterministic below Qt.** Click-guided Gaussian
+centroids reuse the existing calibration rows and fitting tools; raw detector
+windows produce clear/saturated verdicts before an anchor is accepted. Anchor
+add, replace, remove, and clear transitions re-solve or invalidate the rigid
+translation/rotation explicitly, with RMS and per-anchor residuals shown live.
+The file watcher, fit state, error paths, and recovery behavior are unit-tested
+without an event loop, while focused off-screen tests pin the separate GUI.
+
 ## 1.2.0 — 2026-08-13
 
 **Known spectral lines become shared package knowledge.** One tested API now

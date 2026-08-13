@@ -47,6 +47,23 @@ See the [documentation](https://queezz.github.io/echelle_spectra) for full detai
 
 ---
 
+## Live calibration bench
+
+Use the separate pyqtgraph bench while acquiring calibration lamps:
+
+```bash
+echelle-calib path/to/acquisition-folder
+```
+
+It waits for the newest SIF to stop changing, then shows the detector/order
+views. Select an order and click a labeled expected line to fit a centroid,
+check raw-pixel saturation, and add an anchor. With two or more anchors the
+rigid detector alignment, RMS, and residuals update immediately. The existing
+`echelle_spectra` GUI remains unchanged. See the
+[live calibration bench guide](docs/calibration-bench.md).
+
+---
+
 ## Calibration campaign commands
 
 The `echelle` umbrella command is the front door for calibration campaigns:
