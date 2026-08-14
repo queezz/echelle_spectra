@@ -1,2 +1,8 @@
 kit/install.sh text eol=lf
 kit/echelle text eol=lf
+
+# The frozen LHD header templates and their golden references are recovered
+# bytes from 859bf86. Keep every checkout byte-identical to what was recovered.
+src/echelle_spectra/resources/header_template.txt text eol=lf
+src/echelle_spectra/resources/header_template_spectrum.txt text eol=lf
+tests/golden/*.txt text eol=lf

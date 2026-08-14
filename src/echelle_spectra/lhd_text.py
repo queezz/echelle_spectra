@@ -1,10 +1,31 @@
-"""Canonical provenance-complete LHD text export."""
+"""LHD text export against a frozen header.
+
+The LHD-side text header is a contract with the machine's data system, so it
+stays at the byte shape it had before the Harbor unification (owner ruling,
+2026-08-14).  Two legacy dialects survive, and both are rendered here from
+templates recovered verbatim from the pre-train tree:
+
+``spec_div1``
+    ``resources/header_template.txt`` -- the GUI band save and every
+    cube-derived deliverable.  ``DimUnit`` (singular) and the LHD
+    viewing-geometry ``[Comments]`` block.
+
+``spectrum``
+    ``resources/header_template_spectrum.txt`` -- ``Spectrum.save``.
+    ``DimUnits`` (plural), a fixed wavelength dimension, and an ``exposure``
+    comment line.
+
+``ShotNo`` is unquoted and ``Date`` is local ``%m/%d/%Y %H:%M`` in both.  No
+field may be added outside the templates: provenance rides only as extra
+free-text comment lines appended inside the existing ``[Comments]`` block.
+"""
 
 from __future__ import annotations
 
-import json
 from collections.abc import Mapping, Sequence
-from datetime import datetime, timezone
+from datetime import datetime
+from functools import cache
+from importlib.resources import files
 from pathlib import Path
 from typing import Any
 
@@ -14,59 +35,130 @@ from .campaign_run import sha256_file
 
 TEXT_SCHEMA = "echelle-lhd-text/v1"
 
+#: The GUI/`spec_div1` dialect: LHD's deliverable shape.
+SPEC_DIV1 = "spec_div1"
+#: The `Spectrum.save` dialect.
+SPECTRUM = "spectrum"
+
+#: The recovered legacy template backing each dialect, under ``resources``.
+TEMPLATE_FILENAMES = {
+    SPEC_DIV1: "header_template.txt",
+    SPECTRUM: "header_template_spectrum.txt",
+}
+
+#: Timing attributes the frozen header needs, and where a cube gets them.
+TIMING_ATTR_SOURCES = {
+    "trigger_delay_s": "the export config's [metadata] trigger_delay_s field",
+    "frame_interval_s": "the detector's CycleTime, recorded by export_spectrocube",
+    "exposure_s": "the detector's ExposureTime, recorded by export_spectrocube",
+}
+
+_LEGACY_DATE_FORMAT = "%m/%d/%Y %H:%M"
+
+
+class LhdTextError(ValueError):
+    """A text export that cannot be written honestly against the frozen header."""
+
+
+@cache
+def legacy_template(dialect: str) -> str:
+    """Return one frozen header template, exactly as the legacy tree carried it."""
+
+    try:
+        name = TEMPLATE_FILENAMES[dialect]
+    except KeyError:
+        raise LhdTextError(
+            f"unknown LHD text dialect {dialect!r}; expected one of "
+            f"{', '.join(sorted(TEMPLATE_FILENAMES))}"
+        ) from None
+    resource = files("echelle_spectra.resources").joinpath(name)
+    return resource.read_text(encoding="utf-8").strip("\n")
+
 
 def _quoted(values: Sequence[object]) -> str:
-    return ",".join(repr(str(value)) for value in values)
+    """Quote a value list the way both legacy writers did: ``'a','b'``."""
+
+    return ",".join(f"'{value}'" for value in values)
+
+
+def _append_comments(header: str, comments: Sequence[str]) -> str:
+    """Insert free text at the end of the template's own ``[Comments]`` block."""
+
+    if not comments:
+        return header
+    lines = header.split("\n")
+    try:
+        data_at = lines.index("# [Data]")
+    except ValueError:  # pragma: no cover - templates are frozen and verified
+        raise LhdTextError("frozen header template lost its [Data] marker") from None
+    if data_at == 0 or lines[data_at - 1] != "#":
+        raise LhdTextError(  # pragma: no cover - templates are frozen and verified
+            "frozen header template lost the blank comment line before [Data]"
+        )
+    lines[data_at - 1 : data_at - 1] = [f"# {line}" for line in comments]
+    return "\n".join(lines)
 
 
 def render_lhd_header(
     *,
-    diagnostic: str,
-    shot: str,
-    dimension_name: str,
+    shot: object,
     dimension_size: int,
-    dimension_unit: str,
     value_names: Sequence[object],
     value_units: Sequence[object],
-    provenance: Mapping[str, object] | None = None,
-    created_at: str | None = None,
+    trigger_delay_s: object,
+    frame_interval_s: object,
+    dialect: str = SPEC_DIV1,
+    diagnostic: str = "spec_div1",
+    dimension_name: str = "Time",
+    dimension_unit: str = "s",
+    exposure_s: object | None = None,
+    date: str | None = None,
     comments: Sequence[str] = (),
 ) -> str:
-    """Render the single LHD header used by every text-writing surface."""
+    """Render one frozen LHD header.
 
-    created = created_at or datetime.now(timezone.utc).isoformat(timespec="seconds")
-    provenance = provenance or {}
-    lines = [
-        "# [Parameters]",
-        f"# FormatSchema = {TEXT_SCHEMA!r}",
-        f"# Name = {diagnostic!r}",
-        f"# ShotNo = {str(shot)!r}",
-        f"# Date = {created!r}",
-        "#",
-        "# DimNo = 1",
-        f"# DimName = {dimension_name!r}",
-        f"# DimSize = {int(dimension_size)}",
-        f"# DimUnit = {dimension_unit!r}",
-        "#",
-        f"# ValNo = {len(value_names)}",
-        f"# ValName = {_quoted(value_names)}",
-        f"# ValUnit = {_quoted(value_units)}",
-        "#",
-        "# [Provenance]",
-    ]
-    for key, value in sorted(provenance.items()):
-        if value is None or value == "":
-            continue
-        rendered = (
-            json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-            if isinstance(value, (dict, list, tuple))
-            else str(value)
-        )
-        lines.append(f"# {key} = {rendered}")
-    lines.extend(["#", "# [Comments]"])
-    lines.extend(f"# {line}" for line in comments)
-    lines.extend(["#", "# [Data]"])
-    return "\n".join(lines)
+    ``diagnostic``, ``dimension_name`` and ``dimension_unit`` apply to the
+    ``spec_div1`` dialect only; the ``spectrum`` template fixes its own
+    ``Name``, ``DimName`` and ``DimUnits`` and requires ``exposure_s``.  For
+    ``spec_div1`` an ``exposure_s`` is written as the first appended comment,
+    because that dialect's frozen block has no exposure line of its own.
+    """
+
+    template = legacy_template(dialect)
+    stamp = date or datetime.now().strftime(_LEGACY_DATE_FORMAT)
+    common = {
+        "shot": shot,
+        "date": stamp,
+        "nval": len(value_names),
+        "vnames": _quoted(value_names),
+        "vunit": _quoted(value_units),
+        "trigdelay": trigger_delay_s,
+        "cycletime": frame_interval_s,
+    }
+    extra = list(comments)
+    if dialect == SPECTRUM:
+        if exposure_s is None:
+            raise LhdTextError(
+                "the spectrum dialect's frozen header carries an exposure line; "
+                "pass exposure_s"
+            )
+        substitutions: dict[str, object] = {
+            **common,
+            "size": int(dimension_size),
+            "exposure": exposure_s,
+        }
+    else:
+        substitutions = {
+            **common,
+            "diag_name": diagnostic,
+            "dimno": 1,
+            "dimname": dimension_name,
+            "dimsize": int(dimension_size),
+            "dimunits": dimension_unit,
+        }
+        if exposure_s is not None:
+            extra.insert(0, f"exposure = {exposure_s} (s)")
+    return _append_comments(template.format(**substitutions), extra)
 
 
 def write_lhd_text(
@@ -99,6 +191,54 @@ def write_lhd_text(
     return destination
 
 
+def cube_timing(attrs: Mapping[str, object], *, cube: str) -> dict[str, float]:
+    """Return the three timing values the frozen header needs, or refuse by name."""
+
+    timing: dict[str, float] = {}
+    for attr, origin in TIMING_ATTR_SOURCES.items():
+        value = attrs.get(attr)
+        if value is None or value == "":
+            raise LhdTextError(
+                f"{cube} is missing the timing attribute {attr!r}, which the frozen "
+                f"LHD header must state; {origin} supplies it. Re-export the cube "
+                "with a config that provides it rather than writing text without it."
+            )
+        try:
+            timing[attr] = float(value)
+        except (TypeError, ValueError):
+            raise LhdTextError(
+                f"{cube} carries a non-numeric timing attribute {attr!r}: {value!r}"
+            ) from None
+    return timing
+
+
+def _provenance_comments(source: Path, attrs: Mapping[str, object]) -> list[str]:
+    """Provenance as free text, which may live only inside ``[Comments]``."""
+
+    lines = [
+        "Text was derived from the saved cube; raw SIF data was not reopened.",
+        f"format_schema = {TEXT_SCHEMA}",
+        f"cube_file = {source.name}",
+        f"cube_sha256 = {sha256_file(source)}",
+    ]
+    optional = (
+        ("cube_created_at", "created_at"),
+        ("source_file", "source_file"),
+        ("snapshot_id", "snapshot_id"),
+        ("snapshot_manifest_sha256", "snapshot_manifest_sha256"),
+        ("calibration_registry_sha256", "calibration_registry_sha256"),
+        ("calibration_registry_epoch_position", "calibration_registry_epoch_position"),
+        ("time_axis_reference", "time_axis_reference"),
+        ("frame_time_formula", "frame_time_formula"),
+    )
+    for label, attr in optional:
+        value = attrs.get(attr)
+        if value is None or value == "":
+            continue
+        lines.append(f"{label} = {value}")
+    return lines
+
+
 def write_cube_text(
     cube_path: str | Path,
     output: str | Path,
@@ -127,27 +267,7 @@ def write_cube_text(
         value_names = ["intensity"]
     units = str(ds.attrs.get("intensity_units", "unknown"))
     attrs: dict[str, Any] = dict(ds.attrs)
-    provenance = {
-        "cube_path": source.name,
-        "cube_sha256": sha256_file(source),
-        "source_file": attrs.get("source_file", ""),
-        "snapshot_id": attrs.get("snapshot_id", "unassigned"),
-        "snapshot_manifest_sha256": attrs.get("snapshot_manifest_sha256", ""),
-        "snapshot_manifest_json": attrs.get("snapshot_manifest_json", ""),
-        "calibration_file_digests_json": attrs.get("calibration_file_digests_json", ""),
-        "calibration_registry_schema": attrs.get("calibration_registry_schema", ""),
-        "calibration_registry_sha256": attrs.get("calibration_registry_sha256", ""),
-        "calibration_registry_epoch_position": attrs.get(
-            "calibration_registry_epoch_position", ""
-        ),
-        "wavelength_polynomials_json": attrs.get("wavelength_polynomials_json", ""),
-        "applied_factor_application": ds.get("applied_absolute_calibration_factor", {}).attrs.get(
-            "application", ""
-        )
-        if "applied_absolute_calibration_factor" in ds
-        else "",
-        "recalibration_history_json": attrs.get("recalibration_history_json", ""),
-    }
+    timing = cube_timing(attrs, cube=source.name)
     header = render_lhd_header(
         diagnostic=str(attrs.get("instrument_id", "Echelle Spectra")),
         shot=str(attrs.get("shot_number", source.stem)),
@@ -156,9 +276,10 @@ def write_cube_text(
         dimension_unit="nm",
         value_names=value_names,
         value_units=[units] * len(value_names),
-        provenance=provenance,
-        created_at=str(attrs.get("created_at", "")) or None,
-        comments=("Text was derived from the saved cube; raw SIF data was not reopened.",),
+        trigger_delay_s=timing["trigger_delay_s"],
+        frame_interval_s=timing["frame_interval_s"],
+        exposure_s=timing["exposure_s"],
+        comments=_provenance_comments(source, attrs),
     )
     table = np.column_stack((wavelength, flattened.T))
     return write_lhd_text(

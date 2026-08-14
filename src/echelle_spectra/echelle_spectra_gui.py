@@ -548,10 +548,8 @@ class EchelleSpectraGUI(QMainWindow, window_layout.Ui_MainWindow):
             dimension_unit="s",
             value_names=names,
             value_units=["W/m^2"] * len(names),
-            provenance={"source_file": str(self.spectra.fpth)},
-            comments=(
-                f"time = {self.trigger_delay.value()} + frameNo*{self.em.info['CycleTime']} (s)",
-            ),
+            trigger_delay_s=self.trigger_delay.value(),
+            frame_interval_s=self.em.info["CycleTime"],
         )
         write_lhd_text(
             pth,

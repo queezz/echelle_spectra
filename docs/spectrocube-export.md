@@ -71,7 +71,7 @@ The following fields from `Spectrum` are automatically written to SpectroCube at
 | `created_at` | UTC timestamp at export time |
 | `exposure_s` | `spectrum.info["ExposureTime"]` |
 | `frame_interval_s` | `spectrum.info["CycleTime"]` |
-| `trigger_delay_s` | optional export-config metadata, when the experiment timing reference is known |
+| `trigger_delay_s` | export-config `[metadata]`, when the experiment timing reference is known; required before the cube can be written as LHD text |
 | `frame_time_formula` | optional export-config metadata; for LHD Echelle runs this is `trigger_delay_s + frame * frame_interval_s` |
 | `source_file` | `spectrum.fpth` |
 | `shot_number` | `spectrum.shotnumber`, or a leading numeric shot id inferred from the source filename |

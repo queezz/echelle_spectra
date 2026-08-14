@@ -67,6 +67,18 @@ ALIGNMENT_SETTINGS_FILENAME = "alignment.toml"
 # Below this the correction would only reformat the table, never move a row.
 IDENTITY_SHIFT_PX = 1e-6
 
+#: The export config a bench-composed one inherits from until the next campaign
+#: re-measures these values.  The bench never measures experiment timing or the
+#: absolute-calibration crop, but a cube exported without them cannot produce
+#: the frozen LHD text header, so the previous campaign's values are carried
+#: forward explicitly and labelled as inherited rather than left out.
+INHERITED_EXPORT_CONFIG_ID = "lhd_cmos_20250926"
+INHERITED_TRIGGER_DELAY_S = 2.50
+INHERITED_TIME_AXIS_REFERENCE = "LHD discharge time"
+INHERITED_FRAME_TIME_FORMULA = "trigger_delay_s + frame * frame_interval_s"
+INHERITED_CROP_MEASURED_AT = "2026-06-05"
+INHERITED_WAVELENGTH_MIN_NM = 403.0
+
 
 class MeasurementRole(Enum):
     """Explicit role assigned to one observed SIF."""
@@ -942,11 +954,25 @@ class CalibrationCampaignSession:
                 ]
             )
 
+        inherited_note = (
+            f"Inherited from {INHERITED_EXPORT_CONFIG_ID}; not measured by this "
+            "bench session. Review before the next LHD campaign."
+        )
         export_lines = [
             "# Generated SpectroCube export configuration for this snapshot.",
             "# Paths are relative to the snapshot folder and remain hand-editable.",
             "[metadata]",
             f"config_id = {_toml_string(snapshot_id)}",
+            "",
+            "# Timing and crop the bench does not measure. Cubes need these to",
+            "# write the frozen LHD text header, so the previous campaign's",
+            "# values are carried forward and marked as inherited.",
+            f"trigger_delay_s = {INHERITED_TRIGGER_DELAY_S:.12g}",
+            f"time_axis_reference = {_toml_string(INHERITED_TIME_AXIS_REFERENCE)}",
+            f"frame_time_formula = {_toml_string(INHERITED_FRAME_TIME_FORMULA)}",
+            f"trigger_delay_note = {_toml_string(inherited_note)}",
+            f"crop_measured_at = {_toml_string(INHERITED_CROP_MEASURED_AT)}",
+            f"crop_measurement_note = {_toml_string(inherited_note)}",
             "",
             "[calibration]",
             'camera = "CMOS"',
@@ -963,6 +989,7 @@ class CalibrationCampaignSession:
             'units = "wmsr"',
             'output_suffix = "_spectrocube_wmsr"',
             "drop_nonfinite_columns = true",
+            f"wavelength_min_nm = {INHERITED_WAVELENGTH_MIN_NM:.12g}",
             f"calibration_source = {_toml_string('snapshot ' + snapshot_id)}",
         ]
         return {

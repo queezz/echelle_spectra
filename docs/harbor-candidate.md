@@ -26,10 +26,33 @@ echelle txt shot.nc shot.txt
 echelle-cube2txt shot.nc shot.txt
 ```
 
-Both commands, legacy spectrum saves, and GUI intensity saves use the same
-`echelle-lhd-text/v1` writer. Its header records cube identity, snapshot and
-registry identity, calibration digests, polynomial/factor interpretation, and
-recalibration history where available.
+### The text header is frozen
+
+The LHD-side header is a contract with the machine's data system, so it stays
+at its pre-unification byte shape (owner ruling, 2026-08-14). One writer
+renders the two legacy dialects, both recovered verbatim into
+`resources/header_template.txt` and `resources/header_template_spectrum.txt`
+and pinned line for line by golden-file tests:
+
+| Dialect | Written by | Frozen particulars |
+| --- | --- | --- |
+| `spec_div1` | GUI band save, `echelle txt`, `echelle-cube2txt` | `DimUnit` (singular); the LHD viewing-geometry, PFR reference, CH/D-band and contact lines in `[Comments]` |
+| `spectrum` | `Spectrum.save` | `DimUnits` (plural); fixed `Name`/`DimName`; an `exposure` comment |
+
+`ShotNo` is unquoted and `Date` is local `%m/%d/%Y %H:%M` in both. No field is
+added outside the templates. Snapshot, digest and schema lines ride as free
+text appended inside the existing `[Comments]` block; the bulky JSON payloads
+(snapshot manifest, wavelength polynomials, recalibration history) stay in the
+cube and its receipts rather than bloating the deliverable.
+
+Cube-derived text states its timing from the cube's own `trigger_delay_s`,
+`frame_interval_s` and `exposure_s` attributes. A cube missing any of the
+three is refused by name — naming the attribute and the field that would have
+supplied it (`[metadata] trigger_delay_s` in the export config; `CycleTime`
+and `ExposureTime` recorded by `export_spectrocube`) — because a frozen header
+must state its time formula and may never omit it silently. Bench-composed
+export configs therefore carry trigger delay, time-axis reference, frame-time
+formula and the inherited crop, so bench-born cubes can always produce text.
 
 ## Post-hoc recalibration
 

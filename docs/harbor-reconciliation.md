@@ -17,8 +17,8 @@ acceptance.
 | 8 registry + complete cube provenance | `calibration_registry.py`, `tools/spectrocube_export.py` | registry/complete-provenance tests | `calibration-epoch-registry.md`; Packet 8 contracts preserved |
 | 9 per-drive catalog | `catalog.build_drive_catalog`, automatic batch hook | `test_catalog_cube_text_and_missing_drive_reading_room` | `harbor-candidate.md` |
 | 9 merged missing-drive index | `catalog.merge_catalogs`, reading-room availability refresh | disconnected catalog fixture | `harbor-candidate.md` |
-| 9 cube-derived canonical text | `lhd_text.py`, `campaign_tools_cli.txt_main` | canonical header/cube fixture | `harbor-candidate.md` |
-| 9 replace divergent headers | legacy `Spectrum.save` and GUI call `lhd_text`; old resource removed | Ruff/import plus canonical writer fixture | `harbor-candidate.md` |
+| 9 cube-derived text | `lhd_text.py`, `campaign_tools_cli.txt_main` | frozen-header/cube fixture and missing-timing refusal | `harbor-candidate.md` |
+| 9 one writer, two frozen dialects | legacy `Spectrum.save` and GUI call `lhd_text`; both legacy templates restored to `resources/` | `test_lhd_text_header.py` golden diffs against `tests/golden/` | `harbor-candidate.md` |
 | 10 wavelength/factor deltas | `recalibration.recalibrate_dataset/cube` | A→B wavelength and factor fixture | `harbor-candidate.md` |
 | 10 old/new provenance + manifest | recalibration history attrs and adjacent manifest | history event assertions; installed-file gate deferred | `harbor-candidate.md` |
 | 10 geometry refusal | pattern digest comparison | changed-pattern refusal names raw SIF | `harbor-candidate.md` |

@@ -1,0 +1,19 @@
+# [Parameters]
+# Name = 'Echelle Spectra'
+# ShotNo = {shot}
+# Date = '{date}'
+#
+# DimNo = 1
+# DimName = 'wavelength'
+# DimSize = {size}
+# DimUnits = 'nm'
+#
+# ValNo = {nval}
+# ValName = {vnames}
+# ValUnit = {vunit}
+#
+# [Comments]
+# time = {trigdelay} + frameNo*{cycletime} (s)
+# exposure = {exposure} (s)
+#
+# [Data]

@@ -11,7 +11,9 @@ from pathlib import Path
 def txt_main(argv: list[str] | None = None, *, prog: str = "echelle-cube2txt") -> int:
     from .lhd_text import write_cube_text
 
-    parser = argparse.ArgumentParser(prog=prog, description="Write canonical LHD text from a saved cube.")
+    parser = argparse.ArgumentParser(
+        prog=prog, description="Write frozen-header LHD text from a saved cube."
+    )
     parser.add_argument("input", help="Saved SpectroCube .nc file.")
     parser.add_argument("output", help="Destination text file.")
     parser.add_argument("--overwrite", action="store_true")

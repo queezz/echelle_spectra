@@ -72,6 +72,9 @@ def _packet8_dataset(snapshot, *, wavelengths: np.ndarray | None = None) -> xr.D
         "wavelength_medium": "air",
         "shot_number": "12345",
         "created_at": "2025-01-01T00:00:00+00:00",
+        "trigger_delay_s": 2.5,
+        "frame_interval_s": 0.5,
+        "exposure_s": 0.25,
         **snapshot.provenance_attrs(),
         "wavelength_polynomials_json": json.dumps(
             {
@@ -154,6 +157,9 @@ def _line_cube(path: Path, shift_px: float | None, snapshot_id: str = "20250101_
             "wavelength_medium": "air",
             "snapshot_id": snapshot_id,
             "shot_number": path.stem,
+            "trigger_delay_s": 2.5,
+            "frame_interval_s": 0.5,
+            "exposure_s": 0.25,
             "wavelength_polynomials_json": json.dumps(
                 {
                     "schema": "spectrocube.wavelength-polynomials/v1",
@@ -212,9 +218,14 @@ def test_catalog_cube_text_and_missing_drive_reading_room(tmp_path: Path) -> Non
 
     text = write_cube_text(cube, tmp_path / "12345.txt")
     header = text.read_text(encoding="utf-8")
-    assert TEXT_SCHEMA in header
-    assert snapshot.snapshot_id in header
-    assert "snapshot_manifest_sha256" in header
+    # The header is frozen: provenance rides inside [Comments], never as fields.
+    assert "# DimUnit = 'nm'" in header
+    assert "# ShotNo = 12345" in header
+    assert "# time = 2.5 + frameNo*0.5 (s)" in header
+    assert f"# format_schema = {TEXT_SCHEMA}" in header
+    assert f"# snapshot_id = {snapshot.snapshot_id}" in header
+    assert "# snapshot_manifest_sha256 = " in header
+    assert "[Provenance]" not in header
 
     page = build_reading_room(merged, tmp_path / "web", document_paths=[])
     rendered = page.read_text(encoding="utf-8")

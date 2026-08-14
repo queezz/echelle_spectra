@@ -8,7 +8,7 @@ from os.path import join
 import numpy as np
 import pandas as pd
 
-from ..lhd_text import render_lhd_header, write_lhd_text
+from ..lhd_text import SPECTRUM, render_lhd_header, write_lhd_text
 
 # pd.isnull handles NaNs in object arrays where np.isnan can fail
 remove_npnans = lambda a: a[~pd.isnull(a)]
@@ -896,21 +896,14 @@ class Spectrum:
         frames = np.arange(self.info["NumberOfFrames"])
         fmt = ["%.6f"] + ["%.6e" for i in frames]
         header = render_lhd_header(
-            diagnostic="Echelle Spectra",
+            dialect=SPECTRUM,
             shot=self.shotnumber,
-            dimension_name="wavelength",
             dimension_size=len(self.wavelength),
-            dimension_unit="nm",
             value_names=[str(frame) for frame in frames],
             value_units=[self.units_names[self.saveunits]] * len(frames),
-            provenance={
-                "source_file": str(self.fpth),
-                "calibration_files": self.calibration_files,
-            },
-            comments=(
-                f"time = {self.trigdelay} + frameNo*{self.info['CycleTime']} (s)",
-                f"exposure = {self.info['ExposureTime']} (s)",
-            ),
+            trigger_delay_s=self.trigdelay,
+            frame_interval_s=self.info["CycleTime"],
+            exposure_s=self.info["ExposureTime"],
         )
 
         pth = join(
