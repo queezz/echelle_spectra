@@ -47,7 +47,9 @@ def _build_parser() -> argparse.ArgumentParser:
     commands.add_parser("txt", help="Write canonical LHD text from a saved cube.")
     commands.add_parser("recal-cube", help="Revise saved-cube wavelength/flux calibration.")
     commands.add_parser("drift", help="Audit science-line drift or accept a refinement.")
-    commands.add_parser("web", help="Build the read-only campaign reading room.")
+    commands.add_parser(
+        "web", help="Build the read-only campaign page: stepper, drives, calibration, reading room."
+    )
     commands.add_parser("historical", help="Validate bundled historical manifests.")
     return parser
 

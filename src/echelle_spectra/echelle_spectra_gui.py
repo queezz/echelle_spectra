@@ -1,5 +1,6 @@
 import ctypes
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
@@ -14,6 +15,66 @@ from .tools import echelle as ech
 from .tools import emissionbands as eb
 from .tools import emissiondata as ebd
 from .tools.line_overlay import LineOverlayManager
+
+# What one camera's attempt at one file ended up seeing.  A single "it did not
+# work" sentinel used to stand for all of these, so a file the reader could not
+# open was indistinguishable from a file the calibration did not fit — and the
+# camera flip-retry chased the wrong cure forever.
+IMAGE_LOADED = "loaded"
+IMAGE_DIMENSION_MISMATCH = "dimension-mismatch"
+IMAGE_UNREADABLE = "unreadable"
+IMAGE_EXTRACTION_FAILED = "extraction-failed"
+IMAGE_DISPLAY_FAILED = "display-failed"
+IMAGE_CALIBRATION_UNAVAILABLE = "calibration-unavailable"
+
+CAMERA_NAMES = ("CCD", "CMOS")
+
+
+@dataclass(frozen=True)
+class ImageLoadOutcome:
+    """One camera's answer for one file, carrying everything a message needs."""
+
+    status: str
+    camera: str
+    image: object = None
+    file_dimensions: tuple = ()
+    binning: tuple = ()
+    expected_dimensions: tuple = ()
+    detail: str = ""
+
+
+@dataclass(frozen=True)
+class CalibrationLoadOutcome:
+    """One calibration set's answer, so a broken file cannot hang the startup."""
+
+    name: str
+    calibration: object
+    detail: str = ""
+
+
+def calibration_dimensions(calibration):
+    """Return a calibration's expected (width, height), empty until it loads."""
+    width = getattr(calibration, "DIMW", None)
+    height = getattr(calibration, "DIMO", None)
+    if width is None or height is None:
+        return ()
+    return (int(width), int(height))
+
+
+def detector_dimensions(info):
+    """Read the detector size a frame reports, the way calibrations derive theirs."""
+    reported = info.get("DetectorDimensions")
+    if reported is not None:
+        return tuple(int(value) for value in reported)
+    width, height = info["size"]
+    return (int(width) * int(info["xbin"]), int(height) * int(info["ybin"]))
+
+
+def format_dimensions(dimensions):
+    """Render a (width, height) pair for the operator."""
+    if not len(dimensions):
+        return "unknown size"
+    return "{}x{}".format(*dimensions)
 
 
 class EchelleSpectraGUI(QMainWindow, window_layout.Ui_MainWindow):
@@ -83,13 +144,13 @@ class EchelleSpectraGUI(QMainWindow, window_layout.Ui_MainWindow):
         self.cb_CCD.filenames = files_ccd
         self.cb_CMOS.filenames = files_cmos
 
-        self.calib_thread_ccd = None
-        self.calib_files_cmos = None
-
-        self.calib_threads = {
-            "CCD": self.calib_thread_ccd,
-            "CMOS": self.calib_files_cmos,
-        }
+        self.calib_threads = {name: None for name in CAMERA_NAMES}
+        # One entry per camera once its thread reports: "" when the calibration
+        # loaded, otherwise why it did not.  Until both are in, no image load
+        # may run against half-built DIMW/DIMO.
+        self.calibration_errors = {}
+        self.pending_image = None
+        self.cameras_tried = []
 
         self.load_calibration(self.cb_CCD)
         self.load_calibration(self.cb_CMOS)
@@ -169,21 +230,50 @@ class EchelleSpectraGUI(QMainWindow, window_layout.Ui_MainWindow):
         self.calib_threads[clbr.name].taskFinished.connect(self._on_calibration_loaded)
         self.calib_threads[clbr.name].start()
 
-    def _on_calibration_loaded(self, result):
-        """When calibration loaded, release buttons and get ready to work"""
-        if result.name == "CCD":
-            self.cb_CCD = result
-            if self.config["debug"]:
-                print("CCD")
+    def calibrations_settled(self):
+        """True once every calibration thread has reported, loaded or failed"""
+        return set(CAMERA_NAMES) <= set(self.calibration_errors)
 
-        if result.name == "CMOS":
-            self.cb_CMOS = result
-            if self.config["debug"]:
-                print("CMOS")
+    def _on_calibration_loaded(self, outcome):
+        """Record one calibration; release buttons only once both have reported"""
+        if outcome.name == "CCD":
+            self.cb_CCD = outcome.calibration
 
-        self.statusBar().showMessage("Calibration files loaded. Ready to work.")
-        self._enable_controls(True)
+        if outcome.name == "CMOS":
+            self.cb_CMOS = outcome.calibration
+
+        self.calibration_errors[outcome.name] = outcome.detail
+        if self.config["debug"]:
+            print(outcome.name, outcome.detail or "loaded")
+
+        if not self.calibrations_settled():
+            self.statusBar().showMessage(
+                f"{outcome.name} calibration ready. Still loading the other camera."
+            )
+            return
+
         self.coursor_bw.setText("")
+        self._enable_controls(True)
+        broken = [name for name in CAMERA_NAMES if self.calibration_errors.get(name)]
+        if broken:
+            self.statusBar().showMessage(
+                "Calibration files failed to load — "
+                + "; ".join(f"{name}: {self.calibration_errors[name]}" for name in broken)
+            )
+        else:
+            self.statusBar().showMessage("Calibration files loaded. Ready to work.")
+
+        self._load_pending_image()
+
+    def _load_pending_image(self):
+        """Run a load that arrived while the calibrations were still loading"""
+        pending = self.pending_image
+        if pending is None:
+            return
+
+        self.pending_image = None
+        self.filename = pending
+        self.load_image()
 
     def setup_bands(self):
         """Create list of band objects from EmissionBand class"""
@@ -349,7 +439,27 @@ class EchelleSpectraGUI(QMainWindow, window_layout.Ui_MainWindow):
     # ===========================================================================
 
     def load_image(self):
-        """Load SIF image"""
+        """Load SIF image, giving each camera calibration at most one attempt"""
+        if not self.calibrations_settled():
+            self._queue_image_load()
+            return
+
+        self.cameras_tried = []
+        self._start_image_load()
+
+    def _queue_image_load(self):
+        """Hold a load issued during startup instead of racing the calibrations"""
+        self.pending_image = self.filename
+        self._enable_controls(False)
+        self.coursor_bw.setText(
+            """<font size = 6 color = "#d1451b">Calibrations loading…</font>"""
+        )
+        self.statusBar().showMessage(
+            f"Calibrations are still loading — {Path(self.filename).name} is queued."
+        )
+
+    def _start_image_load(self):
+        """Run one attempt with the camera calibration currently selected"""
         if not self.in_loop:
             self.progress_range.setRange(0, 1)
             self.clear_fit_traces()
@@ -382,34 +492,34 @@ class EchelleSpectraGUI(QMainWindow, window_layout.Ui_MainWindow):
             cb = self.cb_CCD
             self.CameraCCD.setChecked(True)
 
+        self.cameras_tried.append(cb.name)
         self.image_load_thread = LoadImageThread(self.filename, cb, self.config)
         self.image_load_thread.taskFinished.connect(self._on_image_loaded)
         self.image_load_thread.start()
 
-    def _on_image_loaded(self, result):
+    def _on_image_loaded(self, outcome):
         """Receive the loaded Echelle Image"""
-        self.em = result
-
-        if result is None:
-            self._enable_controls(True)
-            txt = "DIMENSIONS of the Image and Calibration do not match"
-            txt = '<font size = 6 color = "#d1451b">{}</font>'.format(txt)
-            self.image_info_bw.setText(txt)
-
-            self.change_camera()
-            self.load_image()
+        if outcome.status != IMAGE_LOADED:
+            self._on_image_load_failed(outcome)
             return
 
-        self.spectra = ech.Spectrum(self.em)
-
-        self._reset_frame()
-        self._setup_frame()
-
-        self.show_info()
-        self.show_image_frame()
-        self.show_c_frame()
-        self.show_he_frame()
-        self.show_balmer_frame()
+        self.em = outcome.image
+        try:
+            self._show_loaded_image()
+        except Exception as err:
+            # An unhandled failure here used to escape the slot and leave the
+            # window on its orange "Loading Image" with every control dead.
+            self._on_image_load_failed(
+                ImageLoadOutcome(
+                    status=IMAGE_DISPLAY_FAILED,
+                    camera=outcome.camera,
+                    file_dimensions=outcome.file_dimensions,
+                    binning=outcome.binning,
+                    expected_dimensions=outcome.expected_dimensions,
+                    detail=f"{type(err).__name__}: {err}",
+                )
+            )
+            return
 
         if not self.in_loop:
             self._enable_controls(True)
@@ -428,6 +538,93 @@ class EchelleSpectraGUI(QMainWindow, window_layout.Ui_MainWindow):
             self.save_spec_thread.start()
         else:
             self._on_spec_saved(None)
+
+    def _show_loaded_image(self):
+        """Build the spectrum and paint every tab from the freshly loaded image"""
+        self.spectra = ech.Spectrum(self.em)
+
+        self._reset_frame()
+        self._setup_frame()
+
+        self.show_info()
+        self.show_image_frame()
+        self.show_c_frame()
+        self.show_he_frame()
+        self.show_balmer_frame()
+
+    def _on_image_load_failed(self, outcome):
+        """Try the other camera once on a size mismatch, then stop and explain
+
+        Only a dimension mismatch is a question the other calibration can
+        answer.  An unreadable file, a failed extraction, or a calibration that
+        never loaded fail identically on both cameras, so retrying them only
+        buys another spin of the same wheel.
+        """
+        untried = [name for name in CAMERA_NAMES if name not in self.cameras_tried]
+
+        if outcome.status == IMAGE_DIMENSION_MISMATCH and untried:
+            self.statusBar().showMessage(
+                f"{outcome.camera} calibration expects "
+                f"{format_dimensions(outcome.expected_dimensions)} — trying {untried[0]}."
+            )
+            self.change_camera()
+            self._start_image_load()
+            return
+
+        self.em = None
+        message = self._load_failure_text(outcome)
+        self.image_info_bw.setText(
+            '<font size = 4 color = "#d1451b">{}</font>'.format(message)
+        )
+        self.coursor_bw.setText('<font size = 5 color = "#d1451b">Load failed</font>')
+        self.statusBar().showMessage(message)
+        if not self.in_loop:
+            self._enable_controls(True)
+
+        # A file that cannot be loaded must not strand a running shot loop.
+        self.advance_if_in_loop()
+
+    def _load_failure_text(self, outcome):
+        """Say what the file read and what each calibration expected"""
+        name = Path(self.filename).name
+
+        if outcome.status == IMAGE_DIMENSION_MISMATCH:
+            expectations = "; ".join(self._camera_expectations())
+            return (
+                f"{name} reads {format_dimensions(outcome.file_dimensions)} "
+                f"(binning {format_dimensions(outcome.binning)}); {expectations}."
+            )
+
+        if outcome.status == IMAGE_CALIBRATION_UNAVAILABLE:
+            return f"The {outcome.camera} calibration is unusable: {outcome.detail}"
+
+        if outcome.status == IMAGE_EXTRACTION_FAILED:
+            return (
+                f"{name} fits the {outcome.camera} calibration but could not be "
+                f"extracted: {outcome.detail}"
+            )
+
+        if outcome.status == IMAGE_DISPLAY_FAILED:
+            return (
+                f"{name} loaded against the {outcome.camera} calibration but could "
+                f"not be displayed: {outcome.detail}"
+            )
+
+        return f"{name} could not be read: {outcome.detail}"
+
+    def _camera_expectations(self):
+        """One phrase per camera describing the frame size it can accept"""
+        phrases = []
+        for calibration in (self.cb_CCD, self.cb_CMOS):
+            dimensions = calibration_dimensions(calibration)
+            if not len(dimensions):
+                phrases.append(f"the {calibration.name} calibration is unavailable")
+            else:
+                phrases.append(
+                    f"{calibration.name} calibration expects "
+                    f"{format_dimensions(dimensions)}"
+                )
+        return phrases
 
     def _on_spec_saved(self, result):
         """Continue after spectra saved (or not)"""
@@ -828,14 +1025,22 @@ class LoadCalibrationsThread(QtCore.QThread):
         self.config = config
 
     def run(self):
-        self.calibration.start()
         cb = self.calibration
+        try:
+            cb.start()
+        except Exception as err:
+            # Reporting the failure keeps the window usable; a dead thread would
+            # leave the controls disabled and the startup message forever on.
+            self.taskFinished.emit(
+                CalibrationLoadOutcome(cb.name, cb, f"{type(err).__name__}: {err}")
+            )
+            return
 
         if self.config["debug"]:
             print("\n" + cb.name, cb.DIMO, cb.DIMW)
             [print(a, " " * (12 - len(a)), b) for a, b in cb.filenames.items()]
 
-        self.taskFinished.emit(self.calibration)
+        self.taskFinished.emit(CalibrationLoadOutcome(cb.name, cb))
 
 
 class LoadImageThread(QtCore.QThread):
@@ -850,28 +1055,79 @@ class LoadImageThread(QtCore.QThread):
         self.config = config
 
     def run(self):
+        expected = calibration_dimensions(self.cb)
+        if not len(expected):
+            self.taskFinished.emit(
+                ImageLoadOutcome(
+                    status=IMAGE_CALIBRATION_UNAVAILABLE,
+                    camera=self.cb.name,
+                    detail="its calibration files did not load",
+                )
+            )
+            return
+
         try:
             em = ech.EchelleImage(self.filename, clbr=self.cb)
         except Exception as err:
             if self.config["debug"]:
                 print(f"LoadImageThread Error: {err}")
-            self.taskFinished.emit(None)
+            self.taskFinished.emit(
+                ImageLoadOutcome(
+                    status=IMAGE_UNREADABLE,
+                    camera=self.cb.name,
+                    expected_dimensions=expected,
+                    detail=f"{type(err).__name__}: {err}",
+                )
+            )
             return
+
+        dimensions = detector_dimensions(em.info)
+        binning = (int(em.info["xbin"]), int(em.info["ybin"]))
 
         if self.config["debug"]:
-            print(
-                em.info["DetectorDimensions"], self.cb.DIMO, self.cb.DIMW, self.cb.name
-            )
+            print(dimensions, self.cb.DIMO, self.cb.DIMW, self.cb.name)
 
-        if not em.info["DetectorDimensions"] == (self.cb.DIMW, self.cb.DIMO):
-            self.taskFinished.emit(None)
+        if dimensions != expected:
+            self.taskFinished.emit(
+                ImageLoadOutcome(
+                    status=IMAGE_DIMENSION_MISMATCH,
+                    camera=self.cb.name,
+                    file_dimensions=dimensions,
+                    binning=binning,
+                    expected_dimensions=expected,
+                )
+            )
             return
 
-        em.calculate_order_spectra()  # image -> order spectra
-        em.correct_order_shapes()  # remove out of bounds boundaries
-        em.calculate_spectra()  # order spectra -> fullwidth spectra
+        try:
+            em.calculate_order_spectra()  # image -> order spectra
+            em.correct_order_shapes()  # remove out of bounds boundaries
+            em.calculate_spectra()  # order spectra -> fullwidth spectra
+        except Exception as err:
+            # Extraction used to run outside any guard, so a failure here killed
+            # the thread without ever emitting and the window waited forever.
+            self.taskFinished.emit(
+                ImageLoadOutcome(
+                    status=IMAGE_EXTRACTION_FAILED,
+                    camera=self.cb.name,
+                    file_dimensions=dimensions,
+                    binning=binning,
+                    expected_dimensions=expected,
+                    detail=f"{type(err).__name__}: {err}",
+                )
+            )
+            return
 
-        self.taskFinished.emit(em)
+        self.taskFinished.emit(
+            ImageLoadOutcome(
+                status=IMAGE_LOADED,
+                camera=self.cb.name,
+                image=em,
+                file_dimensions=dimensions,
+                binning=binning,
+                expected_dimensions=expected,
+            )
+        )
 
 
 class FitLinesThread(QtCore.QThread):
