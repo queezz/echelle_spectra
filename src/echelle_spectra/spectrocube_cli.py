@@ -41,6 +41,9 @@ from .calibration_registry import (
     load_calibration_registry,
 )
 from .campaign_run import (
+    GATE_SAMPLE,
+    GATE_UNGATED,
+    GATE_VERDICT,
     RunReceipt,
     default_volume_label,
     find_resumable_run,
@@ -61,6 +64,11 @@ _DEFAULTS = {
 
 _ExportStatus = Literal["exported", "skipped", "dry-run", "failed"]
 _PRINT_LOCK = threading.Lock()
+
+# Cubes produced by an unverified --sample run carry this attribute. NetCDF has
+# no boolean attribute type, so the flag is stored as the legal integer true.
+DRIFT_SAMPLE_ATTR = "drift_sample"
+DRIFT_SAMPLE_TRUE = 1
 
 
 @dataclass(frozen=True)
@@ -302,8 +310,19 @@ def _build_parser(*, prog: str = "echelle-spectrocube") -> argparse.ArgumentPars
         default=None,
         metavar="JSON",
         help=(
-            "Sampled drift evidence required before registry-backed bulk processing; "
+            "Sampled drift evidence required before any registry-backed processing; "
             "insufficient or unaccepted shifted evidence is refused."
+        ),
+    )
+    p.add_argument(
+        "--sample",
+        type=int,
+        default=None,
+        metavar="N",
+        help=(
+            "Legal first registry run: process the first N resolved files without a "
+            "verdict. The receipt and every produced cube are marked as an unverified "
+            "sample, which 'echelle drift audit' then turns into --drift-verdict evidence."
         ),
     )
     return p
@@ -491,6 +510,119 @@ def _registry_provenance(
     }
 
 
+@dataclass(frozen=True)
+class GateAuthorization:
+    """How one target earned the right to process its calibration epoch."""
+
+    gate: str
+    files: tuple[Path, ...]
+    evidence_path: str = ""
+    evidence_sha256: str = ""
+    verdict: str = ""
+    sample: bool = False
+
+
+def _shell_quote(value: object) -> str:
+    text = str(value)
+    return f'"{text}"' if " " in text else text
+
+
+def _gate_refusal(
+    reason: str,
+    args: argparse.Namespace,
+    settings: dict,
+    input_path: Path,
+) -> str:
+    """Refuse a registry run and name the exact commands that produce the evidence."""
+
+    output = args.output or str(input_path)
+    sample_command = [
+        "echelle process",
+        _shell_quote(input_path),
+        f"--registry {_shell_quote(settings.get('registry') or 'calibration_registry.toml')}",
+    ]
+    if settings.get("calibrations"):
+        sample_command.append(f"--calibrations {_shell_quote(settings['calibrations'])}")
+    sample_command.extend([f"-o {_shell_quote(output)}", "--sample 5"])
+    return "\n".join(
+        [
+            f"ERROR: {reason}",
+            "  Take the sampled evidence this gate needs:",
+            f"    {' '.join(sample_command)}",
+            f"    echelle drift audit {_shell_quote(Path(output) / '*.nc')} -o drift-evidence.json",
+            "  Then repeat this command with --drift-verdict drift-evidence.json",
+            "  PowerShell passes cube paths as "
+            f"(Get-ChildItem {_shell_quote(Path(output) / '*.nc')}).FullName",
+        ]
+    )
+
+
+def _authorize_run(
+    args: argparse.Namespace,
+    settings: dict,
+    registry: CalibrationEpochRegistry | None,
+    sif_files: list[Path],
+    *,
+    input_path: Path,
+    target_label: str | None = None,
+) -> GateAuthorization | None:
+    """Authorize, sample, or refuse one target; refusals are already reported."""
+
+    if registry is None:
+        # An explicitly configured calibration is legal, but the receipt must
+        # say forever that nothing verified this epoch.
+        return GateAuthorization(gate=GATE_UNGATED, files=tuple(sif_files))
+
+    from .drift import DriftError, require_sampled_verdict
+
+    if args.sample is not None:
+        selected = tuple(sif_files[: args.sample])
+        _emit_target(
+            f"Gate:        sample of {len(selected)}/{len(sif_files)} file(s) with no "
+            "verdict; every cube is marked drift_sample",
+            target_label=target_label,
+        )
+        return GateAuthorization(gate=GATE_SAMPLE, files=selected, sample=True)
+
+    if not args.drift_verdict:
+        _emit_target(
+            _gate_refusal(
+                "registry-backed processing requires a sampled epoch audit "
+                "(--drift-verdict) or an explicit unverified first sample (--sample N).",
+                args,
+                settings,
+                input_path,
+            ),
+            target_label=target_label,
+            stream=sys.stderr,
+        )
+        return None
+
+    try:
+        selected_ids = {registry.resolve_source(path).snapshot_id for path in sif_files}
+        payload = require_sampled_verdict(args.drift_verdict, selected_ids)
+    except (CalibrationRegistryError, DriftError, OSError, ValueError) as exc:
+        _emit_target(
+            _gate_refusal(f"drift gate failed: {exc}", args, settings, input_path),
+            target_label=target_label,
+            stream=sys.stderr,
+        )
+        return None
+
+    evidence = Path(args.drift_verdict)
+    _emit_target(
+        f"Gate:        verdict '{payload.get('verdict')}' from {evidence}",
+        target_label=target_label,
+    )
+    return GateAuthorization(
+        gate=GATE_VERDICT,
+        files=tuple(sif_files),
+        evidence_path=str(evidence.resolve()),
+        evidence_sha256=sha256_file(evidence),
+        verdict=str(payload.get("verdict", "")),
+    )
+
+
 def _export_one(
     sif_path: Path,
     output_nc: Path,
@@ -628,27 +760,17 @@ def _run_batch_target(
         )
         return 1
 
-    if registry is not None and len(sif_files) > 1:
-        from .drift import DriftError, require_sampled_verdict
-
-        if not args.drift_verdict:
-            _emit_target(
-                "ERROR: registry-backed bulk processing requires --drift-verdict from a "
-                "sampled epoch audit.",
-                target_label=target_label,
-                stream=sys.stderr,
-            )
-            return 1
-        try:
-            selected_ids = {registry.resolve_source(path).snapshot_id for path in sif_files}
-            require_sampled_verdict(args.drift_verdict, selected_ids)
-        except (CalibrationRegistryError, DriftError, OSError, ValueError) as exc:
-            _emit_target(
-                f"ERROR: bulk drift gate failed: {exc}",
-                target_label=target_label,
-                stream=sys.stderr,
-            )
-            return 1
+    authorization = _authorize_run(
+        args,
+        settings,
+        registry,
+        sif_files,
+        input_path=input_path,
+        target_label=target_label,
+    )
+    if authorization is None:
+        return 1
+    sif_files = list(authorization.files)
 
     if not args.dry_run:
         out_dir.mkdir(parents=True, exist_ok=True)
@@ -746,6 +868,16 @@ def _run_batch_target(
             receipt.expected_files = max(receipt.expected_files, len(sif_files))
             receipt.write_manifest()
             _emit_target(f"Resuming:    {receipt.directory}", target_label=target_label)
+        # A resumed receipt records how the run in front of it was authorized,
+        # not how an earlier one was.
+        receipt.record_authorization(
+            gate=authorization.gate,
+            sample=authorization.sample,
+            sample_files=len(sif_files) if authorization.sample else 0,
+            evidence_path=authorization.evidence_path,
+            evidence_sha256=authorization.evidence_sha256,
+            verdict=authorization.verdict,
+        )
 
     if stop_event is not None and stop_event.is_set():
         if receipt is not None:
@@ -847,6 +979,8 @@ def _run_batch_target(
         selected_snapshot_id: str | None = None
         selected_calibration = clbr
         selected_extra_attrs = dict(settings["extra_attrs"])
+        if authorization.sample:
+            selected_extra_attrs[DRIFT_SAMPLE_ATTR] = DRIFT_SAMPLE_TRUE
         if registry is not None:
             try:
                 epoch = registry.resolve_source(sif)
@@ -1106,6 +1240,13 @@ def _run_single_file(
     calibration = None
     extra_attrs = dict(settings["extra_attrs"])
     if registry is not None:
+        authorization = _authorize_run(
+            args, settings, registry, [input_path], input_path=input_path
+        )
+        if authorization is None:
+            return 1
+        if authorization.sample:
+            extra_attrs[DRIFT_SAMPLE_ATTR] = DRIFT_SAMPLE_TRUE
         try:
             epoch = registry.resolve_source(input_path)
             snapshot = epoch.snapshot
@@ -1170,6 +1311,20 @@ def main(argv: list[str] | None = None, *, prog: str = "echelle-spectrocube") ->
     args = parser.parse_args(argv)
     args, settings = _settings_from_args(args)
     settings["epoch_registry"] = _load_epoch_registry(args, settings, parser)
+    if args.sample is not None:
+        if args.drift_verdict:
+            parser.error(
+                "--sample takes an unverified first sample and --drift-verdict authorizes a "
+                "verified run; they cannot be combined. Sample first, audit the sample with "
+                "'echelle drift audit', then rerun with --drift-verdict alone."
+            )
+        if args.sample < 1:
+            parser.error("--sample must select at least one file.")
+        if settings.get("epoch_registry") is None:
+            parser.error(
+                "--sample marks cubes and receipts as unverified epoch samples and "
+                "therefore requires --registry."
+            )
     if args.input is None:
         parser.error("INPUT is required unless supplied by --plan.")
 

@@ -24,7 +24,7 @@ def catalog_main(argv: list[str] | None = None, *, prog: str = "echelle catalog"
     from .catalog import build_drive_catalog, merge_catalogs
 
     parser = argparse.ArgumentParser(prog=prog, description="Build and merge portable cube catalogs.")
-    commands = parser.add_subparsers(dest="action", required=True)
+    commands = parser.add_subparsers(dest="action", metavar="COMMAND")
     build = commands.add_parser("build", help="Write one catalog beside a drive's cubes.")
     build.add_argument("cubes")
     build.add_argument("--volume-label", required=True)
@@ -34,6 +34,9 @@ def catalog_main(argv: list[str] | None = None, *, prog: str = "echelle catalog"
     merge.add_argument("catalogs", nargs="+")
     merge.add_argument("-o", "--output", required=True)
     args = parser.parse_args(argv)
+    if args.action is None:
+        parser.print_help()
+        return 0
     if args.action == "build":
         path = build_drive_catalog(
             args.cubes,
@@ -78,17 +81,24 @@ def drift_main(argv: list[str] | None = None, *, prog: str = "echelle drift") ->
     from .drift import audit_cubes, create_refinement_snapshot, write_drift_evidence
 
     parser = argparse.ArgumentParser(prog=prog, description="Audit science-line drift and accept refinements.")
-    commands = parser.add_subparsers(dest="action", required=True)
-    audit = commands.add_parser("audit")
+    commands = parser.add_subparsers(dest="action", metavar="COMMAND")
+    audit = commands.add_parser(
+        "audit", help="Measure sampled cubes and write one immutable verdict file."
+    )
     audit.add_argument("cubes", nargs="+")
     audit.add_argument("--every", type=int, default=1)
     audit.add_argument("--shot", action="append", default=[])
     audit.add_argument("-o", "--output", required=True)
-    refine = commands.add_parser("refine")
+    refine = commands.add_parser(
+        "refine", help="Accept a shifted verdict and emit an immutable -rN snapshot."
+    )
     refine.add_argument("evidence")
     refine.add_argument("--calibrations", required=True)
     refine.add_argument("--accept-shift", required=True, type=float)
     args = parser.parse_args(argv)
+    if args.action is None:
+        parser.print_help()
+        return 0
     if args.action == "audit":
         payload = audit_cubes(args.cubes, every=args.every, shots=set(args.shot))
         path = write_drift_evidence(args.output, payload)

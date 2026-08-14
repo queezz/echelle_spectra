@@ -114,11 +114,11 @@ developer tools cannot be assumed.
 | `echelle snapshot create` | Copies role-named calibration inputs into one immutable, digested snapshot | Yes, usually through the bench |
 | `echelle snapshot validate DIR` | Rechecks snapshot schema, paths, sizes, and SHA-256 digests | Yes |
 | `echelle snapshot show DIR` | Prints a compact snapshot summary | Yes |
-| `echelle process INPUT -o OUTPUT` | Converts one SIF, a folder, or several drives to SpectroCube NetCDF and records resumable receipts | Yes |
+| `echelle process INPUT -o OUTPUT` | Converts one SIF, a folder, or several drives to SpectroCube NetCDF and records resumable receipts | Yes; a registry run needs `--sample N` or `--drift-verdict` |
 | `echelle catalog build/merge` | Writes per-drive catalogs and a durable all-years index with volume labels | Candidate; audit/catalog work |
 | `echelle txt CUBE OUTPUT` / `echelle-cube2txt` | Writes canonical provenance-complete LHD text from a saved cube | Candidate; no raw SIF needed |
 | `echelle recal-cube CUBE --new-snapshot DIR` | Applies safe wavelength/factor snapshot deltas and refuses geometry changes | Candidate; reviewed repair only |
-| `echelle drift audit/refine` | Samples Balmer/Fulcher centroids, emits a four-state verdict, and accepts immutable `-rN` refinements | Candidate; required before registry bulk runs |
+| `echelle drift audit/refine` | Samples Balmer/Fulcher centroids, emits a four-state verdict, and accepts immutable `-rN` refinements | Candidate; required before any registry run |
 | `echelle web --catalog INDEX --output DIR` | Builds the static read-only reading room and command composer | Candidate; never controls workers |
 | `echelle historical` | Validates the three thin historical calibration binders | Candidate; inspection only |
 | `echelle-pattern SPHERE BACKGROUND` | Previews or writes a detector order-pattern fit | Specialist recalibration |
@@ -156,16 +156,31 @@ $Data = "D:\NIFS"
 # 3. Recheck the snapshot produced by the completed bench procedure.
 .\echelle.ps1 snapshot validate "$Data\calibrations\20260814_cmos"
 
-# 4. Preview a processing run without writing files or receipts.
+# 4. Preview the first sample without writing files or receipts.
 .\echelle.ps1 process "$Data\shots" `
   -o "$Data\cubes" `
   --runs-dir "$Data\runs" `
   --registry "$Data\calibration_registry.toml" `
   --calibrations "$Data\calibrations" `
   --volume-label NIFS-A `
+  --sample 5 `
   --dry-run
 
-# 5. Run for real by repeating the command without --dry-run.
+# 5. Take the sample for real by repeating step 4 without --dry-run.
+#    Nothing else may run yet: these cubes are the audit's input.
+
+# 6. Audit the sample into one immutable verdict file.
+.\echelle.ps1 drift audit (Get-ChildItem "$Data\cubes\*.nc").FullName `
+  -o "$Data\epoch-drift.json"
+
+# 7. Process the whole drive under that verdict.
+.\echelle.ps1 process "$Data\shots" `
+  -o "$Data\cubes" `
+  --runs-dir "$Data\runs" `
+  --registry "$Data\calibration_registry.toml" `
+  --calibrations "$Data\calibrations" `
+  --volume-label NIFS-A `
+  --drift-verdict "$Data\epoch-drift.json"
 ```
 
 ### macOS Terminal
@@ -187,21 +202,41 @@ data="/Volumes/NIFS"
 # 3. Recheck the completed snapshot.
 ./echelle snapshot validate "$data/calibrations/20260814_cmos"
 
-# 4. Preview before writing cubes or receipts.
+# 4. Preview the first sample before writing cubes or receipts.
 ./echelle process "$data/shots" \
   -o "$data/cubes" \
   --runs-dir "$data/runs" \
   --registry "$data/calibration_registry.toml" \
   --calibrations "$data/calibrations" \
   --volume-label NIFS-A \
+  --sample 5 \
   --dry-run
 
-# 5. Run for real by repeating the command without --dry-run.
+# 5. Take the sample for real by repeating step 4 without --dry-run.
+#    Nothing else may run yet: these cubes are the audit's input.
+
+# 6. Audit the sample into one immutable verdict file.
+./echelle drift audit "$data"/cubes/*.nc -o "$data/epoch-drift.json"
+
+# 7. Process the whole drive under that verdict.
+./echelle process "$data/shots" \
+  -o "$data/cubes" \
+  --runs-dir "$data/runs" \
+  --registry "$data/calibration_registry.toml" \
+  --calibrations "$data/calibrations" \
+  --volume-label NIFS-A \
+  --drift-verdict "$data/epoch-drift.json"
 ```
 
 Put every accepted snapshot ID into the ordered registry and verify its
 inclusive bounds with `echelle status` before processing. Use one
 `--volume-label` for each input folder when processing several drives.
+
+Steps 4–7 are the whole gate: a registry-backed run needs either `--sample N`,
+which processes at most N resolved files and marks its receipt and cubes as an
+unverified sample, or `--drift-verdict`, which spends the sampled evidence the
+audit wrote. A run with an explicit `--config` calibration and no registry stays
+legal and is recorded as `ungated (no registry)`.
 
 ## Safe inspection versus writing
 
@@ -213,10 +248,15 @@ echelle status
 echelle snapshot show DIR
 echelle snapshot validate DIR
 echelle process INPUT --dry-run
+echelle catalog
+echelle drift
 echelle-pattern SPHERE BACKGROUND
 echelle-align SIGNAL BACKGROUND SPHERE SPHERE_BG
 echelle-nist-overlay --list-lamps
 ```
+
+Bare `echelle snapshot`, `echelle catalog`, and `echelle drift` print their own
+help instead of failing, so a subcommand name never has to be remembered.
 
 Writing begins with `snapshot create`, a real `process` run, `echelle-pattern
 --output`, `echelle-align --save`, wavelength-QC/overlay output commands, or the
@@ -258,6 +298,32 @@ That is an honest empty state, not an installation failure. Supply explicit
 is not below the current working directory. Status exits nonzero when it finds
 an invalid snapshot or a registry whose referenced snapshots, bounds, or
 digests do not validate.
+
+### Processing refuses a registry run
+
+```text
+ERROR: registry-backed processing requires a sampled epoch audit
+(--drift-verdict) or an explicit unverified first sample (--sample N).
+  Take the sampled evidence this gate needs:
+    echelle process "D:\NIFS\shots" --registry "D:\NIFS\calibration_registry.toml" ...
+    echelle drift audit "D:\NIFS\cubes\*.nc" -o drift-evidence.json
+  Then repeat this command with --drift-verdict drift-evidence.json
+```
+
+This is the calibration gate, not a broken installation. No drive is processed
+under an epoch nothing has checked. The refusal prints the exact sample and
+audit commands that produce the missing evidence; run them, then repeat the
+processing command with `--drift-verdict`. Every registry-backed form is gated,
+including a single file and a folder holding one file.
+
+Two related refusals:
+
+- `registry still selects 20250926_cmos; the accepted correction produced
+  20250926_cmos-r1` — the audit's shift was accepted, so only the refinement is
+  authorized. Repoint the registry entry at the `-rN` snapshot.
+- `bulk processing refused: sampled verdict is insufficient-data` — the sample
+  measured too few usable lines. Sample more or different shots; insufficient
+  evidence is never read as aligned.
 
 ### Processing finds no files
 

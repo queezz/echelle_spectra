@@ -4,17 +4,65 @@
 you keep the run state in your head. Every non-dry batch creates a durable run
 receipt under `local/runs/` by default.
 
+A registry-backed drive takes three commands: sample the epoch, audit the
+sample, then process the drive under the verdict the audit wrote.
+
 ```powershell
+# 1. Sample the first five resolved files. No verdict is needed yet, and every
+#    produced cube is marked drift_sample.
 echelle process D:\nifs\shots `
   -o D:\nifs\spectrocubes `
   --registry D:\nifs\calibration_registry.toml `
   --calibrations D:\nifs\calibrations `
-  --volume-label NIFS-A
+  --volume-label NIFS-A `
+  --sample 5
+
+# 2. Audit the sample into one immutable verdict file.
+echelle drift audit (Get-ChildItem "D:\nifs\spectrocubes\*.nc").FullName `
+  -o D:\nifs\epoch-drift.json
+
+# 3. Process the whole drive under that verdict.
+echelle process D:\nifs\shots `
+  -o D:\nifs\spectrocubes `
+  --registry D:\nifs\calibration_registry.toml `
+  --calibrations D:\nifs\calibrations `
+  --volume-label NIFS-A `
+  --drift-verdict D:\nifs\epoch-drift.json
 ```
+
+Step 3 resumes the receipt written by step 1: the sampled files are verified and
+skipped rather than exported twice.
 
 The terminal reports the current count, measured file rate, and estimated time
 remaining. An ordinary file failure is recorded and processing continues with
 the next source. The command exits nonzero after the run if any source failed.
+
+## The gate
+
+Nothing reaches a registry-selected calibration without saying how it was
+authorized. Every run records one of three gates in its receipt:
+
+| Gate | Meaning |
+| --- | --- |
+| `verdict` | `--drift-verdict` named sampled evidence that covers every snapshot this run selected. The receipt also stores the evidence path, its SHA-256, and the verdict word. |
+| `sample` | `--sample N` processed at most the first N resolved files (sorted by path) with no verdict at all. The receipt stores `sample = true` and the file count; every cube carries `drift_sample = 1`. |
+| `ungated (no registry)` | The run used an explicit `--config`/`--snapshot-id`/`--camera` calibration. That is legal, and the receipt says forever that no sampled audit stood behind it. |
+
+`--sample` and `--drift-verdict` cannot be combined: one takes unverified
+evidence, the other spends it. `--sample` requires `--registry`.
+
+The gate covers every registry-backed form — a folder of one file, a folder of
+ten thousand, and the single-file path. A refusal names the commands that
+produce the missing evidence instead of only stating that it is missing.
+
+Aligned evidence authorizes the snapshots it audited. An accepted shifted
+verdict authorizes **only** the `-rN` refinement it created: while the registry
+still selects the condemned base snapshot, the gate refuses and tells you to
+repoint the registry's validity at the refinement.
+
+Receipts written before the gate existed remain readable. They report
+`unrecorded (pre-gate receipt)` rather than borrowing an authorization they
+never had.
 
 ## Several drives at once
 
@@ -28,8 +76,14 @@ echelle process D:\nifs-a\shots E:\nifs-b\shots `
   --volume-label NIFS-A `
   --volume-label NIFS-B `
   --registry F:\nifs-calibration\calibration_registry.toml `
-  --calibrations F:\nifs-calibration\calibrations
+  --calibrations F:\nifs-calibration\calibrations `
+  --drift-verdict F:\nifs-calibration\epoch-drift.json
 ```
+
+Each target is gated on its own. `--sample 5` samples each source folder
+separately, so one campaign command can produce the audit input for every drive
+at once; the verdict that covers all of their snapshots then authorizes the
+full multi-drive run.
 
 `-o` is a destination root in this form. Each source receives its own named
 child directory, its own sequential calibration/export worker, and its own
@@ -50,7 +104,8 @@ Each run directory contains:
 
 - `run.toml` — atomic summary containing run state, roots, volume label,
   calibration authority (`per-source-registry` for an epoch run), expected file
-  count, and current status counts;
+  count, the gate that authorized the run with its evidence path, digest, and
+  verdict, and current status counts;
 - `records.jsonl` — an append-only, one-record-per-attempt ledger with source
   path, source size and SHA-256, output path, result, reason, timing, volume,
   and the snapshot selected for that source. Successful exports also record
@@ -88,14 +143,34 @@ echelle process D:\nifs\shots -o D:\nifs\spectrocubes `
 Use `--new-run` when you intentionally want a separate receipt. Use
 `--overwrite` only when existing outputs should be replaced.
 
+Repeat `--registry` and its `--drift-verdict` when resuming a registry-backed
+run. The gate is evaluated on every invocation, including a resume, and the
+receipt records the authorization of the run in front of it.
+
+## Catalog beside the cubes
+
+Every non-dry batch target writes `echelle-catalog.json` beside its cubes. Write
+or refresh one by hand with the same command the run uses:
+
+```powershell
+echelle catalog build D:\nifs\spectrocubes `
+  --volume-label NIFS-A `
+  --receipt-dir local\runs\2026-08-13_12-00-00-shots
+```
+
+`--receipt-dir` is optional and adds the run's state, counts, and calibration
+authority to the catalog. Merge per-drive catalogs into a durable all-years
+index with `echelle catalog merge CATALOG [CATALOG ...] -o all-years.json`.
+
 ## Status
 
 ```powershell
 echelle status --runs local\runs
 ```
 
-Status reports the newest run's state, accounted sources, result counts, and
-calibration authority. Individual records retain their selected snapshot IDs.
+Status reports the newest run's state, accounted sources, result counts,
+calibration authority, and the gate that authorized it. Individual records
+retain their selected snapshot IDs.
 When several source/output targets have receipts, it also reports
 their newest states individually and reconciles their combined totals. It reads
 receipt files recursively; it does not infer progress from filenames or count

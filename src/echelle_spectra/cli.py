@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 
 from .calibration_registry import CalibrationRegistryError, load_calibration_registry
-from .campaign_run import latest_run_summaries, list_run_summaries
+from .campaign_run import GATE_UNRECORDED, latest_run_summaries, list_run_summaries
 from .snapshot import SnapshotValidationError, load_snapshot
 
 
@@ -153,6 +153,12 @@ def _status(argv: list[str]) -> int:
         print(f"  latest:    {latest['id']} [{latest['state']}]")
         print(f"  progress:  {accounted}/{latest['expected_files']} ({details})")
         print(f"  snapshot:  {latest['snapshot_id']}")
+        gate = str(latest.get("gate") or GATE_UNRECORDED)
+        if latest.get("drift_evidence"):
+            gate = f"{gate} ({latest.get('drift_verdict')}; {latest['drift_evidence']})"
+        elif latest.get("sample"):
+            gate = f"{gate} (unverified epoch sample)"
+        print(f"  gate:      {gate}")
         _print_combined_run_status(runs_root)
     else:
         print(f"  runs:      none found under {args.runs}")

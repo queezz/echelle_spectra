@@ -58,16 +58,40 @@ identity kind that the candidate declares, and must find exactly one match.
 Missing identity, no match, and ambiguity are different errors; none falls back
 to a nearby or current calibration.
 
-Use the registry from a source checkout or portable kit:
+Use the registry from a source checkout or portable kit. A registry run is
+gated: sample the epoch, audit the sample, then process under that verdict.
 
 ```powershell
+# Sample: no verdict required, cubes marked drift_sample.
 echelle process D:\NIFS\shots `
   -o D:\NIFS\cubes `
   --registry D:\NIFS\calibration_registry.toml `
   --calibrations D:\NIFS\calibrations `
   --units wmsr `
-  --volume-label NIFS-A
+  --volume-label NIFS-A `
+  --sample 5
+
+echelle drift audit (Get-ChildItem "D:\NIFS\cubes\*.nc").FullName `
+  -o D:\NIFS\epoch-drift.json
+
+# Bulk: authorized by the sampled verdict.
+echelle process D:\NIFS\shots `
+  -o D:\NIFS\cubes `
+  --registry D:\NIFS\calibration_registry.toml `
+  --calibrations D:\NIFS\calibrations `
+  --units wmsr `
+  --volume-label NIFS-A `
+  --drift-verdict D:\NIFS\epoch-drift.json
 ```
+
+Every registry-backed form is gated, including a single-file run and a folder
+holding one file. A run using an explicit `--config` calibration instead of a
+registry stays legal and is recorded as `ungated (no registry)`. See
+[Durable campaign runs](campaign-runs.md) for the gate's receipt fields.
+
+If the audit's shift was accepted, the registry must name the refinement it
+produced. While an entry still points at the condemned base snapshot, the gate
+refuses and names the `-rN` id to repoint the `[validity]` entry at.
 
 `--registry` takes calibration authority. It cannot be combined with
 `--snapshot-id`, an explicitly configured `--camera`, `--calibration-dir`, or

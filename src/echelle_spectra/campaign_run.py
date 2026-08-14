@@ -21,6 +21,15 @@ RUN_SCHEMA = "echelle-run/v1"
 RECORD_SCHEMA = "echelle-run-record/v1"
 TERMINAL_STATUSES = {"exported", "skipped", "failed", "interrupted"}
 
+# How a run was authorized to touch a calibration epoch. The authorization keys
+# are optional additions to the v1 run schema: receipts written before the gate
+# existed stay readable and report GATE_UNRECORDED rather than borrowing an
+# authorization they never had.
+GATE_VERDICT = "verdict"
+GATE_SAMPLE = "sample"
+GATE_UNGATED = "ungated (no registry)"
+GATE_UNRECORDED = "unrecorded (pre-gate receipt)"
+
 
 def utc_now() -> str:
     """Return a stable UTC timestamp for machine-readable receipts."""
@@ -100,6 +109,12 @@ class RunReceipt:
     created_at: str = field(default_factory=utc_now)
     expected_files: int = 0
     state: str = "running"
+    gate: str = GATE_UNGATED
+    sample: bool = False
+    sample_files: int = 0
+    drift_evidence: str = ""
+    drift_evidence_sha256: str = ""
+    drift_verdict: str = ""
     _records: list[dict[str, Any]] = field(default_factory=list, repr=False)
 
     @property
@@ -155,6 +170,12 @@ class RunReceipt:
             created_at=run["created_at"],
             expected_files=int(run.get("expected_files", 0)),
             state=run.get("state", "unknown"),
+            gate=run.get("gate") or GATE_UNRECORDED,
+            sample=bool(run.get("sample", False)),
+            sample_files=int(run.get("sample_files", 0)),
+            drift_evidence=run.get("drift_evidence", ""),
+            drift_evidence_sha256=run.get("drift_evidence_sha256", ""),
+            drift_verdict=run.get("drift_verdict", ""),
         )
         receipt._records = list(read_records(receipt.records_path))
         return receipt
@@ -255,9 +276,43 @@ class RunReceipt:
             for status in sorted(TERMINAL_STATUSES)
         }
 
+    def record_authorization(
+        self,
+        *,
+        gate: str,
+        sample: bool = False,
+        sample_files: int = 0,
+        evidence_path: str = "",
+        evidence_sha256: str = "",
+        verdict: str = "",
+    ) -> None:
+        """Record how this run earned the right to process its calibration epoch."""
+        self.gate = gate
+        self.sample = sample
+        self.sample_files = sample_files
+        self.drift_evidence = evidence_path
+        self.drift_evidence_sha256 = evidence_sha256
+        self.drift_verdict = verdict
+        self.write_manifest()
+
     def finish(self, state: str) -> None:
         self.state = state
         self.write_manifest()
+
+    def _authorization_lines(self) -> list[str]:
+        lines = [
+            f"gate = {_toml_string(self.gate)}",
+            f"sample = {'true' if self.sample else 'false'}",
+        ]
+        if self.sample:
+            lines.append(f"sample_files = {self.sample_files}")
+        if self.drift_evidence:
+            lines.append(f"drift_evidence = {_toml_string(self.drift_evidence)}")
+            lines.append(
+                f"drift_evidence_sha256 = {_toml_string(self.drift_evidence_sha256)}"
+            )
+            lines.append(f"drift_verdict = {_toml_string(self.drift_verdict)}")
+        return lines
 
     def write_manifest(self) -> None:
         counts = self.counts()
@@ -275,6 +330,7 @@ class RunReceipt:
             f"volume_label = {_toml_string(self.volume_label)}",
             f"snapshot_id = {_toml_string(self.snapshot_id)}",
             f"expected_files = {self.expected_files}",
+            *self._authorization_lines(),
             "",
             "[counts]",
             *(
@@ -344,6 +400,10 @@ def list_run_summaries(runs_root: Path) -> list[dict[str, Any]]:
                 "counts": receipt.counts(),
                 "expected_files": receipt.expected_files,
                 "snapshot_id": receipt.snapshot_id,
+                "gate": receipt.gate,
+                "sample": receipt.sample,
+                "drift_evidence": receipt.drift_evidence,
+                "drift_verdict": receipt.drift_verdict,
                 "source_root": str(receipt.source_root),
                 "output_root": str(receipt.output_root),
                 "pattern": receipt.pattern,

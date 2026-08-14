@@ -71,9 +71,12 @@ paste-ready refinement command. Exact acknowledgement creates the next
 immutable `-rN` snapshot, adjusts only its copied wavelength table, records the
 base snapshot/evidence digest, and writes a separate accepted verdict.
 
-Registry-backed folder processing of more than one SIF now requires
-`--drift-verdict`. Aligned evidence is accepted; shifted evidence must have a
-recorded acceptance; insufficient or misaligned evidence is refused.
+Every registry-backed run — a folder of any size and the single-file path —
+requires either `--drift-verdict` or an explicit unverified `--sample N` first
+run. Aligned evidence authorizes the snapshots it audited; an accepted shifted
+verdict authorizes only the `-rN` refinement it created; insufficient or
+misaligned evidence is refused. See [Durable campaign runs](campaign-runs.md)
+for the gate and the authorization each receipt records.
 
 ## Reading room
 

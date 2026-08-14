@@ -297,11 +297,21 @@ def create_refinement_snapshot(
         **evidence,
         "accepted": True,
         "accepted_snapshot_id": snapshot.snapshot_id,
-        "snapshot_ids": sorted({*snapshot_ids, snapshot.snapshot_id}),
+        # Accepting a shift condemns the audited snapshot: only the refinement
+        # carries the corrected wavelength table, so only the refinement is
+        # authorized for bulk processing.
+        "snapshot_ids": [snapshot.snapshot_id],
+        "base_snapshot_ids": sorted(snapshot_ids),
         "base_evidence_sha256": sha256_file(evidence_file),
     }
     write_drift_evidence(accepted_path, accepted)
     return snapshot, accepted_path
+
+
+def _require_authorized_snapshots(selected: set[str], authorized: set[str]) -> None:
+    if not selected <= authorized:
+        missing = ", ".join(sorted(selected - authorized))
+        raise DriftError(f"drift evidence does not cover selected snapshot(s): {missing}")
 
 
 def require_sampled_verdict(path: str | Path, snapshot_ids: set[str]) -> dict[str, Any]:
@@ -310,14 +320,28 @@ def require_sampled_verdict(path: str | Path, snapshot_ids: set[str]) -> dict[st
     payload = json.loads(Path(path).read_text(encoding="utf-8"))
     if payload.get("schema") != DRIFT_SCHEMA:
         raise DriftError("unsupported drift evidence schema")
-    sampled_ids = set(map(str, payload.get("snapshot_ids", [])))
-    if not snapshot_ids <= sampled_ids:
-        missing = ", ".join(sorted(snapshot_ids - sampled_ids))
-        raise DriftError(f"drift evidence does not cover selected snapshot(s): {missing}")
     verdict = payload.get("verdict")
     if verdict == "aligned":
+        _require_authorized_snapshots(
+            snapshot_ids, set(map(str, payload.get("snapshot_ids", [])))
+        )
         return payload
     if verdict == "shifted" and payload.get("accepted"):
+        refined = str(payload.get("accepted_snapshot_id") or "")
+        recorded = set(map(str, payload.get("snapshot_ids", [])))
+        # Records written before the refinement narrowed its own authorization
+        # list both ids; everything that is not the refinement is superseded.
+        superseded = set(map(str, payload.get("base_snapshot_ids") or [])) or (
+            recorded - {refined}
+        )
+        condemned = sorted(snapshot_ids & superseded)
+        if condemned:
+            raise DriftError(
+                f"registry still selects {', '.join(condemned)}; the accepted correction "
+                f"produced {refined} — update the registry validity to point at the "
+                "refined snapshot"
+            )
+        _require_authorized_snapshots(snapshot_ids, {refined} if refined else set())
         return payload
     if verdict == "insufficient-data":
         raise DriftError("bulk processing refused: sampled verdict is insufficient-data")
