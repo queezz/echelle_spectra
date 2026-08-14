@@ -27,6 +27,7 @@ echelle-calib path/to/acquisition-folder \
   --previous-sphere-background path/to/previous-sphere-bg.sif \
   --lamp ThAr --lamp Ne \
   --snapshot-id 20260901_cmos \
+  --valid-from 2026-09-01 \
   --output-root path/to/calibrations \
   --config-root path/to/calibration-configs
 ```
@@ -166,6 +167,45 @@ snapshot and reports **VALIDATED** only after that validator succeeds. Lamp sign
 and background SIFs are both retained under `lamps/` with their explicit family.
 The bench does not build a competing manifest or duplicate validation rules.
 
+## The saved snapshot carries the measured calibration
+
+```text
+calibrations/20260901_cmos/
+├── snapshot.toml
+├── pattern.txt
+├── wavelength.txt   # base table moved by the solved transform
+├── alignment.toml   # transform, RMS, fitted-line count
+├── integral.txt
+├── sphere.sif
+├── sphere_bg.sif
+└── lamps/
+```
+
+The snapshot's `wavelength.txt` is not a copy of the base table. Before
+`create_snapshot()` runs, the bench applies the solved rigid transform to every
+curated row of the base table with the same `apply_rigid_correction_to_lines()`
+and `write_wavelength_table()` functions `echelle-align --save` uses, and hands
+that corrected table to the snapshot API. The written header names the base
+wavelength and pattern files, the alignment dataset, the lamp, signal,
+background, sphere and sphere-background filenames, the transform, the RMS, and
+the number of fitted lines.
+
+A transform that moves no row measurably would only reformat the table, so the
+base bytes are copied instead. The message panel and the procedure checklist say
+which of the two happened and how far the largest row moved, and the manifest's
+`[alignment]` table records `wavelength_correction_applied` alongside the solved
+`dx_px`, `dy_px`, and rotation.
+
+The snapshot folder also gains an `alignment.toml` in the established alignment
+settings shape, so `load_alignment_settings()` reads the transform back from the
+snapshot itself. The reviewable configuration bundle under `--config-root` keeps
+its own richer `alignment.toml`, which additionally lists every accepted anchor.
+
+Every saved snapshot carries a `[validity]` table so it is usable in a
+calibration epoch registry without hand editing. The epoch is open-ended and
+starts on the acquisition date; `--valid-from YYYY-MM-DD` states another start,
+and the default is today.
+
 A save failure preserves classifications, comparison, anchors, and generated
 TOMLs. Correct the identity or missing input and retry. The generated-TOML
 identity must match the snapshot identity, preventing a corrected save from
@@ -175,7 +215,11 @@ quietly using stale configuration.
 
 Automated coverage pins watcher, classification, checklist, exposure, shared-line,
 comparison, TOML, save, validation, failure, and recovery states without Qt;
-focused off-screen tests cover every Packet 5 view. The complete fixture rehearsal
+focused off-screen tests cover every Packet 5 view. Tests also pin that a
+nonzero transform changes the saved table's digest and reproduces the solved
+shift when the table is read back, that a transform moving nothing copies the
+base bytes, that the saved snapshot resolves through a calibration registry
+unedited, and that the snapshot's `alignment.toml` round-trips. The complete fixture rehearsal
 uses the accepted 2025 CMOS geometry/wavelength resources, packaged historical
 ThAr and sphere SIFs, and an explicitly named synthetic lamp-background
 placeholder because no 2025 lamp-background SIF is packaged.

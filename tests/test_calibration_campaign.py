@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import shutil
+from datetime import date
 from pathlib import Path
 
 import numpy as np
@@ -29,9 +30,14 @@ from echelle_spectra.calibration_campaign import (
     evaluate_exposure,
     suggest_file_roles,
 )
+from echelle_spectra.calibration_registry import (
+    CalibrationSourceIdentity,
+    load_calibration_registry,
+)
 from echelle_spectra.snapshot import SnapshotError, load_snapshot
 from echelle_spectra.tools.calibration_alignment import (
     CalibrationTableLine,
+    load_alignment_settings,
     load_wavelength_table,
 )
 
@@ -60,7 +66,7 @@ def _sources(tmp_path: Path) -> dict[str, Path]:
     return answer
 
 
-def _aligned_session(tmp_path: Path) -> CalibrationBenchSession:
+def _aligned_session(tmp_path: Path, shift_px: float = 1.0) -> CalibrationBenchSession:
     columns = 100
     pattern = np.column_stack(
         [np.full(columns, 12, dtype=float), np.full(columns, 30, dtype=float)]
@@ -71,8 +77,8 @@ def _aligned_session(tmp_path: Path) -> CalibrationBenchSession:
     )
     x = np.arange(columns, dtype=float)
     spectra = (
-        20 + 800 * np.exp(-0.5 * ((x - 26) / 1.5) ** 2),
-        20 + 700 * np.exp(-0.5 * ((x - 56) / 1.5) ** 2),
+        20 + 800 * np.exp(-0.5 * ((x - 25 - shift_px) / 1.5) ** 2),
+        20 + 700 * np.exp(-0.5 * ((x - 55 - shift_px) / 1.5) ** 2),
     )
     images = np.zeros((1, 44, columns), dtype=float)
     images[0, 12, :] = spectra[0]
@@ -87,9 +93,49 @@ def _aligned_session(tmp_path: Path) -> CalibrationBenchSession:
             {"ExposureTime": 0.1},
         )
     )
-    assert session.fit_anchor_at(0, 26).accepted
-    assert session.fit_anchor_at(1, 56).accepted
+    assert session.fit_anchor_at(0, 25 + shift_px).accepted
+    assert session.fit_anchor_at(1, 55 + shift_px).accepted
     return session
+
+
+_CURATED_TABLE = """\
+# Curated fixture wavelength lookup table
+# order from to center wavelength band
+0\t0020.000\t0030.000\t00025.0000\t00600.00000\tThI  # ok
+0\t0065.000\t0075.000\t00070.0000\t00604.50000\tArI  # ok
+1\t0050.000\t0060.000\t00055.0000\t00610.00000\tArI  # ok
+1\t0080.000\t0090.000\t00085.0000\t00614.25000\tThI  # ?
+"""
+
+
+def _curated_sources(tmp_path: Path) -> dict[str, Path]:
+    """Give the shared fixture a wavelength table that really has rows."""
+
+    sources = _sources(tmp_path)
+    sources["wavelength.txt"].write_text(_CURATED_TABLE, encoding="utf-8")
+    return sources
+
+
+def _saved_snapshot(
+    tmp_path: Path,
+    sources: dict[str, Path],
+    alignment: CalibrationBenchSession,
+    *,
+    snapshot_id: str = "20250813_cmos",
+    validity=None,
+):
+    campaign = _campaign(tmp_path, sources)
+    _classify_complete(campaign, sources, alignment.frame)
+    campaign.compute_sphere_comparison(_calculator)
+    campaign.write_tomls(tmp_path / "configs", snapshot_id, alignment)
+    snapshot = campaign.save_snapshot(
+        tmp_path / "calibrations",
+        snapshot_id=snapshot_id,
+        detector="cmos",
+        alignment=alignment,
+        validity=validity,
+    )
+    return campaign, snapshot
 
 
 def _campaign(tmp_path: Path, sources: dict[str, Path]) -> CalibrationCampaignSession:
@@ -340,6 +386,115 @@ def test_snapshot_identity_must_match_generated_tomls(tmp_path):
             detector="cmos",
             alignment=alignment,
         )
+
+
+def test_saved_wavelength_table_is_the_measured_one_not_the_base(tmp_path):
+    sources = _curated_sources(tmp_path)
+    alignment = _aligned_session(tmp_path, shift_px=1.0)
+    base = sources["wavelength.txt"]
+    base_digest = hashlib.sha256(base.read_bytes()).hexdigest()
+
+    campaign, snapshot = _saved_snapshot(tmp_path, sources, alignment)
+
+    saved = snapshot.root / "wavelength.txt"
+    assert hashlib.sha256(saved.read_bytes()).hexdigest() != base_digest
+    dx_px = alignment.transform.dx_px
+    assert dx_px == pytest.approx(1.0, abs=0.02)
+    base_rows = load_wavelength_table(base)
+    saved_rows = load_wavelength_table(saved)
+    assert len(saved_rows) == len(base_rows) == 4
+    for original, moved in zip(base_rows, saved_rows):
+        assert moved.center_pixel == pytest.approx(original.center_pixel + dx_px, abs=5e-4)
+        assert moved.pixel_from == pytest.approx(original.pixel_from + dx_px, abs=5e-4)
+        assert moved.wavelength_nm == original.wavelength_nm
+        assert moved.species == original.species
+    header = saved.read_text(encoding="utf-8")
+    assert "Base wavelength file: wavelength.txt" in header
+    assert "Base pattern file: pattern.txt" in header
+    assert "Alignment dataset: 20250813_cmos" in header
+    assert "rigid detector transform" in header
+    assert "Fitted lines: 2" in header
+    assert campaign.wavelength_correction.applied
+    assert snapshot.manifest["alignment"]["wavelength_correction_applied"] is True
+    assert hashlib.sha256(base.read_bytes()).hexdigest() == base_digest
+
+
+def test_transform_that_moves_nothing_copies_the_base_table_byte_for_byte(tmp_path):
+    sources = _curated_sources(tmp_path)
+    alignment = _aligned_session(tmp_path, shift_px=0.0)
+    base = sources["wavelength.txt"]
+
+    campaign, snapshot = _saved_snapshot(tmp_path, sources, alignment)
+
+    saved = snapshot.root / "wavelength.txt"
+    assert saved.read_bytes() == base.read_bytes()
+    assert not campaign.wavelength_correction.applied
+    assert "no line" in campaign.wavelength_correction.reason
+    assert snapshot.manifest["alignment"]["wavelength_correction_applied"] is False
+    detail = {item.key: item for item in campaign.checklist(alignment)}["snapshot"].detail
+    assert "copied unchanged" in detail
+
+
+def test_bench_snapshot_is_registrable_without_hand_editing(tmp_path):
+    sources = _curated_sources(tmp_path)
+    alignment = _aligned_session(tmp_path)
+
+    _campaign_session, snapshot = _saved_snapshot(tmp_path, sources, alignment)
+
+    assert snapshot.manifest["validity"] == {"date_from": "2025-08-13"}
+    assert load_snapshot(snapshot.root).snapshot_id == "20250813_cmos"
+    registry_path = tmp_path / "calibration-registry.toml"
+    registry_path.write_text(
+        'schema = "echelle-calibration-registry/v1"\n'
+        "\n[[epochs]]\n"
+        'snapshot_id = "20250813_cmos"\n',
+        encoding="utf-8",
+    )
+    registry = load_calibration_registry(
+        registry_path, snapshots_root=tmp_path / "calibrations"
+    )
+    epoch = registry.resolve(
+        CalibrationSourceIdentity(Path("20250901_lamp.sif"), acquisition_date=date(2025, 9, 1))
+    )
+    assert epoch.snapshot_id == "20250813_cmos"
+    assert epoch.date_from == date(2025, 8, 13)
+    assert epoch.date_to is None
+
+
+def test_snapshot_folder_carries_round_tripping_alignment_settings(tmp_path):
+    sources = _curated_sources(tmp_path)
+    alignment = _aligned_session(tmp_path)
+
+    _campaign_session, snapshot = _saved_snapshot(tmp_path, sources, alignment)
+
+    settings_path = snapshot.root / "alignment.toml"
+    assert settings_path.is_file()
+    settings = load_alignment_settings(settings_path)
+    assert settings.instrument_id == "cmos"
+    assert settings.base_wavelength_file == "wavelength.txt"
+    assert settings.base_pattern_file == "pattern.txt"
+    assert settings.alignment_dataset_id == "20250813_cmos"
+    assert settings.alignment_lamp == "ThAr"
+    assert settings.signal_file == "thar.sif"
+    assert settings.background_file == "thar_bg.sif"
+    assert settings.output_wavelength_file == "wavelength.txt"
+    assert settings.n_lines == 2
+    assert settings.transform.dx_px == pytest.approx(alignment.transform.dx_px)
+    assert settings.transform.dy_px == pytest.approx(alignment.transform.dy_px)
+    assert settings.transform.theta_rad == pytest.approx(alignment.transform.theta_rad)
+    assert settings.rms_px == pytest.approx(alignment.rms_px)
+
+
+def test_explicit_epoch_start_overrides_the_snapshot_identity_date(tmp_path):
+    sources = _curated_sources(tmp_path)
+    alignment = _aligned_session(tmp_path)
+
+    _campaign_session, snapshot = _saved_snapshot(
+        tmp_path, sources, alignment, validity={"date_from": "2025-08-01"}
+    )
+
+    assert snapshot.manifest["validity"] == {"date_from": "2025-08-01"}
+    assert "2025-08-01" in (snapshot.root / "wavelength.txt").read_text(encoding="utf-8")
 
 
 def test_packaged_2025_watch_to_validated_snapshot_rehearsal(tmp_path):

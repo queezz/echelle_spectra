@@ -14,6 +14,7 @@ import shutil
 import tempfile
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
+from datetime import date
 from enum import Enum
 from pathlib import Path
 
@@ -26,10 +27,19 @@ except ModuleNotFoundError:  # pragma: no cover - Python 3.9/3.10
 
 from .calibration_bench import AlignmentState, BenchFrame, CalibrationBenchSession
 from .snapshot import Snapshot, SnapshotError, create_snapshot, load_snapshot
-from .tools.calibration_alignment import CalibrationTableLine
+from .tools.calibration_alignment import (
+    AlignmentSettings,
+    CalibrationTableLine,
+    RigidTransform,
+    apply_rigid_correction_to_lines,
+    load_wavelength_table,
+    save_alignment_settings,
+    write_wavelength_table,
+)
 from .tools.line_catalog import SpectralLine, load_line_table
 
 __all__ = [
+    "ALIGNMENT_SETTINGS_FILENAME",
     "AbsoluteCalibrationResult",
     "CalibrationCampaignSession",
     "CatalogOrderLine",
@@ -43,11 +53,19 @@ __all__ = [
     "MeasurementRole",
     "SaveState",
     "TomlState",
+    "WavelengthCorrection",
     "catalog_lines_for_order",
     "compute_absolute_calibration",
+    "default_validity",
     "evaluate_exposure",
     "suggest_file_roles",
+    "write_corrected_wavelength_table",
 ]
+
+ALIGNMENT_SETTINGS_FILENAME = "alignment.toml"
+
+# Below this the correction would only reformat the table, never move a row.
+IDENTITY_SHIFT_PX = 1e-6
 
 
 class MeasurementRole(Enum):
@@ -170,6 +188,16 @@ class ChecklistItem:
     label: str
     state: ChecklistState
     detail: str
+
+
+@dataclass(frozen=True)
+class WavelengthCorrection:
+    """What the saved ``wavelength.txt`` is, and why it is that."""
+
+    applied: bool
+    reason: str
+    max_shift_px: float
+    line_count: int
 
 
 @dataclass(frozen=True)
@@ -385,6 +413,82 @@ def compute_absolute_calibration(
     )
 
 
+def write_corrected_wavelength_table(
+    base_wavelength: str | Path,
+    destination: str | Path,
+    *,
+    pattern: np.ndarray,
+    transform: RigidTransform,
+    metadata: Sequence[tuple[str, str]] = (),
+    identity_shift_px: float = IDENTITY_SHIFT_PX,
+) -> WavelengthCorrection:
+    """Write the base lookup table moved by *transform*, or copy it unchanged.
+
+    A transform that moves no curated row would only reformat the base table,
+    so its bytes are copied instead and the returned reason states which of the
+    two outcomes the caller got.
+    """
+
+    source = Path(base_wavelength)
+    target = Path(destination)
+    rows = load_wavelength_table(source)
+    if not rows:
+        shutil.copy2(source, target)
+        return WavelengthCorrection(
+            False,
+            f"{source.name} holds no correctable rows, so its bytes were copied unchanged",
+            0.0,
+            0,
+        )
+    adjusted = apply_rigid_correction_to_lines(rows, pattern, transform)
+    max_shift_px = max(
+        abs(new.center_pixel - old.center_pixel) for old, new in zip(rows, adjusted)
+    )
+    if max_shift_px <= float(identity_shift_px):
+        shutil.copy2(source, target)
+        return WavelengthCorrection(
+            False,
+            f"the solved transform moves no line of {source.name} measurably "
+            f"({max_shift_px:.3g} px), so its bytes were copied unchanged",
+            float(max_shift_px),
+            len(rows),
+        )
+    write_wavelength_table(adjusted, target, metadata=metadata)
+    return WavelengthCorrection(
+        True,
+        f"{len(rows)} rows of {source.name} were moved by the solved transform "
+        f"(largest shift {max_shift_px:.3f} px)",
+        float(max_shift_px),
+        len(rows),
+    )
+
+
+def default_validity(
+    snapshot_id: str, valid_from: date | str | None = None
+) -> dict[str, str]:
+    """Return an open-ended epoch that starts on the acquisition date."""
+
+    if valid_from is None:
+        digits = str(snapshot_id).strip()[:8]
+        try:
+            start = date(int(digits[:4]), int(digits[4:6]), int(digits[6:8]))
+        except ValueError as exc:
+            raise SnapshotError(
+                f"no acquisition date can be read from snapshot id {snapshot_id!r}; "
+                "state the epoch start explicitly"
+            ) from exc
+    elif isinstance(valid_from, date):
+        start = valid_from
+    else:
+        try:
+            start = date.fromisoformat(str(valid_from))
+        except ValueError as exc:
+            raise SnapshotError(
+                f"epoch start must be an ISO YYYY-MM-DD date: {valid_from!r}"
+            ) from exc
+    return {"date_from": start.isoformat()}
+
+
 def _toml_string(value: object) -> str:
     return json.dumps(str(value), ensure_ascii=False)
 
@@ -422,6 +526,7 @@ class CalibrationCampaignSession:
         self.toml_snapshot_id = ""
         self.save_state = SaveState.NOT_READY
         self.saved_snapshot: Snapshot | None = None
+        self.wavelength_correction: WavelengthCorrection | None = None
         self.last_error = ""
 
     def observe_file(self, path: str | Path) -> FileRoleSuggestion:
@@ -509,6 +614,7 @@ class CalibrationCampaignSession:
         self.toml_snapshot_id = ""
         self.save_state = SaveState.NOT_READY
         self.saved_snapshot = None
+        self.wavelength_correction = None
         self.last_error = ""
 
     def _records(self, role: MeasurementRole, family: str = "") -> tuple[MeasurementRecord, ...]:
@@ -714,12 +820,17 @@ class CalibrationCampaignSession:
                     if self.save_state is SaveState.FAILED
                     else ChecklistState.WAITING
                 ),
-                self.saved_snapshot.snapshot_id
-                if self.saved_snapshot is not None
-                else (self.last_error or "save only after every prerequisite is explicit"),
+                self._saved_snapshot_detail(),
             )
         )
         return tuple(items)
+
+    def _saved_snapshot_detail(self) -> str:
+        if self.saved_snapshot is None:
+            return self.last_error or "save only after every prerequisite is explicit"
+        if self.wavelength_correction is None:
+            return self.saved_snapshot.snapshot_id
+        return f"{self.saved_snapshot.snapshot_id} — {self.wavelength_correction.reason}"
 
     def _measurement_pairs_ready(self) -> bool:
         if self._one(MeasurementRole.SPHERE) is None:
@@ -926,6 +1037,72 @@ class CalibrationCampaignSession:
             and self.toml_snapshot_id == snapshot_id
         )
 
+    def alignment_settings(
+        self,
+        snapshot_id: str,
+        detector: str,
+        alignment: CalibrationBenchSession,
+        *,
+        notes: str = "",
+        created_at: str = "",
+    ) -> AlignmentSettings:
+        """Summarise the solved alignment in the established settings shape."""
+
+        if alignment.transform is None:
+            raise SnapshotError("no rigid transform has been solved yet")
+        sphere = self._one(MeasurementRole.SPHERE)
+        sphere_background = self._one(MeasurementRole.SPHERE_BACKGROUND)
+        lamp = self._records(MeasurementRole.LAMP, self.required_lamps[0])
+        lamp_background = self._records(
+            MeasurementRole.LAMP_BACKGROUND, self.required_lamps[0]
+        )
+        return AlignmentSettings(
+            instrument_id=str(detector).strip().lower(),
+            base_wavelength_file=self.wavelength_source.name,
+            base_pattern_file=self.pattern_source.name,
+            transform=alignment.transform,
+            n_lines=len(alignment.anchors),
+            rms_px=float(alignment.rms_px or 0.0),
+            created_at=created_at,
+            alignment_dataset_id=snapshot_id,
+            alignment_source_dir=lamp[-1].path.parent.name if lamp else "",
+            alignment_lamp=", ".join(self.required_lamps),
+            signal_file=lamp[-1].path.name if lamp else "",
+            background_file=lamp_background[-1].path.name if lamp_background else "",
+            sphere_file=sphere.path.name if sphere is not None else "",
+            sphere_background_file=(
+                sphere_background.path.name if sphere_background is not None else ""
+            ),
+            output_wavelength_file="wavelength.txt",
+            notes=notes or "Rigid detector correction solved on the live calibration bench.",
+        )
+
+    @staticmethod
+    def _table_provenance(settings: AlignmentSettings) -> list[tuple[str, str]]:
+        transform = settings.transform
+        return [
+            ("Generated", settings.created_at),
+            ("Base wavelength file", settings.base_wavelength_file),
+            ("Base pattern file", settings.base_pattern_file),
+            ("Alignment dataset", settings.alignment_dataset_id),
+            ("Alignment source dir", settings.alignment_source_dir),
+            ("Lamp", settings.alignment_lamp),
+            ("Signal", settings.signal_file),
+            ("Background", settings.background_file),
+            ("Sphere", settings.sphere_file),
+            ("Sphere background", settings.sphere_background_file),
+            ("Correction model", "rigid detector transform, dx/dy/theta"),
+            (
+                "Transform",
+                f"dx {transform.dx_px:+.4f} px, dy {transform.dy_px:+.4f} px, "
+                f"theta {transform.theta_deg:+.5f} deg",
+            ),
+            ("RMS", f"{settings.rms_px:.4f} px"),
+            ("Fitted lines", str(settings.n_lines)),
+            ("Settings file", ALIGNMENT_SETTINGS_FILENAME),
+            ("Note", settings.notes),
+        ]
+
     def save_snapshot(
         self,
         destination_root: str | Path,
@@ -937,7 +1114,12 @@ class CalibrationCampaignSession:
         base_snapshot: str | None = None,
         validity: Mapping[str, object] | None = None,
     ) -> Snapshot:
-        """Create through Packet 0's API, then validate through its validator."""
+        """Create through Packet 0's API, then validate through its validator.
+
+        The saved ``wavelength.txt`` is the base table with the solved rigid
+        transform applied, so the snapshot carries the calibration the bench
+        actually measured rather than the table it started from.
+        """
 
         self._update_save_state(alignment)
         if not self.ready_for_snapshot(snapshot_id, alignment):
@@ -957,14 +1139,31 @@ class CalibrationCampaignSession:
             if record.role in {MeasurementRole.LAMP, MeasurementRole.LAMP_BACKGROUND}
         ]
         self.save_state = SaveState.SAVING
+        staging = Path(tempfile.mkdtemp(prefix=f".{snapshot_id}.wavelength-"))
         try:
+            epoch = dict(validity) if validity else default_validity(snapshot_id)
+            settings = self.alignment_settings(
+                snapshot_id,
+                detector,
+                alignment,
+                notes=notes,
+                created_at=str(epoch.get("date_from", "")),
+            )
+            corrected = staging / self.wavelength_source.name
+            correction = write_corrected_wavelength_table(
+                self.wavelength_source,
+                corrected,
+                pattern=alignment.pattern,
+                transform=alignment.transform,
+                metadata=self._table_provenance(settings),
+            )
             snapshot = create_snapshot(
                 destination_root,
                 snapshot_id=snapshot_id,
                 detector=detector,
                 files={
                     "pattern": self.pattern_source,
-                    "wavelength": self.wavelength_source,
+                    "wavelength": corrected,
                     "sphere": sphere.path,
                     "sphere_background": sphere_background.path,
                     "integral": self.integral_source,
@@ -973,12 +1172,14 @@ class CalibrationCampaignSession:
                 lamp_files=lamp_files,
                 notes=notes,
                 base_snapshot=base_snapshot,
-                validity=validity,
+                validity=epoch,
                 alignment={
                     "dx_px": alignment.transform.dx_px,
                     "dy_px": alignment.transform.dy_px,
                     "rotation_deg": alignment.transform.theta_deg,
                     "rms_px": alignment.rms_px,
+                    "wavelength_correction_applied": correction.applied,
+                    "wavelength_max_shift_px": correction.max_shift_px,
                 },
                 qc={
                     "lines_used": len(alignment.anchors),
@@ -988,12 +1189,16 @@ class CalibrationCampaignSession:
                     "sphere_comparison": self.comparison.state.value,
                 },
             )
+            save_alignment_settings(settings, snapshot.root / ALIGNMENT_SETTINGS_FILENAME)
             validated = load_snapshot(snapshot.root)
         except Exception as exc:
             self.save_state = SaveState.FAILED
             self.last_error = str(exc)
             raise
+        finally:
+            shutil.rmtree(staging, ignore_errors=True)
         self.saved_snapshot = validated
+        self.wavelength_correction = correction
         self.save_state = SaveState.VALIDATED
         self.last_error = ""
         return validated

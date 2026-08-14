@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from datetime import date
 from pathlib import Path
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -150,6 +151,10 @@ def test_cli_defaults_to_packaged_2025_calibration():
     assert args.minimum_age_s == 1.0
     assert args.integral.name == "integrating_sphere.txt"
     assert args.lamp is None
+    assert args.valid_from == date.today()
+    assert _build_parser().parse_args(["--valid-from", "2026-09-01"]).valid_from == date(
+        2026, 9, 1
+    )
 
 
 def test_packet5_views_show_campaign_memory_and_shared_line_help(qt_app, tmp_path):

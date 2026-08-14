@@ -28,6 +28,7 @@ from .calibration_campaign import (
     MeasurementRole,
     TomlState,
     catalog_lines_for_order,
+    default_validity,
 )
 from .snapshot import SnapshotError
 from .tools.calibration_alignment import load_wavelength_table
@@ -97,6 +98,7 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         snapshot_id: str = "",
         detector: str = "cmos",
         base_snapshot: str = "",
+        valid_from: date | None = None,
         poll_interval_ms: int = 1000,
         start_timer: bool = True,
     ) -> None:
@@ -110,6 +112,7 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         self.initial_snapshot_id = snapshot_id
         self.initial_detector = detector
         self.initial_base_snapshot = base_snapshot
+        self.valid_from = valid_from
         self._load_thread: FrameLoadThread | None = None
         self._campaign_thread: CampaignTaskThread | None = None
         self._pattern_items: list[pg.PlotDataItem] = []
@@ -530,8 +533,10 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
                 "Candidate factors computed; previous comparison is insufficient data."
             )
         elif hasattr(result, "snapshot_id"):
+            correction = getattr(self.campaign, "wavelength_correction", None)
+            detail = "" if correction is None else f" Saved wavelength.txt: {correction.reason}."
             self.message_value.setText(
-                f"Snapshot {result.snapshot_id} saved and validated through Packet 0."
+                f"Snapshot {result.snapshot_id} saved and validated through Packet 0.{detail}"
             )
         self.refresh()
 
@@ -582,6 +587,7 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
                 alignment=self.session,
                 notes=notes,
                 base_snapshot=base_snapshot,
+                validity=default_validity(snapshot_id, self.valid_from),
             )
         )
 
@@ -1046,6 +1052,15 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--detector", default="cmos")
     parser.add_argument("--base-snapshot", default="20250926_cmos")
     parser.add_argument(
+        "--valid-from",
+        type=date.fromisoformat,
+        default=date.today(),
+        help=(
+            "ISO date the saved snapshot's open-ended calibration epoch starts "
+            "(default: today)"
+        ),
+    )
+    parser.add_argument(
         "--output-root",
         type=Path,
         default=Path.cwd() / "calibrations",
@@ -1116,6 +1131,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         snapshot_id=args.snapshot_id,
         detector=args.detector,
         base_snapshot=args.base_snapshot,
+        valid_from=args.valid_from,
         poll_interval_ms=args.poll_ms,
     )
     window.show()
