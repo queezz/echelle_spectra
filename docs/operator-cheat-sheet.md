@@ -1,6 +1,6 @@
 # Echelle operator cheat sheet
 
-This is the short manual for the installed surfaces in Echelle Spectra 1.5.
+This is the short manual for the installed surfaces in Echelle Spectra 1.6.
 It separates the portable NIFS kit from a source checkout because their command
 prefixes are different. The portable kit does **not** add commands to the
 machine-wide `PATH`.
@@ -10,9 +10,8 @@ an Echelle dependency and is not required on an institute workstation. For the
 trip, use the portable-kit section below. Administrator access may be available
 there, but the kit does not need to use it or change the machine-wide Python.
 
-The portable 1.5 kit is still a release candidate until its native macOS gates
-pass. The commands below describe the candidate being validated; they do not
-claim that an older tagged installation already contains these surfaces.
+The portable 1.6 kit is the current released travel kit. Verify the installed
+version before a campaign and keep campaign data outside the replaceable kit.
 
 ## First identify how Echelle is installed
 
@@ -140,6 +139,7 @@ $Data = "D:\NIFS"
 # 1. Confirm the installation and current evidence.
 .\echelle.ps1 status `
   --calibrations "$Data\calibrations" `
+  --registry "$Data\calibration_registry.toml" `
   --runs "$Data\runs"
 
 # 2. Watch the acquisition folder in the live bench.
@@ -154,7 +154,8 @@ $Data = "D:\NIFS"
 .\echelle.ps1 process "$Data\shots" `
   -o "$Data\cubes" `
   --runs-dir "$Data\runs" `
-  --snapshot-id 20260814_cmos `
+  --registry "$Data\calibration_registry.toml" `
+  --calibrations "$Data\calibrations" `
   --volume-label NIFS-A `
   --dry-run
 
@@ -169,6 +170,7 @@ data="/Volumes/NIFS"
 # 1. Confirm the installation and current evidence.
 ./echelle status \
   --calibrations "$data/calibrations" \
+  --registry "$data/calibration_registry.toml" \
   --runs "$data/runs"
 
 # 2. Watch the acquisition folder in the live bench.
@@ -183,15 +185,17 @@ data="/Volumes/NIFS"
 ./echelle process "$data/shots" \
   -o "$data/cubes" \
   --runs-dir "$data/runs" \
-  --snapshot-id 20260814_cmos \
+  --registry "$data/calibration_registry.toml" \
+  --calibrations "$data/calibrations" \
   --volume-label NIFS-A \
   --dry-run
 
 # 5. Run for real by repeating the command without --dry-run.
 ```
 
-Replace the example snapshot ID with the identity actually shown by the bench.
-Use one `--volume-label` for each input folder when processing several drives.
+Put every accepted snapshot ID into the ordered registry and verify its
+inclusive bounds with `echelle status` before processing. Use one
+`--volume-label` for each input folder when processing several drives.
 
 ## Safe inspection versus writing
 
@@ -245,8 +249,9 @@ Always quote paths containing spaces.
 
 That is an honest empty state, not an installation failure. Supply explicit
 `--calibrations`, `--registry`, and `--runs` paths when the campaign evidence
-is not below the current working directory. Status exits nonzero only when it
-finds an invalid snapshot.
+is not below the current working directory. Status exits nonzero when it finds
+an invalid snapshot or a registry whose referenced snapshots, bounds, or
+digests do not validate.
 
 ### Processing finds no files
 

@@ -5,6 +5,39 @@ follows the Fleet convention from 0.3.0 onward: a substantial capability earns
 a minor release, a compatible correction earns a patch, and documentation,
 tests, or internal refactoring alone do not move the number.
 
+## 1.6.0 — 2026-08-14
+
+**Every registry-backed export now resolves one reviewed immutable calibration
+snapshot.** The ordered registry points only to snapshot IDs; the snapshots'
+existing validity tables remain the single authority for inclusive shot/date
+boundaries. Selection is deterministic, requires all declared identity
+dimensions, validates every referenced artifact and digest before processing,
+and refuses overlaps, ambiguity, missing identity, no-match sources, or any
+fallback to another calibration. Batch receipts record the snapshot selected
+for each source and will not resume against a changed epoch decision.
+
+**Flagship SpectroCubes retain the complete recalibration state defined by
+SpectroCube 0.2.0.** Raw zero-origin detector columns and integer echelle-order
+IDs remain aligned with intensity through partial-order handling, dispersion
+reversal, finite masking, crop, and the final stable wavelength sort. The
+writer serializes the existing per-order `numpy.polyfit` coefficients in
+descending-power order and verifies that they reconstruct every retained
+wavelength sample within `5e-10 nm`.
+
+**Absolute cubes state and prove the applied counts-per-second factor.** The
+wavelength-aligned factor records `source_units = "counts/s"`, output-mapping
+units, and the exact neutral application equation. Export numerically verifies
+that count rate multiplied by the factor reproduces stored absolute intensity.
+The selected snapshot ID, exact manifest digest and JSON, every calibration
+artifact digest, registry digest and ordered position, plus the established
+extraction geometry and crop provenance survive NetCDF save/load validation.
+
+**The portable dependency contract now carries SpectroCube 0.2.0.** The public
+extra, immutable Git source, uv lock, companion-wheel expectations, manifests,
+installers, documentation, and installed-package gates agree on the remotely
+reachable neutral contract while retaining the established Python 3.12.13
+travel runtime.
+
 ## 1.5.0 — 2026-08-13
 
 **The calibration campaign can travel as a pinned, self-contained kit.** One

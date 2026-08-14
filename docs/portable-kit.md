@@ -14,13 +14,10 @@ explicit external destination.
 
 ## Release evidence boundary
 
-The tooling can validate payload completeness, platform identity, checksums,
+The tooling validates payload completeness, platform identity, checksums,
 offline resolvability, and byte-identical distribution output without changing
-the product interfaces. Packet 6 is nevertheless a field-gated release: local
-fixtures and cross-platform wheel downloads cannot substitute for execution on
-a clean Windows machine and a clean Mac, and an ordinary cached install cannot
-substitute for a network-disabled offline rehearsal.
-
-The current source targets a 1.5.0 release candidate while the internal seam is
-exercised. Version 1.5.0 is shipped only when all native-platform and offline
-gates have durable evidence.
+the product interfaces. The current 1.6.0 kit preserves the field-gated release
+contract established on clean Windows and native macOS machines, including
+network-disabled offline
+rehearsals. Future kit releases must repeat those gates; local fixtures and
+cross-platform wheel downloads are not substitutes.

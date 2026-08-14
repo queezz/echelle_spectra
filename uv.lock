@@ -522,7 +522,7 @@ wheels = [
 
 [[package]]
 name = "echelle-spectra"
-version = "1.5.0"
+version = "1.6.0"
 source = { editable = "." }
 dependencies = [
     { name = "lmfit" },
@@ -599,7 +599,7 @@ requires-dist = [
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.5.0" },
     { name = "scipy", specifier = ">=1.8.1" },
     { name = "sif-parser", specifier = ">=0.3.0" },
-    { name = "spectrocube", marker = "extra == 'spectrocube'", git = "https://github.com/queezz/spectrocube.git?rev=c46b0c4621ec8d56d7d7209d122b571fb109405e" },
+    { name = "spectrocube", marker = "extra == 'spectrocube'", git = "https://github.com/queezz/spectrocube.git?rev=0b02ac96e386c7121ca2c30f6d36a76518e4e83a" },
     { name = "tomli", marker = "python_full_version < '3.11'", specifier = ">=2.0.1" },
     { name = "twine", marker = "extra == 'dev'" },
 ]
@@ -2586,8 +2586,8 @@ wheels = [
 
 [[package]]
 name = "spectrocube"
-version = "0.1.0"
-source = { git = "https://github.com/queezz/spectrocube.git?rev=c46b0c4621ec8d56d7d7209d122b571fb109405e#c46b0c4621ec8d56d7d7209d122b571fb109405e" }
+version = "0.2.0"
+source = { git = "https://github.com/queezz/spectrocube.git?rev=0b02ac96e386c7121ca2c30f6d36a76518e4e83a#0b02ac96e386c7121ca2c30f6d36a76518e4e83a" }
 dependencies = [
     { name = "netcdf4" },
     { name = "numpy" },

@@ -114,8 +114,9 @@ Real dataset run with CLI path overrides:
 ```
 
 The batch terminal output starts with the source and destination, then reports
-the receipt location and live count/rate/ETA. Add `--snapshot-id` and
-`--volume-label` so every source record carries the campaign provenance:
+the receipt location and live count/rate/ETA. Add `--registry`,
+`--calibrations`, and `--volume-label` so every source resolves one verified
+snapshot and every record carries that identity:
 
 ```text
 SpectroCube batch
@@ -146,13 +147,20 @@ echelle process D:\2024\shots E:\2025\shots `
   --runs-dir F:\runs `
   --volume-label NIFS-2024 `
   --volume-label NIFS-2025 `
-  --config local\campaign-export.toml
+  --config local\campaign-export.toml `
+  --registry F:\calibration\calibration_registry.toml `
+  --calibrations F:\calibration\calibrations
 ```
 
 The output root receives one child directory per source. Processing is
 sequential within each source and concurrent across sources; receipts and
 failures remain independent, while `echelle status --runs F:\runs` reconciles
 the latest state of both targets.
+
+The registry's ordered snapshot IDs point to the immutable snapshot
+`[validity]` tables that define inclusive shot/date bounds. See
+[Calibration epoch registry and cube provenance](calibration-epoch-registry.md)
+for boundary, precedence, optional-field, and recovery details.
 
 To preview a config-driven batch without a plan:
 

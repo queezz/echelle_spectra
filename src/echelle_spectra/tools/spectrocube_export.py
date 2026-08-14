@@ -28,6 +28,8 @@ import numpy as np
 if TYPE_CHECKING:
     from spectrocube import SpectroCube
 
+    from echelle_spectra.snapshot import Snapshot
+
 __all__ = ["to_spectrocube", "export_spectrocube"]
 
 # ---------------------------------------------------------------------------
@@ -211,6 +213,50 @@ def _normalize_wavelength_axis(
     )
 
 
+def _wavelength_permutation(wavelength: np.ndarray, intensity_2d: np.ndarray) -> np.ndarray:
+    """Return the one permutation used by every wavelength-aligned field."""
+
+    marker = np.arange(wavelength.size, dtype=np.int64)[np.newaxis, :]
+    normalized, reordered = _normalize_wavelength_axis(wavelength, marker)
+    if normalized.size != wavelength.size or reordered.shape != marker.shape:
+        raise ValueError("internal wavelength permutation changed the aligned shape")
+    # Exercise the same shape checks against the actual intensity before the
+    # returned index is applied to all representations.
+    if intensity_2d.shape[-1] != wavelength.size:
+        raise ValueError(
+            f"intensity last axis ({intensity_2d.shape[-1]}) does not match "
+            f"wavelength size ({wavelength.size})"
+        )
+    return reordered[0].astype(np.int64, copy=False)
+
+
+def _apply_aligned_selection(
+    wavelength: np.ndarray,
+    intensity_2d: np.ndarray,
+    aligned: dict[str, np.ndarray],
+    selection: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray, dict[str, np.ndarray]]:
+    """Apply one permutation or mask to every wavelength-aligned array."""
+
+    return (
+        wavelength[selection],
+        intensity_2d[..., selection],
+        {name: values[selection] for name, values in aligned.items()},
+    )
+
+
+def _validate_aligned_shapes(
+    wavelength: np.ndarray,
+    aligned: dict[str, np.ndarray],
+) -> None:
+    for name, values in aligned.items():
+        if values.ndim != 1 or values.size != wavelength.size:
+            raise ValueError(
+                f"{name} must be one-dimensional and aligned to wavelength; "
+                f"got shape {values.shape} for {wavelength.size} wavelength samples"
+            )
+
+
 def _drop_nonfinite_columns(
     wavelength: np.ndarray,
     intensity_2d: np.ndarray,
@@ -259,6 +305,7 @@ def _crop_wavelength_axis(
 def to_spectrocube(
     spectrum,
     *,
+    snapshot: "Snapshot | None" = None,
     units: str = "counts",
     instrument_id: str | None = None,
     wavelength_medium: str = "air",
@@ -350,7 +397,7 @@ def to_spectrocube(
 
     unit_meta = _UNIT_INFO[units]
 
-    # --- wavelength ---
+    # --- wavelength and every aligned representation ---
     wavelength = np.asarray(spectrum.wavelength, dtype=float)
 
     # --- intensity ---
@@ -360,23 +407,142 @@ def to_spectrocube(
     if intensity_2d.ndim == 1:
         intensity_2d = intensity_2d[np.newaxis, :]
 
-    wavelength, intensity_2d = _normalize_wavelength_axis(wavelength, intensity_2d)
+    aligned: dict[str, np.ndarray] = {}
+    polynomial_payload: dict[str, object] | None = None
+    if snapshot is not None:
+        detector_pixel = getattr(spectrum, "detector_pixel", None)
+        echelle_order = getattr(spectrum, "echelle_order", None)
+        polynomial_records = getattr(spectrum, "wavelength_polynomials", None)
+        if detector_pixel is None or echelle_order is None or not polynomial_records:
+            raise ValueError(
+                "snapshot-backed export requires detector_pixel, echelle_order, and "
+                "per-order wavelength polynomials from Spectrum extraction"
+            )
+        aligned["detector_pixel"] = np.asarray(detector_pixel, dtype=float)
+        aligned["echelle_order"] = np.asarray(echelle_order)
+        if not np.issubdtype(aligned["echelle_order"].dtype, np.integer):
+            raise ValueError("Spectrum echelle_order must have an integer dtype")
+        if unit_meta["calibration_type"] == "absolute":
+            factors = getattr(spectrum, "absolute", {})
+            if units not in factors:
+                raise ValueError(f"Spectrum has no applied absolute factor for units={units!r}")
+            aligned["applied_absolute_calibration_factor"] = np.asarray(
+                factors[units], dtype=float
+            )
+            if (
+                aligned["applied_absolute_calibration_factor"].ndim != 1
+                or aligned["applied_absolute_calibration_factor"].size != wavelength.size
+            ):
+                raise ValueError(
+                    "applied absolute calibration factor must be one-dimensional and "
+                    "aligned to wavelength"
+                )
+
+            exposure_s = float(getattr(spectrum, "info", {}).get("ExposureTime", 0.0))
+            if not np.isfinite(exposure_s) or exposure_s <= 0:
+                raise ValueError("absolute provenance requires a finite positive exposure time")
+            source_count_rate = np.asarray(spectrum.counts, dtype=float) / exposure_s
+            reconstructed = source_count_rate * aligned[
+                "applied_absolute_calibration_factor"
+            ][np.newaxis, :]
+            finite = np.isfinite(reconstructed) & np.isfinite(intensity_2d)
+            if np.any(finite) and not np.allclose(
+                reconstructed[finite], intensity_2d[finite], rtol=2e-12, atol=0.0
+            ):
+                raise ValueError(
+                    "stored absolute intensity is inconsistent with counts/s times "
+                    "the applied calibration factor"
+                )
+
+    _validate_aligned_shapes(wavelength, aligned)
+    permutation = _wavelength_permutation(wavelength, intensity_2d)
+    wavelength, intensity_2d, aligned = _apply_aligned_selection(
+        wavelength, intensity_2d, aligned, permutation
+    )
     original_wavelength_min_nm = float(wavelength[0])
     original_wavelength_max_nm = float(wavelength[-1])
     original_wavelength_points = int(wavelength.size)
 
     dropped_nonfinite_columns = 0
     if drop_nonfinite_columns:
-        wavelength, intensity_2d, dropped_nonfinite_columns = _drop_nonfinite_columns(
-            wavelength,
-            intensity_2d,
+        valid = np.isfinite(wavelength) & np.all(np.isfinite(intensity_2d), axis=0)
+        for values in aligned.values():
+            valid &= np.isfinite(values)
+        dropped_nonfinite_columns = int(valid.size - np.count_nonzero(valid))
+        wavelength, intensity_2d, aligned = _apply_aligned_selection(
+            wavelength, intensity_2d, aligned, valid
         )
-    wavelength, intensity_2d, dropped_wavelength_crop_columns = _crop_wavelength_axis(
-        wavelength,
-        intensity_2d,
-        min_nm=wavelength_min_nm,
-        max_nm=wavelength_max_nm,
+        if wavelength.size == 0:
+            raise ValueError("finite-value filtering removed all wavelength columns")
+    crop_keep = np.ones(wavelength.shape, dtype=bool)
+    if wavelength_min_nm is not None:
+        crop_keep &= wavelength >= float(wavelength_min_nm)
+    if wavelength_max_nm is not None:
+        crop_keep &= wavelength <= float(wavelength_max_nm)
+    dropped_wavelength_crop_columns = int(crop_keep.size - np.count_nonzero(crop_keep))
+    if not np.any(crop_keep):
+        raise ValueError(
+            "Wavelength crop removed all columns. "
+            f"Requested min_nm={wavelength_min_nm!r}, max_nm={wavelength_max_nm!r}; "
+            f"available range is {wavelength[0]:.6g}–{wavelength[-1]:.6g} nm."
+        )
+    wavelength, intensity_2d, aligned = _apply_aligned_selection(
+        wavelength, intensity_2d, aligned, crop_keep
     )
+
+    if snapshot is not None:
+        represented_orders = {int(value) for value in np.unique(aligned["echelle_order"])}
+        records_by_order = {
+            int(record["order"]): {
+                "order": int(record["order"]),
+                "coefficients": [float(value) for value in record["coefficients"]],
+            }
+            for record in polynomial_records
+        }
+        missing_orders = represented_orders - set(records_by_order)
+        if missing_orders:
+            raise ValueError(
+                "wavelength polynomial records are missing represented order(s): "
+                + ", ".join(str(value) for value in sorted(missing_orders))
+            )
+        wavelength_artifact = snapshot.artifact_for_role("wavelength")
+        polynomial_payload = {
+            "schema": "spectrocube.wavelength-polynomials/v1",
+            "coefficient_order": "descending_power",
+            "input": "detector_pixel",
+            "input_units": "pixel",
+            "output": "wavelength",
+            "output_units": "nm",
+            "orders": [records_by_order[value] for value in sorted(represented_orders)],
+            "writer": "echelle_spectra",
+            "snapshot_id": snapshot.snapshot_id,
+            "wavelength_artifact_sha256": wavelength_artifact.sha256,
+        }
+        for order_id in sorted(represented_orders):
+            samples = aligned["echelle_order"] == order_id
+            reconstructed = np.polyval(
+                records_by_order[order_id]["coefficients"],
+                aligned["detector_pixel"][samples],
+            )
+            if not np.allclose(
+                reconstructed,
+                wavelength[samples],
+                rtol=0.0,
+                atol=5e-10,
+            ):
+                max_error = float(np.max(np.abs(reconstructed - wavelength[samples])))
+                raise ValueError(
+                    f"wavelength polynomial for order {order_id} does not reconstruct "
+                    f"stored samples within 5e-10 nm (max error {max_error:.6g} nm)"
+                )
+
+        if "applied_absolute_calibration_factor" in aligned:
+            factor = aligned["applied_absolute_calibration_factor"]
+            if np.any(factor <= 0):
+                raise ValueError(
+                    "retained applied absolute-calibration factors must be strictly positive; "
+                    "fix or explicitly crop the calibration input"
+                )
 
     n_frames = intensity_2d.shape[0]
     if squeeze_single_frame and n_frames == 1:
@@ -433,11 +599,11 @@ def to_spectrocube(
         attrs["dropped_wavelength_crop_columns"] = dropped_wavelength_crop_columns
 
     calibration_folder = getattr(spectrum, "calibration_folder", None)
-    if calibration_folder is not None:
+    if calibration_folder is not None and snapshot is None:
         attrs["calibration_folder"] = str(calibration_folder)
 
     calibration_files = getattr(spectrum, "calibration_files", {})
-    if calibration_files:
+    if calibration_files and snapshot is None:
         if calibration_files.get("orders"):
             attrs["calibration_order_pattern_file"] = str(calibration_files["orders"])
         if calibration_files.get("wavelength"):
@@ -480,8 +646,11 @@ def to_spectrocube(
         attrs["calibration_source"] = calibration_source
 
     attrs.update(extra_attrs)
+    if snapshot is not None:
+        attrs.update(snapshot.provenance_attrs())
+        attrs["wavelength_polynomials_json"] = _json_attr(polynomial_payload)
 
-    return SpectroCube.from_arrays(
+    sc = SpectroCube.from_arrays(
         wavelength=wavelength,
         intensity=intensity,
         instrument_id=str(instrument_id),
@@ -492,12 +661,43 @@ def to_spectrocube(
         coords=coords,
         **attrs,
     )
+    if snapshot is not None:
+        import xarray as xr
+
+        sc.ds.coords["detector_pixel"] = xr.DataArray(
+            aligned["detector_pixel"],
+            dims=("wavelength",),
+            attrs={
+                "units": "pixel",
+                "detector_axis": "column",
+                "reference_frame": "raw_detector",
+                "index_origin": 0,
+            },
+        )
+        sc.ds.coords["echelle_order"] = xr.DataArray(
+            aligned["echelle_order"].astype(np.int64, copy=False),
+            dims=("wavelength",),
+        )
+        if "applied_absolute_calibration_factor" in aligned:
+            from spectrocube import APPLIED_FACTOR_APPLICATION
+
+            sc.ds["applied_absolute_calibration_factor"] = xr.DataArray(
+                aligned["applied_absolute_calibration_factor"],
+                dims=("wavelength",),
+                attrs={
+                    "units": f"{unit_meta['intensity_units']} per (counts/s)",
+                    "source_units": "counts/s",
+                    "application": APPLIED_FACTOR_APPLICATION,
+                },
+            )
+    return sc
 
 
 def export_spectrocube(
     spectrum,
     path: str,
     *,
+    snapshot: "Snapshot | None" = None,
     units: str = "counts",
     instrument_id: str | None = None,
     wavelength_medium: str = "air",
@@ -541,6 +741,7 @@ def export_spectrocube(
     """
     sc = to_spectrocube(
         spectrum,
+        snapshot=snapshot,
         units=units,
         instrument_id=instrument_id,
         wavelength_medium=wavelength_medium,

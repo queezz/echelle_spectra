@@ -7,7 +7,8 @@ receipt under `local/runs/` by default.
 ```powershell
 echelle process D:\nifs\shots `
   -o D:\nifs\spectrocubes `
-  --snapshot-id 20260813_cmos `
+  --registry D:\nifs\calibration_registry.toml `
+  --calibrations D:\nifs\calibrations `
   --volume-label NIFS-A
 ```
 
@@ -26,7 +27,8 @@ echelle process D:\nifs-a\shots E:\nifs-b\shots `
   --runs-dir F:\nifs-runs `
   --volume-label NIFS-A `
   --volume-label NIFS-B `
-  --snapshot-id 20260813_cmos
+  --registry F:\nifs-calibration\calibration_registry.toml `
+  --calibrations F:\nifs-calibration\calibrations
 ```
 
 `-o` is a destination root in this form. Each source receives its own named
@@ -47,10 +49,12 @@ all workers stop before taking another source.
 Each run directory contains:
 
 - `run.toml` — atomic summary containing run state, roots, volume label,
-  snapshot ID, expected file count, and current status counts;
+  calibration authority (`per-source-registry` for an epoch run), expected file
+  count, and current status counts;
 - `records.jsonl` — an append-only, one-record-per-attempt ledger with source
   path, source size and SHA-256, output path, result, reason, timing, volume,
-  and snapshot. Successful exports also record output size and SHA-256.
+  and the snapshot selected for that source. Successful exports also record
+  output size and SHA-256.
 
 These files belong beside local campaign data and must not be committed. A
 snapshot ID can be omitted for legacy work; receipts then say `unassigned`
@@ -67,11 +71,14 @@ with the same source and destination. Before skipping prior work it verifies:
 
 1. the source path, size, and SHA-256 still match;
 2. the output path, size, and SHA-256 still match;
-3. the prior terminal record says the export completed.
+3. the prior terminal record says the export completed;
+4. for registry runs, the currently selected snapshot ID still matches the
+   recorded snapshot.
 
 Only then is the source recorded as skipped because its completed output was
-verified. Changed or missing output is not accepted as completed. To name the
-resume explicitly, use the path printed at interruption:
+verified. A changed epoch selection, changed source, or changed/missing output
+is not accepted as completed. To name the resume explicitly, use the path
+printed at interruption:
 
 ```powershell
 echelle process D:\nifs\shots -o D:\nifs\spectrocubes `
@@ -88,7 +95,8 @@ echelle status --runs local\runs
 ```
 
 Status reports the newest run's state, accounted sources, result counts, and
-snapshot ID. When several source/output targets have receipts, it also reports
+calibration authority. Individual records retain their selected snapshot IDs.
+When several source/output targets have receipts, it also reports
 their newest states individually and reconciles their combined totals. It reads
 receipt files recursively; it does not infer progress from filenames or count
 superseded retries twice.

@@ -81,6 +81,7 @@ nav:
       - Operator cheat sheet: operator-cheat-sheet.md
       - Basic usage: usage.md
       - Calibration snapshots: calibration-snapshots.md
+      - Calibration epoch registry: calibration-epoch-registry.md
       - Durable campaign runs: campaign-runs.md
       - Pattern extraction: pattern-extraction.md
       - Calibration alignment: calibration-alignment.md

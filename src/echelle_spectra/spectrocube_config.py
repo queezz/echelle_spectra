@@ -20,6 +20,15 @@ _CALIBRATION_FILE_KEYS = {
 }
 
 
+def _relative_to_config(value: object, config_path: Path) -> str | None:
+    if not value:
+        return None
+    candidate = Path(str(value))
+    if not candidate.is_absolute():
+        candidate = config_path.parent / candidate
+    return str(candidate)
+
+
 def load_toml(path: str | Path) -> dict[str, Any]:
     """Load a TOML file as a plain dictionary."""
     with Path(path).open("rb") as f:
@@ -28,7 +37,8 @@ def load_toml(path: str | Path) -> dict[str, Any]:
 
 def export_config_from_toml(path: str | Path) -> dict[str, Any]:
     """Return CLI-ready export defaults from a calibration config TOML."""
-    raw = load_toml(path)
+    config_path = Path(path)
+    raw = load_toml(config_path)
     calibration = raw.get("calibration", {})
     export = raw.get("export", {})
     metadata = raw.get("metadata", {})
@@ -42,6 +52,8 @@ def export_config_from_toml(path: str | Path) -> dict[str, Any]:
     settings: dict[str, Any] = {
         "camera": calibration.get("camera"),
         "calibration_dir": calibration.get("calibration_dir"),
+        "registry": _relative_to_config(calibration.get("registry"), config_path),
+        "calibrations": _relative_to_config(calibration.get("calibrations"), config_path),
         "instrument_id": calibration.get("instrument_id"),
         "wavelength_medium": calibration.get("wavelength_medium"),
         "calibration_files": calibration_files,
@@ -74,11 +86,14 @@ def export_config_from_toml(path: str | Path) -> dict[str, Any]:
 
 def export_plan_from_toml(path: str | Path) -> dict[str, Any]:
     """Load a SpectroCube generation plan TOML."""
-    raw = load_toml(path)
+    plan_path = Path(path)
+    raw = load_toml(plan_path)
     plan = raw.get("plan", {})
-    if "config" in plan:
-        config_path = Path(plan["config"])
-        if not config_path.is_absolute():
-            config_path = Path(path).parent / config_path
-        plan["config"] = str(config_path)
+    for key in ("config", "registry", "calibrations"):
+        if key not in plan:
+            continue
+        referenced = Path(plan[key])
+        if not referenced.is_absolute():
+            referenced = plan_path.parent / referenced
+        plan[key] = str(referenced)
     return plan

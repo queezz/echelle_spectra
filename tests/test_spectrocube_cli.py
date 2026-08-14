@@ -134,6 +134,57 @@ class TestParser:
         args = _build_parser().parse_args(["shot.sif", "--config", "config.toml"])
         assert args.config == "config.toml"
 
+    def test_registry_and_snapshot_root_paths(self):
+        args = _build_parser().parse_args(
+            [
+                "193778_Echelle.SIF",
+                "--registry",
+                "calibration_registry.toml",
+                "--calibrations",
+                "calibrations",
+            ]
+        )
+        assert args.registry == "calibration_registry.toml"
+        assert args.calibrations == "calibrations"
+
+    def test_registry_rejects_camera_declared_in_config(
+        self, tmp_path: Path, capsys
+    ) -> None:
+        config = tmp_path / "config.toml"
+        config.write_text(
+            """
+[calibration]
+camera = "CMOS"
+registry = "calibration_registry.toml"
+""".strip(),
+            encoding="utf-8",
+        )
+
+        with pytest.raises(SystemExit) as caught:
+            main([str(tmp_path / "shot_193778.SIF"), "--config", str(config), "--dry-run"])
+
+        assert caught.value.code == 2
+        assert "--registry cannot be combined" in capsys.readouterr().err
+
+    def test_config_registry_paths_are_relative_to_the_config(self, tmp_path: Path) -> None:
+        config_dir = tmp_path / "configuration"
+        config_dir.mkdir()
+        config = config_dir / "export.toml"
+        config.write_text(
+            """
+[calibration]
+registry = "registry.toml"
+calibrations = "snapshots"
+""".strip(),
+            encoding="utf-8",
+        )
+
+        args = _build_parser().parse_args(["shot_193778.SIF", "--config", str(config)])
+        _, settings = _settings_from_args(args)
+
+        assert Path(settings["registry"]) == config_dir / "registry.toml"
+        assert Path(settings["calibrations"]) == config_dir / "snapshots"
+
     def test_plan_path_without_input(self):
         args = _build_parser().parse_args(["--plan", "plan.toml"])
         assert args.input is None

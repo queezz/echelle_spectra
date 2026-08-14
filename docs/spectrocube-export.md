@@ -82,6 +82,13 @@ The following fields from `Spectrum` are automatically written to SpectroCube at
 | `dropped_nonfinite_wavelength_columns` | count of invalid wavelength columns dropped before export |
 | `calibration_source` | `"integrating sphere (echelle_spectra)"` (absolute modes only) |
 
+Registry-backed exports replace machine-local calibration paths with complete
+immutable snapshot provenance and add the four independently optional
+SpectroCube 0.2 recalibration representations. See
+[Calibration epoch registry and cube provenance](calibration-epoch-registry.md)
+for their exact dimensions, raw detector-coordinate convention, polynomial
+ordering, factor equation, and provenance attributes.
+
 !!! note "Non-finite absolute-calibration columns"
     Absolute calibration can produce non-finite columns where the sphere response
     is invalid or the low-wavelength edge is outside the useful calibration
@@ -196,6 +203,22 @@ The 20250926 CMOS/LHD config crops the unstable low-wavelength edge below
 `403.0 nm`, exports `wmsr` (`W/m2/nm/sr`), and records the original wavelength
 range plus dropped-column counts in SpectroCube metadata.
 
+### Epoch-registry export
+
+Use a registry when one source or batch must select calibration by shot/date:
+
+```bash
+echelle-spectrocube /data/shots \
+  --registry /data/calibration_registry.toml \
+  --calibrations /data/calibrations \
+  --units wmsr -o /data/cubes
+```
+
+The registry is calibration authority and cannot be mixed with snapshot-ID,
+camera, calibration-directory, or per-file calibration overrides. Registry and
+snapshot validation happens before extraction; a missing identity, no match,
+overlap, or digest mismatch fails without fallback.
+
 ### Plan-driven export
 
 For repeatable single-file or batch generation, use a plan TOML that points at
@@ -250,6 +273,8 @@ echelle-spectrocube /data/shots/ --dry-run --verbose
 | `--units` | `counts` | `counts`, `wm`, `wmsr`, or `phmsr` |
 | `-o / --output` | same dir as INPUT | Output file (single) or directory (batch) |
 | `--camera` | `CMOS` | Which bundled calibration to use: `CMOS` or `CCD` |
+| `--registry` | *(none)* | Ordered epoch registry; selects one immutable snapshot per source |
+| `--calibrations` | beside registry | Root containing snapshot-ID directories |
 | `--calibration-dir` | bundled resources | Path to calibration files folder |
 | `--order-pattern` | selected camera default | Override order-pattern file |
 | `--wavelength` | selected camera default | Override wavelength lookup table |

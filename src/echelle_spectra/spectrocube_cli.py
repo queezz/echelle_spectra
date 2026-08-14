@@ -16,13 +16,11 @@ Dry run to preview what would happen::
 
     echelle-spectrocube /data/shots/ --dry-run --verbose
 
-Limitation
-----------
-Unattended conversion requires the bundled calibration SIF files
-(sphere images) in ``resources/calibration_files/``.  If these binary files
-are absent from the installed package, use ``--calibration-dir`` to point
-to a directory containing them.  The same calibration must be appropriate
-for all SIF files in a batch.
+Calibration authority
+---------------------
+Legacy conversion uses one bundled or manually configured calibration.  An
+epoch registry instead resolves and verifies one immutable snapshot for every
+source, allowing a batch to cross reviewed shot/date boundaries safely.
 """
 
 from __future__ import annotations
@@ -37,11 +35,17 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
+from .calibration_registry import (
+    CalibrationEpochRegistry,
+    CalibrationRegistryError,
+    load_calibration_registry,
+)
 from .campaign_run import (
     RunReceipt,
     default_volume_label,
     find_resumable_run,
     new_run_directory,
+    sha256_file,
     target_runs_root,
     utc_now,
 )
@@ -276,6 +280,23 @@ def _build_parser(*, prog: str = "echelle-spectrocube") -> argparse.ArgumentPars
             "Repeat once per source when processing several targets."
         ),
     )
+    p.add_argument(
+        "--registry",
+        default=None,
+        metavar="TOML",
+        help=(
+            "Ordered calibration epoch registry. Referenced snapshot [validity] "
+            "boundaries select exactly one immutable snapshot per source."
+        ),
+    )
+    p.add_argument(
+        "--calibrations",
+        default=None,
+        metavar="DIR",
+        help=(
+            "Snapshot root used with --registry (default: calibrations beside the registry)."
+        ),
+    )
     return p
 
 
@@ -340,8 +361,13 @@ def _settings_from_args(args: argparse.Namespace) -> tuple[argparse.Namespace, d
     settings = dict(_DEFAULTS)
     settings["calibration_files"] = {}
     settings["extra_attrs"] = {}
+    settings["_camera_explicit"] = False
     if config_path:
         config_settings = export_config_from_toml(config_path)
+        settings["_camera_explicit"] = config_settings.get("camera") not in (
+            None,
+            "",
+        )
         for key, value in config_settings.items():
             if value not in (None, {}, ""):
                 if key == "extra_attrs":
@@ -363,6 +389,8 @@ def _settings_from_args(args: argparse.Namespace) -> tuple[argparse.Namespace, d
         value = getattr(args, attr)
         if value is not None:
             settings[key] = value
+            if key == "camera":
+                settings["_camera_explicit"] = True
 
     calibration_files = dict(settings.get("calibration_files") or {})
     for key, value in {
@@ -378,6 +406,14 @@ def _settings_from_args(args: argparse.Namespace) -> tuple[argparse.Namespace, d
 
     if args.calibration_dir is not None:
         settings["calibration_dir"] = args.calibration_dir
+    if args.registry is not None:
+        settings["registry"] = args.registry
+    elif plan.get("registry") and not settings.get("registry"):
+        settings["registry"] = plan["registry"]
+    if args.calibrations is not None:
+        settings["calibrations"] = args.calibrations
+    elif plan.get("calibrations") and not settings.get("calibrations"):
+        settings["calibrations"] = plan["calibrations"]
 
     if args.input is None:
         args.input = plan.get("input") or plan.get("input_dir")
@@ -390,6 +426,58 @@ def _settings_from_args(args: argparse.Namespace) -> tuple[argparse.Namespace, d
     args.verbose = bool(args.verbose or plan.get("verbose", False))
 
     return args, settings
+
+
+def _load_epoch_registry(
+    args: argparse.Namespace,
+    settings: dict,
+    parser: argparse.ArgumentParser,
+) -> CalibrationEpochRegistry | None:
+    registry_path = settings.get("registry")
+    if not registry_path:
+        return None
+    manual_files = settings.get("calibration_files") or {}
+    if (
+        args.snapshot_id
+        or settings.get("_camera_explicit")
+        or settings.get("calibration_dir")
+        or manual_files
+    ):
+        parser.error(
+            "--registry cannot be combined with --snapshot-id, --camera, "
+            "--calibration-dir, or manual calibration-file overrides; the selected "
+            "snapshot is the calibration authority"
+        )
+    try:
+        return load_calibration_registry(
+            registry_path,
+            snapshots_root=settings.get("calibrations"),
+        )
+    except CalibrationRegistryError as exc:
+        parser.error(str(exc))
+    return None  # pragma: no cover - argparse exits
+
+
+def _snapshot_camera(snapshot) -> str:
+    camera = snapshot.detector.upper()
+    if camera not in {"CMOS", "CCD"}:
+        raise CalibrationRegistryError(
+            f"snapshot {snapshot.snapshot_id!r} detector {snapshot.detector!r} "
+            "does not map to a supported camera (CMOS or CCD)"
+        )
+    return camera
+
+
+def _registry_provenance(
+    registry: CalibrationEpochRegistry,
+    *,
+    position: int,
+) -> dict[str, object]:
+    return {
+        "calibration_registry_schema": "echelle-calibration-registry/v1",
+        "calibration_registry_sha256": sha256_file(registry.path),
+        "calibration_registry_epoch_position": int(position),
+    }
 
 
 def _export_one(
@@ -411,6 +499,7 @@ def _export_one(
     dry_run: bool,
     verbose: bool,
     calibration: object | None = None,
+    snapshot: object | None = None,
 ) -> ExportResult:
     """Export one SIF file."""
     from .tools.spectrocube_export import export_spectrocube
@@ -439,6 +528,7 @@ def _export_one(
         export_spectrocube(
             sp,
             str(temporary_output),
+            snapshot=snapshot,
             units=units,
             instrument_id=instrument_id,
             wavelength_medium=wavelength_medium,
@@ -500,6 +590,7 @@ def _run_batch_target(
     stop_event: threading.Event | None = None,
 ) -> int:
     """Process one source sequentially and return its independent exit code."""
+    registry: CalibrationEpochRegistry | None = settings.get("epoch_registry")
     sif_files = sorted(input_path.glob(args.pattern))
     if not sif_files and args.pattern == "*.SIF":
         sif_files = sorted(input_path.glob("*.sif"))
@@ -566,7 +657,8 @@ def _run_batch_target(
                     output_root=out_dir,
                     pattern=args.pattern,
                     volume_label=volume_label or default_volume_label(input_path),
-                    snapshot_id=args.snapshot_id or "unassigned",
+                    snapshot_id=args.snapshot_id
+                    or ("per-source-registry" if registry is not None else "unassigned"),
                     expected_files=len(sif_files),
                 )
             except FileExistsError:
@@ -577,13 +669,17 @@ def _run_batch_target(
                     output_root=out_dir,
                     pattern=args.pattern,
                     volume_label=volume_label or default_volume_label(input_path),
-                    snapshot_id=args.snapshot_id or "unassigned",
+                    snapshot_id=args.snapshot_id
+                    or ("per-source-registry" if registry is not None else "unassigned"),
                     expected_files=len(sif_files),
                 )
             _emit_target(
                 f"Receipt:     {receipt.directory}", target_label=target_label
             )
-        if args.snapshot_id and receipt.snapshot_id != args.snapshot_id:
+        expected_receipt_snapshot = args.snapshot_id or (
+            "per-source-registry" if registry is not None else None
+        )
+        if expected_receipt_snapshot and receipt.snapshot_id != expected_receipt_snapshot:
             _emit_target(
                 "ERROR: Run receipt snapshot does not match --snapshot-id.",
                 target_label=target_label,
@@ -611,7 +707,7 @@ def _run_batch_target(
     cal_dir = Path(settings["calibration_dir"]) if settings.get("calibration_dir") else None
     calibration_files = settings["calibration_files"]
     clbr = None
-    if not args.dry_run:
+    if not args.dry_run and registry is None:
         try:
             from .tools.loader import build_calibration
 
@@ -657,6 +753,8 @@ def _run_batch_target(
                 receipt.finish("partial")
             return 1
 
+    calibration_cache: dict[str, object] = {}
+
     failed: list[Path] = []
     n_exported = 0
     n_skipped = 0
@@ -691,25 +789,59 @@ def _run_batch_target(
                     target_label=target_label,
                 )
             return 130
-        if (
+        result: ExportResult | None = None
+        selected_snapshot = None
+        selected_snapshot_id: str | None = None
+        selected_calibration = clbr
+        selected_extra_attrs = dict(settings["extra_attrs"])
+        if registry is not None:
+            try:
+                epoch = registry.resolve_source(sif)
+                selected_snapshot = epoch.snapshot
+                selected_snapshot_id = epoch.snapshot_id
+                selected_extra_attrs.update(
+                    _registry_provenance(registry, position=epoch.position)
+                )
+                if not args.dry_run:
+                    selected_calibration = calibration_cache.get(epoch.snapshot_id)
+                    if selected_calibration is None:
+                        from .tools.loader import build_calibration
+
+                        selected_calibration = build_calibration(
+                            epoch.snapshot.root,
+                            _snapshot_camera(epoch.snapshot),
+                            calibration_files=epoch.snapshot.calibration_files(),
+                        )
+                        calibration_cache[epoch.snapshot_id] = selected_calibration
+            except (CalibrationRegistryError, OSError, ValueError) as exc:
+                result = ExportResult("failed", f"calibration epoch selection failed: {exc}")
+                _emit_target(
+                    f"FAIL {sif.name}: {result.reason}",
+                    target_label=target_label,
+                    stream=sys.stderr,
+                )
+
+        if result is None and (
             receipt is not None
             and source is not None
             and not args.overwrite
-            and receipt.completed_output_is_valid(source, nc_out)
+            and receipt.completed_output_is_valid(
+                source, nc_out, snapshot_id=selected_snapshot_id
+            )
         ):
             result = ExportResult("skipped", "completed output verified from prior receipt")
-        elif (
+        elif result is None and (
             receipt is not None
             and source is not None
             and not args.overwrite
             and nc_out.exists()
-            and receipt.has_export_record(source)
+            and receipt.has_export_record(source, snapshot_id=selected_snapshot_id)
         ):
             result = ExportResult(
                 "failed",
                 "recorded completed output changed; inspect it or use --overwrite",
             )
-        else:
+        elif result is None:
             try:
                 result = _normalize_export_result(
                     _export_one(
@@ -725,11 +857,12 @@ def _run_batch_target(
                         wavelength_max_nm=settings.get("wavelength_max_nm"),
                         calibration_source=settings.get("calibration_source"),
                         drop_nonfinite_columns=settings["drop_nonfinite_columns"],
-                        extra_attrs=settings["extra_attrs"],
+                        extra_attrs=selected_extra_attrs,
                         overwrite=args.overwrite,
                         dry_run=args.dry_run,
                         verbose=args.verbose,
-                        calibration=clbr,
+                        calibration=selected_calibration,
+                        snapshot=selected_snapshot,
                     )
                 )
             except KeyboardInterrupt:
@@ -764,6 +897,7 @@ def _run_batch_target(
                 finished_at=utc_now(),
                 duration_s=time.monotonic() - item_started,
                 reason=result.reason,
+                snapshot_id=selected_snapshot_id,
             )
         if status == "failed":
             failed.append(sif)
@@ -911,6 +1045,26 @@ def _run_single_file(
         )
 
     cal_dir = Path(settings["calibration_dir"]) if settings.get("calibration_dir") else None
+    registry: CalibrationEpochRegistry | None = settings.get("epoch_registry")
+    snapshot = None
+    calibration = None
+    extra_attrs = dict(settings["extra_attrs"])
+    if registry is not None:
+        try:
+            epoch = registry.resolve_source(input_path)
+            snapshot = epoch.snapshot
+            extra_attrs.update(_registry_provenance(registry, position=epoch.position))
+            if not args.dry_run:
+                from .tools.loader import build_calibration
+
+                calibration = build_calibration(
+                    snapshot.root,
+                    _snapshot_camera(snapshot),
+                    calibration_files=snapshot.calibration_files(),
+                )
+        except (CalibrationRegistryError, OSError, ValueError) as exc:
+            print(f"ERROR: Calibration epoch selection failed: {exc}", file=sys.stderr)
+            return 1
     result = _normalize_export_result(
         _export_one(
             input_path,
@@ -925,10 +1079,12 @@ def _run_single_file(
             wavelength_max_nm=settings.get("wavelength_max_nm"),
             calibration_source=settings.get("calibration_source"),
             drop_nonfinite_columns=settings["drop_nonfinite_columns"],
-            extra_attrs=settings["extra_attrs"],
+            extra_attrs=extra_attrs,
             overwrite=args.overwrite,
             dry_run=args.dry_run,
             verbose=True,
+            calibration=calibration,
+            snapshot=snapshot,
         )
     )
     return 0 if result.status != "failed" else 1
@@ -957,6 +1113,7 @@ def main(argv: list[str] | None = None, *, prog: str = "echelle-spectrocube") ->
     parser = _build_parser(prog=prog)
     args = parser.parse_args(argv)
     args, settings = _settings_from_args(args)
+    settings["epoch_registry"] = _load_epoch_registry(args, settings, parser)
     if args.input is None:
         parser.error("INPUT is required unless supplied by --plan.")
 

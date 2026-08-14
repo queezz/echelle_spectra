@@ -282,16 +282,25 @@ class EchelleImage:
         using order borders from calibration clbr
         """
         clbr = self.clbr
-
-        self.spectra = np.array([i[clbr.order_borders] for i in self.order_spectra])
-
-        a = remove_npnans(self.spectra)
-
-        self.spectra = a.reshape(
-            self.info["NumberOfFrames"], int(len(a) / self.info["NumberOfFrames"])
+        selected_wavelength = np.asarray(clbr.order_wavel[clbr.order_borders])
+        selected_spectra = np.asarray(
+            [frame[clbr.order_borders] for frame in self.order_spectra]
+        )
+        detector_grid = np.broadcast_to(
+            np.arange(clbr.DIMW), clbr.order_borders.shape
+        )
+        order_grid = np.broadcast_to(
+            np.asarray(clbr.order_ids)[:, np.newaxis], clbr.order_borders.shape
         )
 
-        self.wavelength = remove_npnans(clbr.wavelength)
+        # Partial orders are padded in the wavelength solution.  Derive one
+        # geometry mask and apply it to every aligned representation instead of
+        # independently flattening/removing NaNs from each array.
+        keep = np.isfinite(selected_wavelength)
+        self.wavelength = selected_wavelength[keep]
+        self.spectra = selected_spectra[:, keep]
+        self.detector_pixel = detector_grid[clbr.order_borders][keep]
+        self.echelle_order = order_grid[clbr.order_borders][keep]
 
     def plot_order_image(self, frame, ordind, aspect=2):
         """Plot order image"""
@@ -548,12 +557,13 @@ class Calibrations:
         pwrs = [ab(len(i[0])) for i in msks]
         x = np.arange(self.DIMW)
 
-        self.order_wavel = np.array(
-            [
-                np.poly1d(np.polyfit(w[m][:, 3], w[m][:, 4], p))(x)
-                for m, p in zip(msks, pwrs)
-            ]
-        )
+        coefficients = [np.polyfit(w[m][:, 3], w[m][:, 4], p) for m, p in zip(msks, pwrs)]
+        self.order_ids = ords
+        self.wavelength_polynomials = [
+            {"order": int(order_id), "coefficients": fit.astype(float).tolist()}
+            for order_id, fit in zip(ords, coefficients)
+        ]
+        self.order_wavel = np.array([np.poly1d(fit)(x) for fit in coefficients])
         if kws.get("rtrn", False):
             return self.order_wavel
         if kws.get("plot", False):
@@ -793,15 +803,32 @@ class Spectrum:
         self.calibration_detector_width_px = int(getattr(image.clbr, "DIMW", 0))
         order_borders = getattr(image.clbr, "order_borders", None)
         order_wavel = getattr(image.clbr, "order_wavel", None)
+        order_ids = np.asarray(
+            getattr(
+                image.clbr,
+                "order_ids",
+                np.arange(order_borders.shape[0]) if order_borders is not None else [],
+            )
+        )
         self.calibration_order_count = int(order_borders.shape[0]) if order_borders is not None else 0
+        self.detector_pixel = getattr(image, "detector_pixel", None)
+        self.echelle_order = getattr(image, "echelle_order", None)
+        self.wavelength_polynomials = tuple(
+            {
+                "order": int(item["order"]),
+                "coefficients": [float(value) for value in item["coefficients"]],
+            }
+            for item in getattr(image.clbr, "wavelength_polynomials", ())
+        )
         self.order_border_pixel_ranges = []
         self.order_wavelength_ranges_nm = []
         for order_idx, order_mask in enumerate(order_borders if order_borders is not None else []):
+            order_id = int(order_ids[order_idx])
             pixels = np.flatnonzero(order_mask)
             if pixels.size:
                 self.order_border_pixel_ranges.append(
                     {
-                        "order": int(order_idx),
+                        "order": order_id,
                         "start_px": int(pixels[0]),
                         "end_px": int(pixels[-1]),
                         "n_px": int(pixels.size),
@@ -813,7 +840,7 @@ class Spectrum:
                 if finite_wavelength.size:
                     self.order_wavelength_ranges_nm.append(
                         {
-                            "order": int(order_idx),
+                            "order": order_id,
                             "min_nm": float(np.min(finite_wavelength)),
                             "max_nm": float(np.max(finite_wavelength)),
                             "n_px": int(finite_wavelength.size),
@@ -826,6 +853,10 @@ class Spectrum:
             self.wavelength = np.flip(self.wavelength)
             self.counts = np.flip(self.counts, axis=1)
             self.absolute = {i: np.flip(j) for i, j in self.absolute.items()}
+            if self.detector_pixel is not None:
+                self.detector_pixel = np.flip(self.detector_pixel)
+            if self.echelle_order is not None:
+                self.echelle_order = np.flip(self.echelle_order)
 
         self.wm = _apply_absolute_calibration(
             self.counts,

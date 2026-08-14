@@ -167,7 +167,13 @@ class RunReceipt:
             sha256=sha256_file(source),
         )
 
-    def completed_output_is_valid(self, source: SourceIdentity, output: Path) -> bool:
+    def completed_output_is_valid(
+        self,
+        source: SourceIdentity,
+        output: Path,
+        *,
+        snapshot_id: str | None = None,
+    ) -> bool:
         """Return true only when a prior export still matches source and output."""
         output = output.resolve()
         for record in reversed(self._records):
@@ -176,6 +182,8 @@ class RunReceipt:
             if record.get("source_sha256") != source.sha256:
                 return False
             if int(record.get("source_size_bytes", -1)) != source.size_bytes:
+                return False
+            if snapshot_id is not None and record.get("snapshot_id") != snapshot_id:
                 return False
             if record.get("output") != _relative_or_absolute(output, self.output_root):
                 return False
@@ -186,10 +194,12 @@ class RunReceipt:
             return record.get("output_sha256") == sha256_file(output)
         return False
 
-    def has_export_record(self, source: SourceIdentity) -> bool:
+    def has_export_record(self, source: SourceIdentity, *, snapshot_id: str | None = None) -> bool:
         """Return whether this run ever published an output for the source key."""
         return any(
-            record.get("status") == "exported" and record.get("source") == source.key
+            record.get("status") == "exported"
+            and record.get("source") == source.key
+            and (snapshot_id is None or record.get("snapshot_id") == snapshot_id)
             for record in self._records
         )
 
@@ -203,6 +213,7 @@ class RunReceipt:
         finished_at: str,
         duration_s: float,
         reason: str = "",
+        snapshot_id: str | None = None,
     ) -> dict[str, Any]:
         if status not in TERMINAL_STATUSES:
             raise ValueError(f"Unsupported receipt status: {status}")
@@ -214,7 +225,7 @@ class RunReceipt:
             "source_size_bytes": source.size_bytes,
             "source_sha256": source.sha256,
             "volume_label": self.volume_label,
-            "snapshot_id": self.snapshot_id,
+            "snapshot_id": snapshot_id or self.snapshot_id,
             "output": _relative_or_absolute(output, self.output_root),
             "output_path": str(output),
             "status": status,

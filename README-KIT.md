@@ -6,11 +6,10 @@ project wheel, dependency wheelhouse, and `checksums.sha256`. It does not need
 Dropbox, Git, an existing Python installation, administrator rights, Fleet, or
 lab-cli.
 
-> **Release-candidate status (2026-08-13):** the pinned manifest, assembly path,
-> installers, offline wheelhouse contract, and reproducible-distribution tooling
-> target 1.5.0. Packet 6 is not shipped until fresh isolated Windows and native
-> macOS installs plus network-disabled offline rehearsals all pass. A kit built
-> from an uncommitted candidate is a validation kit, not a published release.
+> **Current release:** the pinned 1.6.0 manifest, assembly path, installers,
+> offline wheelhouse contract, and reproducible-distribution tooling passed the
+> Packet 6 Windows, native macOS, and network-disabled offline gates. A kit built
+> from uncommitted source is still a validation kit, not a published release.
 
 ## Windows x86-64: three commands
 
@@ -117,9 +116,9 @@ Pop-Location
 
 `$CompanionDist` contains two normalized universal wheels. SpectroCube is built
 from a clean archive of the manifest's exact commit,
-`c46b0c4621ec8d56d7d7209d122b571fb109405e`. `sif_parser` is built from its
+`0b02ac96e386c7121ca2c30f6d36a76518e4e83a`. `sif_parser` is built from its
 manifest-pinned PyPI source archive after its 18,722-byte input and SHA-256 are
-verified. SpectroCube 0.1.0 is not published in the configured package
+verified. SpectroCube 0.2.0 is not published in the configured package
 registry, while `sif_parser` 0.3.6 publishes no wheel; carrying both verified
 wheels removes the hidden checkout and compiler dependencies from target
 machines. Pass both paths as repeated `--companion-wheel` arguments.

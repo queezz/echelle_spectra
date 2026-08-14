@@ -10,7 +10,7 @@ import warnings
 
 import numpy as np
 
-from echelle_spectra.tools.echelle import Spectrum
+from echelle_spectra.tools.echelle import EchelleImage, Spectrum
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -168,3 +168,51 @@ class TestAbsoluteCalibrationWarnings:
             sp = Spectrum(img)
 
         assert np.count_nonzero(~np.isfinite(sp.wmsr)) == 2
+
+
+def test_partial_order_raw_detector_coordinates_survive_negative_flip() -> None:
+    class Calibration:
+        DIMW = 4
+        direction = -1
+        order_ids = np.array([10, 11])
+        order_borders = np.array([[True, True, True, False], [False, True, True, True]], dtype=bool)
+        order_wavel = np.array([[500.0, 499.0, np.nan, 497.0], [402.0, 401.0, 400.0, 399.0]])
+        wavelength_polynomials = (
+            {"order": 10, "coefficients": [-1.0, 500.0]},
+            {"order": 11, "coefficients": [-1.0, 402.0]},
+        )
+        absolute = {
+            "wm": np.arange(1.0, 6.0),
+            "wmsr": np.arange(1.0, 6.0),
+            "phmsr": np.arange(1.0, 6.0),
+        }
+        folder = "/cal"
+        filenames = {}
+        dv = 1
+
+    class Image:
+        pass
+
+    image = Image()
+    image.clbr = Calibration()
+    image.order_spectra = np.arange(8.0).reshape(1, 2, 4)
+    image.info = {
+        "NumberOfFrames": 1,
+        "ExposureTime": 1.0,
+        "CycleTime": 1.0,
+        "BackgroundFrames": [],
+    }
+    image.fpth = "/data/fixture.SIF"
+    EchelleImage.calculate_spectra(image)
+
+    spectrum = Spectrum(image)
+    np.testing.assert_array_equal(spectrum.wavelength, [399, 400, 401, 499, 500])
+    np.testing.assert_array_equal(spectrum.detector_pixel, [3, 2, 1, 1, 0])
+    np.testing.assert_array_equal(spectrum.echelle_order, [11, 11, 11, 10, 10])
+    np.testing.assert_array_equal(spectrum.counts, [[7, 6, 5, 1, 0]])
+    for record in spectrum.wavelength_polynomials:
+        selected = spectrum.echelle_order == record["order"]
+        np.testing.assert_allclose(
+            np.polyval(record["coefficients"], spectrum.detector_pixel[selected]),
+            spectrum.wavelength[selected],
+        )

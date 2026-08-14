@@ -104,3 +104,54 @@ def test_bare_campaign_subcommands_are_self_explaining(tmp_path: Path, capsys) -
         == 0
     )
     assert "Echelle campaign status" in capsys.readouterr().out
+
+
+def test_status_validates_and_prints_ordered_epoch_boundaries(tmp_path: Path, capsys) -> None:
+    root = tmp_path / "calibrations"
+    assert (
+        snapshot_cli.main(
+            [
+                "create",
+                "20260813_cmos",
+                "--output-root",
+                str(root),
+                "--detector",
+                "cmos",
+                "--lamp-used",
+                "H2",
+                "--shot-from",
+                "200000",
+                "--shot-to",
+                "299999",
+                *_source_args(tmp_path),
+            ]
+        )
+        == 0
+    )
+    registry = tmp_path / "calibration_registry.toml"
+    registry.write_text(
+        """schema = "echelle-calibration-registry/v1"
+
+[[epochs]]
+snapshot_id = "20260813_cmos"
+""",
+        encoding="utf-8",
+    )
+    capsys.readouterr()
+    assert (
+        cli.main(
+            [
+                "status",
+                "--calibrations",
+                str(root),
+                "--registry",
+                str(registry),
+                "--runs",
+                str(tmp_path / "runs"),
+            ]
+        )
+        == 0
+    )
+    shown = capsys.readouterr().out
+    assert "calibration_registry.toml (1 epoch(s))" in shown
+    assert "1. 20260813_cmos: shot 200000..299999 (inclusive)" in shown

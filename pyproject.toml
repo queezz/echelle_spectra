@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "echelle_spectra"
-version = "1.5.0"                       # Consider setuptools_scm later for auto-versioning
+version = "1.6.0"                       # Consider setuptools_scm later for auto-versioning
 description = "Graphical tool for the extraction and analysis of calibrated spectra from 2D Echelle spectrometer images"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -88,7 +88,7 @@ docs = [
 ]
 # SpectroCube neutral calibrated-spectrum container (optional export target)
 spectrocube = [
-  "spectrocube>=0.1.0",
+  "spectrocube>=0.2.0",
 ]
 
 [dependency-groups]
@@ -118,7 +118,7 @@ required-environments = [
 # SpectroCube is not published on the configured package index. The universal
 # lock therefore names the exact existing sibling commit; generated kits carry
 # its separately built and verified wheel instead of depending on a checkout.
-spectrocube = { git = "https://github.com/queezz/spectrocube.git", rev = "c46b0c4621ec8d56d7d7209d122b571fb109405e" }
+spectrocube = { git = "https://github.com/queezz/spectrocube.git", rev = "0b02ac96e386c7121ca2c30f6d36a76518e4e83a" }
 
 [tool.black]
 line-length = 100

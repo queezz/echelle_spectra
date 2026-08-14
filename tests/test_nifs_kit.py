@@ -60,7 +60,7 @@ def _requirement_blocks(text: str) -> list[str]:
 def test_manifest_pins_supported_matrix_and_project_identity() -> None:
     manifest = load_manifest(MANIFEST)
     pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
-    assert manifest.application_version == pyproject["project"]["version"] == "1.5.0"
+    assert manifest.application_version == pyproject["project"]["version"] == "1.6.0"
     assert manifest.toolchain["python"] == (ROOT / ".python-version").read_text().strip()
     assert set(manifest.platforms) == {
         "windows-x86_64",
@@ -76,7 +76,7 @@ def test_manifest_pins_supported_matrix_and_project_identity() -> None:
         "setuptools": "84.0.0",
         "wheel": "0.48.0",
         "twine": "7.0.0",
-        "source_date_epoch": 1786579200,
+        "source_date_epoch": 1786665600,
     }
     assert {
         key: platform.minimum_os_version
@@ -101,7 +101,10 @@ def test_companion_source_is_the_same_exact_commit_as_uv_lock_source() -> None:
     sif_parser = next(item for item in manifest.companions if item.name == "sif_parser")
     source = pyproject["tool"]["uv"]["sources"]["spectrocube"]
     assert companion.name == "spectrocube"
-    assert companion.version == "0.1.0"
+    assert companion.version == "0.2.0"
+    assert pyproject["project"]["optional-dependencies"]["spectrocube"] == [
+        "spectrocube>=0.2.0"
+    ]
     assert companion.source_url == source["git"]
     assert companion.source_ref == source["rev"]
     assert sif_parser.version == "0.3.6"
@@ -166,6 +169,11 @@ def test_lock_is_limited_to_the_declared_kit_runtime_and_platforms() -> None:
     assert lock["requires-python"] == ">=3.9"
     locked_names = {package["name"] for package in lock["package"]}
     assert {"echelle-spectra", "spectrocube", "pyqt5", "netcdf4"} <= locked_names
+    spectrocube = next(package for package in lock["package"] if package["name"] == "spectrocube")
+    assert spectrocube["version"] == "0.2.0"
+    assert spectrocube["source"]["git"].endswith(
+        "0b02ac96e386c7121ca2c30f6d36a76518e4e83a"
+    )
 
 
 def test_manifest_refuses_schema_url_and_checksum_drift(tmp_path: Path) -> None:
@@ -212,8 +220,8 @@ def test_extract_uv_selects_only_the_named_binary(tmp_path: Path) -> None:
 
 
 def test_project_wheel_identity_and_malformed_wheel_refusal(tmp_path: Path) -> None:
-    wheel = _wheel(tmp_path / "echelle_spectra-1.5.0-py3-none-any.whl", "echelle_spectra", "1.5.0")
-    assert inspect_project_wheel(wheel) == ("echelle_spectra", "1.5.0")
+    wheel = _wheel(tmp_path / "echelle_spectra-1.6.0-py3-none-any.whl", "echelle_spectra", "1.6.0")
+    assert inspect_project_wheel(wheel) == ("echelle_spectra", "1.6.0")
     malformed = tmp_path / "malformed.whl"
     malformed.write_bytes(b"not a zip")
     with pytest.raises(KitError, match="cannot inspect"):

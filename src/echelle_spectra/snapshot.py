@@ -83,6 +83,60 @@ class Snapshot:
     def lamps(self) -> tuple[str, ...]:
         return tuple(str(item) for item in self.manifest.get("lamps", []))
 
+    def artifact_for_role(self, role: str) -> Artifact:
+        """Return the unique required artifact for *role*."""
+
+        matches = [artifact for artifact in self.artifacts if artifact.role == role]
+        if len(matches) != 1:
+            raise SnapshotValidationError(
+                [f"snapshot {self.snapshot_id!r} does not contain exactly one {role!r} artifact"]
+            )
+        return matches[0]
+
+    def calibration_files(self) -> dict[str, str]:
+        """Return the established ``Calibrations`` filename vocabulary."""
+
+        return {
+            "orders": self.artifact_for_role("pattern").path,
+            "wavelength": self.artifact_for_role("wavelength").path,
+            "sphr": self.artifact_for_role("sphere").path,
+            "bkgr": self.artifact_for_role("sphere_background").path,
+            "integral": self.artifact_for_role("integral").path,
+        }
+
+    def provenance_attrs(self) -> dict[str, str]:
+        """Return portable, complete NetCDF-string provenance attributes."""
+
+        manifest_sha256, _ = file_digest(self.root / "snapshot.toml")
+        artifact_records = [
+            {
+                "role": artifact.role,
+                "path": artifact.path,
+                "sha256": artifact.sha256,
+                "size_bytes": artifact.size_bytes,
+                **({"source_name": artifact.source_name} if artifact.source_name else {}),
+                **({"label": artifact.label} if artifact.label else {}),
+            }
+            for artifact in self.artifacts
+        ]
+        return {
+            "snapshot_id": self.snapshot_id,
+            "snapshot_manifest_sha256": manifest_sha256,
+            "snapshot_manifest_json": json.dumps(
+                self.manifest,
+                default=str,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ),
+            "calibration_file_digests_json": json.dumps(
+                artifact_records,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ),
+        }
+
 
 def validate_snapshot_id(snapshot_id: str) -> str:
     """Return a normalized id or raise with the public naming convention."""

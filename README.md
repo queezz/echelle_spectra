@@ -56,9 +56,8 @@ for common command failures. The full [documentation](https://queezz.github.io/e
 contains the calibration and processing details.
 
 For the pinned, no-admin travel payload, see the
-[portable NIFS kit instructions](README-KIT.md). The kit remains a Packet 6
-release candidate until fresh isolated Windows, native macOS, and offline gates
-are all exercised.
+[portable NIFS kit instructions](README-KIT.md). The released 1.6 kit preserves
+its Python 3.12.13 runtime and pinned offline installation contract.
 
 ---
 
@@ -99,7 +98,10 @@ run after verifying completed source and output digests. Several source folders
 can be processed together with one sequential worker per drive and isolated
 outputs, receipts, progress, and failures. See the
 [calibration snapshot guide](docs/calibration-snapshots.md) and
-[campaign run guide](docs/campaign-runs.md).
+[campaign run guide](docs/campaign-runs.md). For multi-epoch processing, the
+[calibration epoch registry](docs/calibration-epoch-registry.md) resolves and
+verifies one immutable snapshot per source and writes complete recalibration
+provenance into each cube.
 
 ---
 

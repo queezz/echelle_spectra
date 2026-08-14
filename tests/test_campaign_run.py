@@ -11,6 +11,7 @@ import pytest
 
 from echelle_spectra import cli
 from echelle_spectra.campaign_run import RUN_SCHEMA, RunReceipt, sha256_file
+from echelle_spectra.snapshot import ROLE_FILENAMES, create_snapshot
 from echelle_spectra.spectrocube_cli import ExportResult, _export_one, main
 
 
@@ -51,6 +52,41 @@ def _export_kwargs() -> dict:
         "dry_run": False,
         "verbose": False,
     }
+
+
+def _registry_fixture(tmp_path: Path) -> tuple[Path, Path]:
+    snapshots = tmp_path / "calibrations"
+    snapshot_ids = ("20240101_cmos", "20250101_cmos")
+    bounds = ((100000, 199999), (200000, 299999))
+    for snapshot_id, (shot_from, shot_to) in zip(snapshot_ids, bounds):
+        sources = tmp_path / f"{snapshot_id}-sources"
+        sources.mkdir()
+        files = {}
+        for role in ROLE_FILENAMES:
+            source = sources / f"{role}.dat"
+            source.write_text(f"{snapshot_id}/{role}", encoding="utf-8")
+            files[role] = source
+        create_snapshot(
+            snapshots,
+            snapshot_id=snapshot_id,
+            detector="cmos",
+            files=files,
+            lamps=("ThAr",),
+            validity={"shot_from": shot_from, "shot_to": shot_to},
+        )
+    registry = tmp_path / "calibration_registry.toml"
+    registry.write_text(
+        """schema = "echelle-calibration-registry/v1"
+
+[[epochs]]
+snapshot_id = "20240101_cmos"
+
+[[epochs]]
+snapshot_id = "20250101_cmos"
+""",
+        encoding="utf-8",
+    )
+    return registry, snapshots
 
 
 def test_export_publishes_output_atomically(tmp_path: Path) -> None:
@@ -398,3 +434,59 @@ def test_run_manifest_uses_versioned_schema(tmp_path: Path) -> None:
         expected_files=0,
     )
     assert f'schema = "{RUN_SCHEMA}"' in receipt.manifest_path.read_text(encoding="utf-8")
+
+
+def test_registry_batch_resolves_and_records_one_snapshot_per_source(
+    tmp_path: Path, fake_spectrocube
+) -> None:
+    registry, snapshots = _registry_fixture(tmp_path)
+    source = tmp_path / "source"
+    source.mkdir()
+    _files(source, "199999_Echelle.SIF", "200000_Echelle.SIF", "200001_Echelle.SIF")
+    output = tmp_path / "cubes"
+    runs = tmp_path / "runs"
+    calibrations = {"20240101_cmos": object(), "20250101_cmos": object()}
+    exports: list[tuple[str, str]] = []
+
+    def build(folder: Path, _camera: str, **_kwargs):
+        return calibrations[Path(folder).name]
+
+    def export(sif: Path, nc_out: Path, **kwargs) -> ExportResult:
+        exports.append((sif.name, kwargs["snapshot"].snapshot_id))
+        assert kwargs["calibration"] is calibrations[kwargs["snapshot"].snapshot_id]
+        assert len(kwargs["extra_attrs"]["calibration_registry_sha256"]) == 64
+        nc_out.write_text("cube", encoding="utf-8")
+        return ExportResult("exported")
+
+    with (
+        patch("echelle_spectra.tools.loader.build_calibration", side_effect=build) as builder,
+        patch("echelle_spectra.spectrocube_cli._export_one", side_effect=export),
+        pytest.raises(SystemExit) as result,
+    ):
+        main(
+            [
+                str(source),
+                "-o",
+                str(output),
+                "--runs-dir",
+                str(runs),
+                "--registry",
+                str(registry),
+                "--calibrations",
+                str(snapshots),
+            ]
+        )
+    assert result.value.code == 0
+    assert exports == [
+        ("199999_Echelle.SIF", "20240101_cmos"),
+        ("200000_Echelle.SIF", "20250101_cmos"),
+        ("200001_Echelle.SIF", "20250101_cmos"),
+    ]
+    assert builder.call_count == 2
+    receipt = RunReceipt.load(next(runs.iterdir()))
+    assert receipt.snapshot_id == "per-source-registry"
+    assert [record["snapshot_id"] for record in receipt._records] == [
+        "20240101_cmos",
+        "20250101_cmos",
+        "20250101_cmos",
+    ]

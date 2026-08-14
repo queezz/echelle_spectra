@@ -6,6 +6,7 @@ import argparse
 import sys
 from pathlib import Path
 
+from .calibration_registry import CalibrationRegistryError, load_calibration_registry
 from .campaign_run import latest_run_summaries, list_run_summaries
 from .snapshot import SnapshotValidationError, load_snapshot
 
@@ -73,6 +74,36 @@ def _print_combined_run_status(runs_root: Path) -> None:
         )
 
 
+def _print_registry_status(registry: Path, snapshots_root: Path) -> bool:
+    """Print registry epochs and return whether validation failed."""
+
+    if not registry.is_file():
+        print(f"  registry:  not found ({registry})")
+        return False
+    try:
+        loaded_registry = load_calibration_registry(registry, snapshots_root=snapshots_root)
+    except CalibrationRegistryError as exc:
+        print(f"  registry:  INVALID ({exc})")
+        return True
+    print(f"  registry:  {registry} ({len(loaded_registry.epochs)} epoch(s))")
+    for epoch in loaded_registry.epochs:
+        shot = (
+            f"shot {epoch.shot_from if epoch.shot_from is not None else '-inf'}.."
+            f"{epoch.shot_to if epoch.shot_to is not None else '+inf'}"
+            if epoch.needs_shot
+            else ""
+        )
+        day = (
+            f"date {epoch.date_from.isoformat() if epoch.date_from else '-inf'}.."
+            f"{epoch.date_to.isoformat() if epoch.date_to else '+inf'}"
+            if epoch.needs_date
+            else ""
+        )
+        bounds = " and ".join(value for value in (shot, day) if value)
+        print(f"    {epoch.position}. {epoch.snapshot_id}: {bounds} (inclusive)")
+    return False
+
+
 def _status(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(prog="echelle status")
     parser.add_argument("--calibrations", default="calibrations", metavar="DIR")
@@ -101,10 +132,7 @@ def _status(argv: list[str]) -> int:
         for path, exc in invalid:
             print(f"    {path.name}: {exc.errors[0]}")
     registry = Path(args.registry)
-    if registry.is_file():
-        print(f"  registry:  {registry}")
-    else:
-        print(f"  registry:  not found ({registry})")
+    registry_invalid = _print_registry_status(registry, root)
     runs_root = Path(args.runs)
     runs = list_run_summaries(runs_root)
     if runs:
@@ -122,7 +150,7 @@ def _status(argv: list[str]) -> int:
         _print_combined_run_status(runs_root)
     else:
         print(f"  runs:      none found under {args.runs}")
-    return 1 if invalid else 0
+    return 1 if invalid or registry_invalid else 0
 
 
 def main(argv: list[str] | None = None) -> int:

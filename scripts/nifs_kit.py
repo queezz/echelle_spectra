@@ -156,9 +156,9 @@ def load_manifest(path: Path) -> KitManifest:  # noqa: C901
             source_ref=_required(value, "source_ref", str, context),
             source_size=value.get("source_size"),
         )
-        expected_companions = {"spectrocube": "0.1.0", "sif_parser": "0.3.6"}
+        expected_companions = {"spectrocube": "0.2.0", "sif_parser": "0.3.6"}
         if expected_companions.get(companion.name) != companion.version:
-            raise KitError("companions must be spectrocube 0.1.0 and sif_parser 0.3.6")
+            raise KitError("companions must be spectrocube 0.2.0 and sif_parser 0.3.6")
         if companion.wheel_prefix != f"{companion.name}-":
             raise KitError(f"{context}.wheel_prefix must be {companion.name}-")
         parsed_source = urllib.parse.urlparse(companion.source_url)
