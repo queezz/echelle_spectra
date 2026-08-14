@@ -128,6 +128,7 @@ def test_decreasing_dispersion_raw_pixels_share_crop_mask_and_sort(tmp_path: Pat
     assert factor.attrs == {
         "units": "W/m2/nm/sr per (counts/s)",
         "source_units": "counts/s",
+        "absolute_kind": "wmsr",
         "application": APPLIED_FACTOR_APPLICATION,
     }
     assert np.all(np.isfinite(factor)) and np.all(factor.values > 0)

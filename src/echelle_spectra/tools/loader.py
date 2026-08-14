@@ -39,10 +39,25 @@ DEFAULT_CAMERA_FILENAMES: dict[str, dict[str, str]] = {
 _CAMERA_FILENAMES = DEFAULT_CAMERA_FILENAMES
 
 
-def _normalize_calibration_file_override(value: str) -> str:
+def _normalize_calibration_file_override(
+    value: str, calibration_folder: str | Path | None = None
+) -> str:
+    """Resolve one filename override without letting the process CWD outrank it.
+
+    Snapshot-sourced maps name their files by role (``pattern.txt``,
+    ``wavelength.txt``, ``sphere.sif``, ...), so a same-named file in whatever
+    directory the process happens to run from could silently replace a
+    calibration input.  A name that exists inside *calibration_folder* is
+    therefore always kept relative and resolved against that folder.  Only names
+    the calibration folder does not carry fall back to working-directory
+    resolution, which the shipped export config still relies on for its
+    repo-relative table paths.
+    """
     path = Path(value)
     if path.is_absolute():
         return str(path)
+    if calibration_folder is not None and (Path(calibration_folder) / path).exists():
+        return str(value)
     if path.exists():
         return str(path.resolve())
     return str(value)
@@ -68,7 +83,10 @@ def build_calibration(
         Which calibration file set to use — ``"CMOS"`` (default) or ``"CCD"``.
     calibration_files : dict, optional
         Filename overrides for the selected camera calibration set.  Values may
-        be relative to *calibration_folder* or absolute paths.
+        be relative to *calibration_folder* or absolute paths.  A relative name
+        that *calibration_folder* carries always resolves inside that folder, so
+        snapshot-sourced role filenames cannot be shadowed by the working
+        directory.
 
     Returns
     -------
@@ -95,7 +113,7 @@ def build_calibration(
     if calibration_files:
         filenames.update(
             {
-                k: _normalize_calibration_file_override(str(v))
+                k: _normalize_calibration_file_override(str(v), cal_dir)
                 for k, v in calibration_files.items()
                 if v
             }

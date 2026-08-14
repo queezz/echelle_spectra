@@ -131,13 +131,54 @@ def _evaluate_wavelength(ds, snapshot: Snapshot) -> tuple[np.ndarray, dict[str, 
     return wavelength, _polynomial_payload(snapshot, represented_solutions)
 
 
-def _factor_kind(units: str) -> str:
+#: Absolute-factor kinds and the intensity units each one produces.  Ordered
+#: longest unit text first so ``wmsr`` is never read as its ``wm`` prefix.
+ABSOLUTE_KIND_UNITS = (
+    ("phmsr", "ph/s/nm/sr"),
+    ("wmsr", "W/m2/nm/sr"),
+    ("wm", "W/m2/nm"),
+)
+
+
+def _factor_kind_from_units(units: str) -> str | None:
+    """Recover the applied kind from a pre-F2 cube's factor units text."""
+
     lowered = units.casefold()
-    if "ph" in lowered:
-        return "phmsr"
-    if "sr" in lowered:
-        return "wmsr"
-    return "wm"
+    for kind, unit_text in ABSOLUTE_KIND_UNITS:
+        if lowered.startswith(unit_text.casefold()):
+            return kind
+    return None
+
+
+def _factor_kind(factor) -> str:
+    """Return which sphere curve produced a cube's applied absolute factor.
+
+    Cubes written from this version onwards state the kind outright in the
+    ``absolute_kind`` attribute.  The units text remains the documented fallback
+    for cubes written before it existed, and an unrecognisable units string is
+    refused rather than guessed: rescaling by the wrong sphere curve is silent.
+    """
+
+    known = {kind for kind, _ in ABSOLUTE_KIND_UNITS}
+    declared = str(factor.attrs.get("absolute_kind", "")).strip().casefold()
+    if declared:
+        if declared not in known:
+            raise RecalibrationError(
+                f"cube declares an unknown absolute_kind {declared!r}; expected one of "
+                + ", ".join(sorted(known))
+            )
+        return declared
+    units = str(factor.attrs.get("units", "")).strip()
+    kind = _factor_kind_from_units(units)
+    if kind is None:
+        raise RecalibrationError(
+            "cube does not state which absolute calibration curve it applied: "
+            "applied_absolute_calibration_factor carries no absolute_kind attribute and "
+            f"its units {units!r} match none of "
+            + ", ".join(f"{name} ({unit})" for name, unit in ABSOLUTE_KIND_UNITS)
+            + "; re-export the cube so it records absolute_kind"
+        )
+    return kind
 
 
 def factor_from_snapshot(ds, snapshot: Snapshot) -> np.ndarray:
@@ -151,8 +192,7 @@ def factor_from_snapshot(ds, snapshot: Snapshot) -> np.ndarray:
         _snapshot_camera(snapshot),
         calibration_files=snapshot.calibration_files(),
     )
-    old_factor = ds["applied_absolute_calibration_factor"]
-    kind = _factor_kind(str(old_factor.attrs.get("units", "")))
+    kind = _factor_kind(ds["applied_absolute_calibration_factor"])
     factor = np.asarray(calibration.absolute[kind], dtype=float)
     wavelength = np.asarray(calibration.wavelength, dtype=float)
     detector_grid = np.broadcast_to(
@@ -161,10 +201,20 @@ def factor_from_snapshot(ds, snapshot: Snapshot) -> np.ndarray:
     order_grid = np.broadcast_to(
         np.asarray(calibration.order_ids)[:, None], calibration.order_borders.shape
     )[calibration.order_borders]
+    # Length trap: Calibrations.wavelength keeps the partial-order NaN pad
+    # (N_full) while EchelleImage.wavelength and every absolute factor are built
+    # from the already-pruned sphere spectra (N_keep).  The N_full grids above
+    # take the keep mask; the factor is already in wavelength[keep] order and
+    # must not be masked again.
     keep = np.isfinite(wavelength)
+    if factor.size != int(np.count_nonzero(keep)):
+        raise RecalibrationError(
+            f"snapshot absolute factor has {factor.size} samples for "
+            f"{int(np.count_nonzero(keep))} retained wavelength samples"
+        )
     lookup = {
         (int(order), int(pixel)): float(value)
-        for order, pixel, value in zip(order_grid[keep], detector_grid[keep], factor[keep])
+        for order, pixel, value in zip(order_grid[keep], detector_grid[keep], factor)
     }
     try:
         return np.asarray(
@@ -184,6 +234,16 @@ def factor_from_snapshot(ds, snapshot: Snapshot) -> np.ndarray:
 
 
 def _replace_factor(revised, original, new_snapshot: Snapshot, new_factor: np.ndarray | None):
+    """Apply a new absolute factor, dropping the samples it cannot calibrate.
+
+    Export drops wavelength columns whose absolute factor is not strictly
+    positive — one noise-negative sphere-minus-background column must not fail a
+    whole file — and recalibration mirrors that tolerance: a sample whose old or
+    new factor is non-finite or non-positive is removed and counted in the
+    ``dropped_nonpositive_factor_columns`` attribute instead of refusing the
+    revision.  Every retained sample keeps the strictly positive guarantee.
+    """
+
     if "applied_absolute_calibration_factor" not in revised:
         raise RecalibrationError(
             "absolute-factor recalibration needs applied_absolute_calibration_factor"
@@ -194,10 +254,27 @@ def _replace_factor(revised, original, new_snapshot: Snapshot, new_factor: np.nd
         if new_factor is not None
         else factor_from_snapshot(revised, new_snapshot)
     )
-    if replacement.shape != old.shape or not np.all(np.isfinite(replacement)):
-        raise RecalibrationError("replacement absolute factor must be finite and wavelength-aligned")
-    if np.any(replacement <= 0):
-        raise RecalibrationError("replacement absolute factor must be strictly positive")
+    if replacement.shape != old.shape:
+        raise RecalibrationError("replacement absolute factor must be wavelength-aligned")
+    previous = np.asarray(old.values, dtype=float)
+    usable = (
+        np.isfinite(replacement)
+        & (replacement > 0)
+        & np.isfinite(previous)
+        & (previous > 0)
+    )
+    dropped = int(usable.size - np.count_nonzero(usable))
+    if not np.any(usable):
+        raise RecalibrationError(
+            "no wavelength sample has a strictly positive old and replacement absolute factor"
+        )
+    if dropped:
+        revised = revised.isel(wavelength=np.flatnonzero(usable))
+        replacement = replacement[usable]
+        old = revised["applied_absolute_calibration_factor"]
+        revised.attrs["dropped_nonpositive_factor_columns"] = (
+            int(revised.attrs.get("dropped_nonpositive_factor_columns", 0)) + dropped
+        )
     source_signal = revised["intensity"] / old
     revised["intensity"] = source_signal * replacement
     revised["intensity"].attrs.update(original["intensity"].attrs)
@@ -206,9 +283,17 @@ def _replace_factor(revised, original, new_snapshot: Snapshot, new_factor: np.nd
         replacement,
         dict(old.attrs),
     )
+    return revised, dropped
 
 
-def _append_history(ds, revised, new_snapshot: Snapshot, changes: list[str]) -> dict[str, Any]:
+def _append_history(
+    ds,
+    revised,
+    new_snapshot: Snapshot,
+    changes: list[str],
+    *,
+    dropped_nonpositive_factor_columns: int = 0,
+) -> dict[str, Any]:
     history = []
     raw_history = ds.attrs.get("recalibration_history_json")
     if raw_history:
@@ -229,6 +314,8 @@ def _append_history(ds, revised, new_snapshot: Snapshot, changes: list[str]) -> 
         "new_snapshot_manifest_json": new_snapshot.provenance_attrs()["snapshot_manifest_json"],
         "changes": changes,
     }
+    if dropped_nonpositive_factor_columns:
+        event["dropped_nonpositive_factor_columns"] = int(dropped_nonpositive_factor_columns)
     history.append(event)
     revised.attrs.update(new_snapshot.provenance_attrs())
     revised.attrs["recalibration_history_json"] = json.dumps(
@@ -275,16 +362,25 @@ def recalibrate_dataset(
     revised = ds.copy(deep=True)
     changes: list[str] = []
     polynomial_payload: dict[str, Any] | None = None
+    dropped_nonpositive_factor_columns = 0
     if update_wavelength:
         wavelength, polynomial_payload = _evaluate_wavelength(revised, new_snapshot)
         revised = revised.assign_coords(wavelength=("wavelength", wavelength))
         changes.append("wavelength")
 
     if update_factor:
-        _replace_factor(revised, ds, new_snapshot, new_factor)
+        revised, dropped_nonpositive_factor_columns = _replace_factor(
+            revised, ds, new_snapshot, new_factor
+        )
         changes.append("absolute-factor")
 
-    event = _append_history(ds, revised, new_snapshot, changes)
+    event = _append_history(
+        ds,
+        revised,
+        new_snapshot,
+        changes,
+        dropped_nonpositive_factor_columns=dropped_nonpositive_factor_columns,
+    )
     if polynomial_payload is not None:
         revised.attrs["wavelength_polynomials_json"] = json.dumps(
             polynomial_payload, sort_keys=True, separators=(",", ":")

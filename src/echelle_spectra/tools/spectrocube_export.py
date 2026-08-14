@@ -349,8 +349,12 @@ def to_spectrocube(
     drop_nonfinite_columns : bool
         Drop wavelength columns where the wavelength or any frame intensity is
         non-finite.  This is useful for absolute calibration columns where a
-        zero sphere response would otherwise create infinities.  Dropped column
-        counts are recorded in metadata.  Default: ``True``.
+        zero sphere response would otherwise create infinities.  Columns whose
+        applied absolute factor is not strictly positive — a noise-negative
+        sphere-minus-background column, say — are dropped with them.  Both
+        dropped column counts are recorded in metadata
+        (``dropped_nonfinite_wavelength_columns`` and
+        ``dropped_nonpositive_factor_columns``).  Default: ``True``.
     wavelength_min_nm, wavelength_max_nm : float, optional
         Inclusive wavelength crop bounds in nm.  When supplied, the exported
         wavelength axis and intensity are cropped and the original range is
@@ -464,11 +468,23 @@ def to_spectrocube(
     original_wavelength_points = int(wavelength.size)
 
     dropped_nonfinite_columns = 0
+    dropped_nonpositive_factor_columns = 0
     if drop_nonfinite_columns:
         valid = np.isfinite(wavelength) & np.all(np.isfinite(intensity_2d), axis=0)
         for values in aligned.values():
             valid &= np.isfinite(values)
         dropped_nonfinite_columns = int(valid.size - np.count_nonzero(valid))
+        applied_factor = aligned.get("applied_absolute_calibration_factor")
+        if applied_factor is not None:
+            # A noise-negative sphere-minus-background column is plausible across
+            # a whole detector and must not fail the file.  Such columns join the
+            # non-finite drop instead, which keeps the strictly positive factor
+            # guarantee for every column that survives.
+            positive = valid & (applied_factor > 0)
+            dropped_nonpositive_factor_columns = int(
+                np.count_nonzero(valid) - np.count_nonzero(positive)
+            )
+            valid = positive
         wavelength, intensity_2d, aligned = _apply_aligned_selection(
             wavelength, intensity_2d, aligned, valid
         )
@@ -541,7 +557,8 @@ def to_spectrocube(
             if np.any(factor <= 0):
                 raise ValueError(
                     "retained applied absolute-calibration factors must be strictly positive; "
-                    "fix or explicitly crop the calibration input"
+                    "keep drop_nonfinite_columns enabled so non-positive columns are dropped, "
+                    "or explicitly crop the calibration input"
                 )
 
     n_frames = intensity_2d.shape[0]
@@ -588,6 +605,8 @@ def to_spectrocube(
 
     if dropped_nonfinite_columns:
         attrs["dropped_nonfinite_wavelength_columns"] = dropped_nonfinite_columns
+    if dropped_nonpositive_factor_columns:
+        attrs["dropped_nonpositive_factor_columns"] = dropped_nonpositive_factor_columns
     if dropped_wavelength_crop_columns:
         if wavelength_min_nm is not None:
             attrs["wavelength_crop_min_nm"] = float(wavelength_min_nm)
@@ -687,6 +706,9 @@ def to_spectrocube(
                 attrs={
                     "units": f"{unit_meta['intensity_units']} per (counts/s)",
                     "source_units": "counts/s",
+                    # State the sphere curve outright: recalibration must never
+                    # have to reverse-engineer it from free-text units.
+                    "absolute_kind": units,
                     "application": APPLIED_FACTOR_APPLICATION,
                 },
             )
