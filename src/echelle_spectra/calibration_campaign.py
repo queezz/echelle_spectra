@@ -1,15 +1,20 @@
 """UI-independent campaign memory for the live calibration bench.
 
-The live Qt window is deliberately a thin adapter over this module.  Explicit
-file-role classification, the self-ticking procedure, exposure guidance,
-shared-catalog line help, sphere-factor comparison, TOML composition, and
-snapshot save/validation can therefore be rehearsed without an event loop.
+The live Qt window is deliberately a thin adapter over this module.  Exposure
+triage, explicit file-role classification, the data-driven procedure, exposure
+guidance, shared-catalog line help, sphere-factor comparison, TOML composition,
+and snapshot save/validation can therefore be rehearsed without an event loop.
+
+The bench accepts whatever is dropped on it: lamp names are free text, the
+procedure is derived from the roles actually assigned, and no lamp family is
+ever a gate.
 """
 
 from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import tempfile
 from collections.abc import Callable, Mapping, Sequence
@@ -19,6 +24,7 @@ from enum import Enum
 from pathlib import Path
 
 import numpy as np
+from scipy import ndimage
 
 try:  # pragma: no cover - selected by the running Python version
     import tomllib
@@ -40,29 +46,50 @@ from .tools.line_catalog import SpectralLine, load_line_table
 
 __all__ = [
     "ALIGNMENT_SETTINGS_FILENAME",
+    "KNOWN_LAMP_NAMES",
+    "PREVIOUS_CAMPAIGN_LAMPS",
     "AbsoluteCalibrationResult",
     "CalibrationCampaignSession",
     "CatalogOrderLine",
     "ChecklistItem",
     "ChecklistState",
     "ComparisonState",
+    "CountsHistogram",
     "ExposureGuidance",
     "ExposureState",
+    "ExposureTriage",
     "FileRoleSuggestion",
+    "LoadedFrameRecord",
     "MeasurementRecord",
     "MeasurementRole",
+    "SaturationClusters",
     "SaveState",
     "TomlState",
     "WavelengthCorrection",
+    "catalog_family_for_lamp",
     "catalog_lines_for_order",
     "compute_absolute_calibration",
+    "counts_histogram",
     "default_validity",
     "evaluate_exposure",
+    "measure_saturation_clusters",
+    "normalize_lamp_name",
     "suggest_file_roles",
+    "triage_exposure",
     "write_corrected_wavelength_table",
 ]
 
 ALIGNMENT_SETTINGS_FILENAME = "alignment.toml"
+
+#: Detector full scale for the 16-bit Andor cameras this bench serves.
+FULL_SCALE_COUNTS = 65535.0
+
+#: Lamp names the bench offers as ready-made choices.  Any other name is
+#: accepted as free text; the list is convenience, never a permitted set.
+KNOWN_LAMP_NAMES = ("ThAr", "Ne", "Hg", "H2")
+
+#: What the previous campaign actually measured, offered as a suggestion.
+PREVIOUS_CAMPAIGN_LAMPS = ("Ne",)
 
 # Below this the correction would only reformat the table, never move a row.
 IDENTITY_SHIFT_PX = 1e-6
@@ -87,6 +114,12 @@ class MeasurementRole(Enum):
     SPHERE_BACKGROUND = "sphere-background"
     LAMP = "lamp"
     LAMP_BACKGROUND = "lamp-background"
+    OTHER = "other"
+
+
+#: The two lamp roles.  ``MeasurementRole.OTHER`` parks an experiment frame on
+#: the bench without giving it any calibration meaning.
+LAMP_ROLES = (MeasurementRole.LAMP, MeasurementRole.LAMP_BACKGROUND)
 
 
 class ExposureState(Enum):
@@ -113,6 +146,7 @@ class ChecklistState(Enum):
     WAITING = "waiting"
     DONE = "done"
     ATTENTION = "attention"
+    SUGGESTION = "suggestion"
 
 
 class TomlState(Enum):
@@ -139,6 +173,7 @@ class FileRoleSuggestion:
 
     roles: tuple[MeasurementRole, ...]
     reason: str
+    lamp_name: str = ""
 
     @property
     def is_unambiguous(self) -> bool:
@@ -156,6 +191,64 @@ class ExposureGuidance:
     exposure_s: float | None
     suggested_exposure_s: float | None
     next_action: str
+    anomalous_pixels: int = 0
+
+
+@dataclass(frozen=True)
+class CountsHistogram:
+    """Raw-count distribution of one frame stack, ready to draw."""
+
+    edges: np.ndarray
+    counts: np.ndarray
+    full_scale: float
+
+
+@dataclass(frozen=True)
+class SaturationClusters:
+    """Full-scale pixels separated into real saturation and lone anomalies.
+
+    A connected cluster of at least two full-scale pixels is real saturation.
+    An isolated full-scale pixel is an anomaly — a cosmic ray or a hot pixel —
+    and is counted rather than held against the frame.
+    """
+
+    saturation_level: float
+    cluster_count: int
+    cluster_pixels: int
+    largest_cluster_pixels: int
+    anomalous_pixels: int
+    peak_counts: float | None
+    clean_peak_counts: float | None
+    finite_pixels: int
+
+    @property
+    def is_saturated(self) -> bool:
+        return self.cluster_count > 0
+
+
+@dataclass(frozen=True)
+class ExposureTriage:
+    """One-glance exposure verdict for a freshly loaded frame, before roles."""
+
+    state: ExposureState
+    headline: str
+    details: tuple[str, ...]
+    full_scale: float
+    saturation: SaturationClusters
+    histogram: CountsHistogram
+    top_histogram: CountsHistogram
+    headroom_fraction: float | None
+    safe_gain: float | None
+    noise_floor: float | None
+    peak_over_noise: float | None
+    #: The peak the verdict was judged on: the brightest non-anomalous pixel.
+    peak_counts: float | None = None
+
+    @property
+    def is_usable(self) -> bool:
+        """Whether lines may be fitted on this frame at all."""
+
+        return self.state in {ExposureState.GOOD, ExposureState.DIM}
 
 
 @dataclass(frozen=True)
@@ -168,6 +261,16 @@ class MeasurementRecord:
     exposure: ExposureGuidance | None = None
     size_bytes: int = 0
     modified_ns: int = 0
+
+
+@dataclass(frozen=True)
+class LoadedFrameRecord:
+    """A file the bench has read and triaged, whatever it turns out to be."""
+
+    path: Path
+    triage: ExposureTriage
+    exposure: ExposureGuidance
+    suggestion: FileRoleSuggestion
 
 
 @dataclass(frozen=True)
@@ -194,12 +297,18 @@ class SphereComparison:
 
 @dataclass(frozen=True)
 class ChecklistItem:
-    """One self-ticking procedure row."""
+    """One derived procedure row.
+
+    A row that is not yet possible names what would unblock it, and a row that
+    is only advice is marked non-blocking so it can never jail the operator.
+    """
 
     key: str
     label: str
     state: ChecklistState
     detail: str
+    blocking: bool = True
+    unblocked_by: str = ""
 
 
 @dataclass(frozen=True)
@@ -221,33 +330,82 @@ class CatalogOrderLine:
     detector_pixel: float
 
 
-def _normalized_lamp_family(value: str) -> str:
-    compact = value.strip().lower().replace("-", "").replace(" ", "")
-    aliases = {
-        "thar": "ThAr",
-        "ne": "Ne",
-        "hg": "Hg",
-        "h2": "H2",
-        "fulcher": "H2",
-    }
-    if compact not in aliases:
-        raise ValueError("lamp family must be one of ThAr, Ne, Hg, or H2")
-    return aliases[compact]
+_LAMP_ALIASES = {
+    "thar": "ThAr",
+    "th": "ThAr",
+    "ne": "Ne",
+    "neon": "Ne",
+    "hg": "Hg",
+    "mercury": "Hg",
+    "h2": "H2",
+    "fulcher": "H2",
+    "deuterium": "D2",
+    "d2": "D2",
+}
+
+_LAMP_NAME_EXTRA_CHARACTERS = "+-_."
+
+_CATALOG_FAMILIES = {"ThAr": "thar", "Ne": "ne", "Hg": "hg", "H2": "fulcher"}
 
 
-def _catalog_family(lamp_family: str) -> str:
-    return {"ThAr": "thar", "Ne": "ne", "Hg": "hg", "H2": "fulcher"}[
-        _normalized_lamp_family(lamp_family)
-    ]
+def normalize_lamp_name(value: str) -> str:
+    """Return the canonical spelling of a lamp name, accepting any lamp.
+
+    Known spellings collapse onto their canonical form so ``th-ar`` and
+    ``ThAr`` are one lamp.  Every other non-empty, path-safe name is kept as
+    the operator typed it: the bench never refuses a lamp it has not met.
+    """
+
+    text = str(value).strip()
+    if not text:
+        raise ValueError("a lamp role needs a lamp name")
+    compact = text.casefold().replace("-", "").replace(" ", "")
+    if compact in _LAMP_ALIASES:
+        return _LAMP_ALIASES[compact]
+    if not all(
+        character.isalnum() or character in _LAMP_NAME_EXTRA_CHARACTERS
+        for character in text
+    ):
+        raise ValueError(
+            "a lamp name may hold only letters, digits, '+', '-', '_', and '.'"
+        )
+    return text
+
+
+def catalog_family_for_lamp(lamp_name: str) -> str | None:
+    """Return the packaged line-catalog family for *lamp_name*, if one exists."""
+
+    try:
+        return _CATALOG_FAMILIES.get(normalize_lamp_name(lamp_name))
+    except ValueError:
+        return None
+
+
+def _lamp_name_in_filename(stem: str) -> str:
+    """Return the lamp name a filename hints at, or an empty string."""
+
+    tokens = [token for token in re.split(r"[^0-9a-zA-Z]+", stem) if token]
+    for token in tokens:
+        compact = token.casefold()
+        if compact in _LAMP_ALIASES:
+            return _LAMP_ALIASES[compact]
+    return ""
 
 
 def suggest_file_roles(path: str | Path) -> FileRoleSuggestion:
-    """Suggest likely roles from a filename without accepting the suggestion."""
+    """Suggest a likely role from a filename without ever accepting it.
 
-    stem = Path(path).stem.casefold()
-    background = any(token in stem for token in ("background", "_bg", "-bg", "bkg"))
-    sphere = any(token in stem for token in ("sphere", "sphr", "absolute"))
-    lamp = any(token in stem for token in ("thar", "th-ar", "neon", "lamp", "h2", "hg"))
+    The suggestion pre-fills the manual controls and nothing else.  A file
+    whose name says nothing still loads, still gets triaged, and can still be
+    given any role by hand.
+    """
+
+    stem = Path(path).stem
+    folded = stem.casefold()
+    background = any(token in folded for token in ("background", "_bg", "-bg", "bkg", "dark"))
+    sphere = any(token in folded for token in ("sphere", "sphr", "absolute"))
+    lamp_name = _lamp_name_in_filename(stem)
+    lamp = bool(lamp_name) or "lamp" in folded
     if sphere and background:
         return FileRoleSuggestion(
             (MeasurementRole.SPHERE_BACKGROUND,),
@@ -261,12 +419,16 @@ def suggest_file_roles(path: str | Path) -> FileRoleSuggestion:
     if lamp and background:
         return FileRoleSuggestion(
             (MeasurementRole.LAMP_BACKGROUND,),
-            "filename looks like a lamp background; confirm the role and lamp family",
+            f"filename looks like a {lamp_name or 'lamp'} background; "
+            "confirm the role and lamp name",
+            lamp_name,
         )
     if lamp:
         return FileRoleSuggestion(
             (MeasurementRole.LAMP,),
-            "filename looks like a lamp signal; confirm the role and lamp family",
+            f"filename looks like a {lamp_name or 'lamp'} signal; "
+            "confirm the role and lamp name",
+            lamp_name,
         )
     if background:
         return FileRoleSuggestion(
@@ -275,7 +437,7 @@ def suggest_file_roles(path: str | Path) -> FileRoleSuggestion:
         )
     return FileRoleSuggestion(
         tuple(MeasurementRole),
-        "filename does not support a unique role; select it explicitly",
+        "filename does not support a unique role; assign one by hand",
     )
 
 
@@ -291,19 +453,281 @@ def _metadata_exposure_s(metadata: Mapping[str, object]) -> float | None:
     return None
 
 
+#: Four-connectivity inside one frame.  Saturation spreads across neighbouring
+#: pixels of the same exposure; it never links two frames, so a hot pixel that
+#: repeats every frame stays a repeated anomaly instead of becoming a cluster.
+_IN_FRAME_CROSS = np.array(
+    [[False, True, False], [True, True, True], [False, True, False]]
+)
+
+#: Cap on pixels sampled for the robust noise floor; the frames are large and
+#: the floor is a property of the background, not of the sample size.
+_NOISE_SAMPLE_LIMIT = 250_000
+
+
+def measure_saturation_clusters(
+    images: np.ndarray,
+    *,
+    saturation_level: float = 0.98 * FULL_SCALE_COUNTS,
+) -> SaturationClusters:
+    """Separate clustered saturation from isolated full-scale anomalies.
+
+    ``images`` may be ``(rows, cols)`` or ``(frames, rows, cols)``.  Clusters
+    are found with four-connectivity inside each frame: two or more touching
+    full-scale pixels are real saturation, while a lone full-scale pixel is a
+    cosmic ray or hot pixel and is reported as an anomaly instead.
+    """
+
+    stack = np.asarray(images, dtype=float)
+    if stack.ndim == 2:
+        stack = stack[np.newaxis, :, :]
+    if stack.ndim != 3:
+        raise ValueError("images must have shape (rows, cols) or (frames, rows, cols)")
+    level = float(saturation_level)
+
+    finite_pixels = 0
+    peak: float | None = None
+    clean_peak: float | None = None
+    cluster_count = 0
+    cluster_pixels = 0
+    largest_cluster = 0
+    anomalies = 0
+    for frame in stack:
+        finite = np.isfinite(frame)
+        finite_pixels += int(np.count_nonzero(finite))
+        if not finite.any():
+            continue
+        peak = _maximum(peak, float(np.max(frame[finite])))
+        saturated = finite & (frame >= level)
+        if not saturated.any():
+            clean_peak = _maximum(clean_peak, float(np.max(frame[finite])))
+            continue
+        labels, _found = ndimage.label(saturated, structure=_IN_FRAME_CROSS)
+        sizes = np.bincount(labels.reshape(-1))
+        sizes[0] = 0
+        anomalies += int(np.count_nonzero(sizes == 1))
+        clustered = sizes[sizes >= 2]
+        cluster_count += int(clustered.size)
+        cluster_pixels += int(clustered.sum())
+        largest_cluster = max(largest_cluster, int(clustered.max()) if clustered.size else 0)
+        lonely = (sizes == 1)[labels]
+        candidates = finite & ~lonely
+        if candidates.any():
+            clean_peak = _maximum(clean_peak, float(np.max(frame[candidates])))
+    return SaturationClusters(
+        level,
+        cluster_count,
+        cluster_pixels,
+        largest_cluster,
+        anomalies,
+        peak,
+        clean_peak,
+        finite_pixels,
+    )
+
+
+def _maximum(current: float | None, candidate: float) -> float:
+    return candidate if current is None else max(current, candidate)
+
+
+def counts_histogram(
+    values: np.ndarray,
+    *,
+    full_scale: float = FULL_SCALE_COUNTS,
+    bins: int = 96,
+    lowest: float | None = None,
+) -> CountsHistogram:
+    """Bin finite raw counts between *lowest* and detector full scale."""
+
+    finite = np.asarray(values, dtype=float).reshape(-1)
+    finite = finite[np.isfinite(finite)]
+    smallest = float(finite.min()) if finite.size else 0.0
+    largest = float(finite.max()) if finite.size else float(full_scale)
+    low = float(lowest) if lowest is not None else min(0.0, smallest)
+    high = max(float(full_scale), largest)
+    if high <= low:
+        high = low + 1.0
+    counts, edges = np.histogram(finite, bins=int(bins), range=(low, high))
+    return CountsHistogram(edges, counts, float(full_scale))
+
+
+def _noise_floor(finite: np.ndarray) -> tuple[float, float]:
+    """Return a robust (baseline, noise) pair from a strided pixel sample."""
+
+    stride = max(1, finite.size // _NOISE_SAMPLE_LIMIT)
+    sample = finite[::stride]
+    baseline = float(np.median(sample))
+    noise = float(1.4826 * np.median(np.abs(sample - baseline)))
+    if noise <= 0:
+        noise = float(np.std(sample))
+    if noise <= 0:
+        noise = 1.0
+    return baseline, noise
+
+
+def triage_exposure(
+    frame: BenchFrame,
+    *,
+    saturation_level: float = 0.98 * FULL_SCALE_COUNTS,
+    full_scale: float = FULL_SCALE_COUNTS,
+    dim_fraction: float = 0.20,
+    minimum_peak_snr: float = 10.0,
+    safe_fraction: float = 0.90,
+    top_fraction: float = 0.90,
+) -> ExposureTriage:
+    """Judge one freshly read frame before it is given any role.
+
+    This is the bench's front door: it needs nothing but a file.  The verdict
+    reports clustered saturation, counted anomalies, remaining headroom, and
+    whether the frame is bright enough above its own noise floor for lines to
+    fit well.
+    """
+
+    clusters = measure_saturation_clusters(frame.images, saturation_level=saturation_level)
+    finite = np.asarray(frame.images, dtype=float).reshape(-1)
+    finite = finite[np.isfinite(finite)]
+    histogram = counts_histogram(finite, full_scale=full_scale)
+    top_histogram = counts_histogram(
+        finite, full_scale=full_scale, bins=48, lowest=top_fraction * full_scale
+    )
+    # A frame whose only bright pixels are lone spikes still has a real peak:
+    # fall back to it rather than pretending the frame holds nothing.
+    reference_peak = (
+        clusters.clean_peak_counts
+        if clusters.clean_peak_counts is not None
+        else clusters.peak_counts
+    )
+    if not finite.size or reference_peak is None:
+        return ExposureTriage(
+            ExposureState.NO_DATA,
+            "NO DATA — the frame holds no finite raw pixels; reacquire.",
+            ("Nothing can be judged from this file.",),
+            float(full_scale),
+            clusters,
+            histogram,
+            top_histogram,
+            None,
+            None,
+            None,
+            None,
+        )
+
+    baseline, noise = _noise_floor(finite)
+    clean_peak = float(reference_peak)
+    headroom = clean_peak / float(full_scale)
+    safe_gain = (safe_fraction * float(full_scale)) / max(clean_peak, np.finfo(float).eps)
+    peak_over_noise = (clean_peak - baseline) / noise
+    state = _triage_state(clusters, headroom, peak_over_noise, dim_fraction, minimum_peak_snr)
+    details = _triage_details(clusters, clean_peak, headroom, safe_gain, baseline, peak_over_noise)
+    return ExposureTriage(
+        state,
+        _triage_headline(state, clusters, headroom, safe_gain, peak_over_noise),
+        details,
+        float(full_scale),
+        clusters,
+        histogram,
+        top_histogram,
+        float(headroom),
+        float(safe_gain),
+        float(baseline),
+        float(peak_over_noise),
+        clean_peak,
+    )
+
+
+def _triage_state(
+    clusters: SaturationClusters,
+    headroom: float,
+    peak_over_noise: float,
+    dim_fraction: float,
+    minimum_peak_snr: float,
+) -> ExposureState:
+    if clusters.is_saturated:
+        return ExposureState.SATURATED
+    if headroom < dim_fraction or peak_over_noise < minimum_peak_snr:
+        return ExposureState.DIM
+    return ExposureState.GOOD
+
+
+def _triage_headline(
+    state: ExposureState,
+    clusters: SaturationClusters,
+    headroom: float,
+    safe_gain: float,
+    peak_over_noise: float,
+) -> str:
+    """Compose the single line the operator reads between two exposures."""
+
+    tail = ""
+    if clusters.anomalous_pixels:
+        tail = (
+            f" {clusters.anomalous_pixels} isolated full-scale pixel(s) are anomalies, "
+            "not saturation."
+        )
+    if state is ExposureState.SATURATED:
+        return (
+            f"SATURATED — {clusters.cluster_pixels} full-scale pixel(s) in "
+            f"{clusters.cluster_count} connected cluster(s); lower the exposure "
+            f"and shoot again.{tail}"
+        )
+    if state is ExposureState.DIM:
+        return (
+            f"TOO DIM FOR LINES — brightest real pixel at {100.0 * headroom:.1f}% of "
+            f"full scale, only {peak_over_noise:.0f}x the noise floor: right for a "
+            f"background, too weak for a lamp. About {safe_gain:.1f}x brighter is safe."
+            f"{tail}"
+        )
+    return (
+        f"HEALTHY — brightest real pixel at {100.0 * headroom:.1f}% of full scale; "
+        f"about {safe_gain:.1f}x brighter is still safe.{tail}"
+    )
+
+
+def _triage_details(
+    clusters: SaturationClusters,
+    clean_peak: float,
+    headroom: float,
+    safe_gain: float,
+    baseline: float,
+    peak_over_noise: float,
+) -> tuple[str, ...]:
+    anomaly_note = (
+        f"{clusters.anomalous_pixels} isolated full-scale pixel(s) counted as "
+        "anomalies (cosmic rays or hot pixels), not saturation"
+        if clusters.anomalous_pixels
+        else "no isolated full-scale pixels"
+    )
+    saturation_note = (
+        f"{clusters.cluster_pixels} full-scale pixel(s) in {clusters.cluster_count} "
+        f"cluster(s), largest {clusters.largest_cluster_pixels}"
+        if clusters.is_saturated
+        else "no connected full-scale cluster"
+    )
+    return (
+        f"Brightest non-anomalous pixel {clean_peak:.0f} counts "
+        f"({100.0 * headroom:.1f}% of full scale) — about {safe_gain:.1f}x brighter is safe.",
+        f"Saturation: {saturation_note}.",
+        f"Anomalies: {anomaly_note}.",
+        f"Noise floor {baseline:.0f} counts; peak stands {peak_over_noise:.0f}x above it.",
+    )
+
+
 def evaluate_exposure(
     frame: BenchFrame,
     *,
-    saturation_level: float = 0.98 * 65535,
+    saturation_level: float = 0.98 * FULL_SCALE_COUNTS,
     dim_fraction: float = 0.20,
     target_fraction: float = 0.70,
 ) -> ExposureGuidance:
-    """Inspect raw detector pixels and state the next safe exposure action."""
+    """State the next safe acquisition action for one triaged frame."""
 
-    values = np.asarray(frame.images, dtype=float)
-    finite = values[np.isfinite(values)]
+    triage = triage_exposure(
+        frame, saturation_level=saturation_level, dim_fraction=dim_fraction
+    )
     exposure_s = _metadata_exposure_s(frame.metadata)
-    if not finite.size:
+    clusters = triage.saturation
+    peak = triage.peak_counts
+    if triage.state is ExposureState.NO_DATA or peak is None:
         return ExposureGuidance(
             ExposureState.NO_DATA,
             None,
@@ -312,46 +736,33 @@ def evaluate_exposure(
             exposure_s,
             None,
             "No finite raw pixels are available; reacquire before continuing.",
+            clusters.anomalous_pixels,
         )
-    peak = float(np.max(finite))
-    saturated_pixels = int(np.count_nonzero(finite >= saturation_level))
-    saturated_fraction = saturated_pixels / int(finite.size)
     scale = target_fraction * saturation_level / max(peak, np.finfo(float).eps)
     suggested = exposure_s * scale if exposure_s is not None else None
-    if saturated_pixels:
+    saturated_fraction = (
+        clusters.cluster_pixels / clusters.finite_pixels if clusters.finite_pixels else 0.0
+    )
+    if triage.state is ExposureState.SATURATED:
         action = "Lower exposure and reacquire; do not accept anchors from this frame."
         if suggested is not None:
             action = f"Lower exposure to about {suggested:.4g} s and reacquire."
-        return ExposureGuidance(
-            ExposureState.SATURATED,
-            peak,
-            saturated_pixels,
-            saturated_fraction,
-            exposure_s,
-            suggested,
-            action,
-        )
-    if peak < dim_fraction * saturation_level:
+    elif triage.state is ExposureState.DIM:
         action = "Increase exposure, then reacquire for stronger unsaturated lines."
         if suggested is not None:
             action = f"Increase exposure toward {suggested:.4g} s, then reacquire."
-        return ExposureGuidance(
-            ExposureState.DIM,
-            peak,
-            0,
-            0.0,
-            exposure_s,
-            suggested,
-            action,
-        )
+    else:
+        action = "Exposure is usable. Continue with line identification and anchor fitting."
+        suggested = exposure_s
     return ExposureGuidance(
-        ExposureState.GOOD,
+        triage.state,
         peak,
-        0,
-        0.0,
+        clusters.cluster_pixels,
+        saturated_fraction,
         exposure_s,
-        exposure_s,
-        "Exposure is usable. Continue with line identification and anchor fitting.",
+        suggested,
+        action,
+        clusters.anomalous_pixels,
     )
 
 
@@ -374,9 +785,12 @@ def catalog_lines_for_order(
     pixels = np.asarray([row.center_pixel for row in rows], dtype=float)
     minimum_nm = float(wavelengths[0])
     maximum_nm = float(wavelengths[-1])
+    family = catalog_family_for_lamp(lamp_family)
+    if family is None:
+        return ()
     catalog = [
         line
-        for line in load_line_table(_catalog_family(lamp_family))
+        for line in load_line_table(family)
         if minimum_nm <= line.wavelength_nm <= maximum_nm
     ]
     catalog.sort(
@@ -514,23 +928,23 @@ class CalibrationCampaignSession:
         pattern_source: str | Path,
         wavelength_source: str | Path,
         integral_source: str | Path,
-        required_lamps: Sequence[str] = ("ThAr",),
+        suggested_lamps: Sequence[str] = PREVIOUS_CAMPAIGN_LAMPS,
         previous_sphere: str | Path | None = None,
         previous_sphere_background: str | Path | None = None,
     ) -> None:
         self.pattern_source = Path(pattern_source)
         self.wavelength_source = Path(wavelength_source)
         self.integral_source = Path(integral_source)
-        self.required_lamps = tuple(
-            dict.fromkeys(_normalized_lamp_family(item) for item in required_lamps)
+        #: What the previous campaign measured.  Advice for this one, never a gate.
+        self.suggested_lamps = tuple(
+            dict.fromkeys(normalize_lamp_name(item) for item in suggested_lamps if str(item).strip())
         )
-        if not self.required_lamps:
-            raise ValueError("at least one required lamp family is needed")
         self.previous_sphere = Path(previous_sphere) if previous_sphere else None
         self.previous_sphere_background = (
             Path(previous_sphere_background) if previous_sphere_background else None
         )
         self.observed: dict[Path, FileRoleSuggestion] = {}
+        self.loaded: dict[Path, LoadedFrameRecord] = {}
         self.measurements: dict[Path, MeasurementRecord] = {}
         self.comparison = SphereComparison(ComparisonState.NOT_RUN, "not computed")
         self.toml_state = TomlState.NOT_GENERATED
@@ -549,6 +963,52 @@ class CalibrationCampaignSession:
         self.observed[source] = suggestion
         return suggestion
 
+    def record_frame(
+        self,
+        frame: BenchFrame,
+        *,
+        saturation_level: float = 0.98 * FULL_SCALE_COUNTS,
+    ) -> LoadedFrameRecord:
+        """Triage a freshly read frame before it has any role at all.
+
+        The frame itself is not retained — only its verdict — so a bench can
+        hold a whole campaign folder without holding every detector image.
+        """
+
+        suggestion = self.observe_file(frame.path)
+        triage = triage_exposure(frame, saturation_level=saturation_level)
+        record = LoadedFrameRecord(
+            Path(frame.path),
+            triage,
+            evaluate_exposure(frame, saturation_level=saturation_level),
+            suggestion,
+        )
+        self.loaded[record.path] = record
+        return record
+
+    def forget_file(self, path: str | Path) -> bool:
+        """Drop one loaded file and any role it carried."""
+
+        source = Path(path)
+        self.observed.pop(source, None)
+        removed = self.loaded.pop(source, None) is not None
+        return self.remove_classification(source) or removed
+
+    @property
+    def assigned_lamps(self) -> tuple[str, ...]:
+        """Lamp names the operator actually assigned, in a stable order."""
+
+        return tuple(
+            sorted(
+                {
+                    record.lamp_family
+                    for record in self.measurements.values()
+                    if record.role in LAMP_ROLES and record.lamp_family
+                },
+                key=str.casefold,
+            )
+        )
+
     def classify_file(
         self,
         path: str | Path,
@@ -556,7 +1016,7 @@ class CalibrationCampaignSession:
         *,
         lamp_family: str = "",
         frame: BenchFrame | None = None,
-        saturation_level: float = 0.98 * 65535,
+        saturation_level: float = 0.98 * FULL_SCALE_COUNTS,
     ) -> MeasurementRecord:
         """Explicitly assign a role; filename suggestions never call this method."""
 
@@ -565,12 +1025,13 @@ class CalibrationCampaignSession:
             raise FileNotFoundError(f"measurement source not found: {source}")
         stat = source.stat()
         family = ""
-        if role in {MeasurementRole.LAMP, MeasurementRole.LAMP_BACKGROUND}:
-            family = _normalized_lamp_family(lamp_family)
+        if role in LAMP_ROLES:
+            family = normalize_lamp_name(lamp_family)
+        loaded = self.loaded.get(source)
         exposure = (
             evaluate_exposure(frame, saturation_level=saturation_level)
             if frame is not None
-            else None
+            else (loaded.exposure if loaded is not None else None)
         )
         if exposure is not None and role in {
             MeasurementRole.SPHERE_BACKGROUND,
@@ -590,6 +1051,7 @@ class CalibrationCampaignSession:
                 exposure.exposure_s,
                 exposure.suggested_exposure_s,
                 action,
+                exposure.anomalous_pixels,
             )
         existing = self.measurements.get(source)
         if (
@@ -630,7 +1092,7 @@ class CalibrationCampaignSession:
         self.last_error = ""
 
     def _records(self, role: MeasurementRole, family: str = "") -> tuple[MeasurementRecord, ...]:
-        normalized = _normalized_lamp_family(family) if family else ""
+        normalized = normalize_lamp_name(family) if family else ""
         return tuple(
             sorted(
                 (
@@ -730,21 +1192,54 @@ class CalibrationCampaignSession:
         return self.comparison
 
     def checklist(self, alignment: CalibrationBenchSession) -> tuple[ChecklistItem, ...]:
-        """Derive the ordered, self-ticking measurement procedure."""
+        """Derive the procedure from the files and roles that actually exist.
 
-        items = []
+        Nothing here is a fixed lamp list.  The rows follow what was loaded and
+        assigned, every row that cannot be done yet names what would unblock
+        it, and the previous campaign's lamps appear only as advice.
+        """
+
+        return (
+            *self._input_items(),
+            *self._sphere_items(),
+            *self._lamp_items(),
+            *self._output_items(alignment),
+        )
+
+    def _input_items(self) -> tuple[ChecklistItem, ...]:
         references_ready = all(
             path.is_file()
             for path in (self.pattern_source, self.wavelength_source, self.integral_source)
         )
-        items.append(
+        loaded = tuple(self.loaded.values())
+        saturated = sum(
+            1 for record in loaded if record.triage.state is ExposureState.SATURATED
+        )
+        on_bench = set(self.loaded) | set(self.measurements)
+        detail = "drop SIF files on the bench or use Add files"
+        if on_bench:
+            detail = (
+                f"{len(on_bench)} file(s) on the bench, {len(loaded)} file(s) triaged, "
+                f"{saturated} saturated"
+            )
+        return (
             ChecklistItem(
                 "references",
                 "Pattern, wavelength, and sphere reference",
                 ChecklistState.DONE if references_ready else ChecklistState.ATTENTION,
                 "loaded" if references_ready else "one or more reference files are missing",
-            )
+            ),
+            ChecklistItem(
+                "files",
+                "SIFs loaded and exposure-triaged",
+                ChecklistState.DONE if on_bench else ChecklistState.WAITING,
+                detail,
+                unblocked_by="" if on_bench else "drop any SIF onto the bench window",
+            ),
         )
+
+    def _sphere_items(self) -> tuple[ChecklistItem, ...]:
+        items = []
         for role, key, label in (
             (MeasurementRole.SPHERE, "sphere", "Integrating-sphere signal"),
             (
@@ -759,13 +1254,20 @@ class CalibrationCampaignSession:
                     key,
                     label,
                     ChecklistState.DONE if record else ChecklistState.WAITING,
-                    record.path.name if record else "classify a measured SIF explicitly",
+                    record.path.name if record else "no file carries this role yet",
+                    unblocked_by=""
+                    if record
+                    else f"assign the {label.casefold()} role to a loaded file",
                 )
             )
         comparison_done = self.comparison.state in {
             ComparisonState.READY,
             ComparisonState.INSUFFICIENT_DATA,
         }
+        pair_ready = (
+            self._one(MeasurementRole.SPHERE) is not None
+            and self._one(MeasurementRole.SPHERE_BACKGROUND) is not None
+        )
         items.append(
             ChecklistItem(
                 "sphere-comparison",
@@ -778,34 +1280,92 @@ class CalibrationCampaignSession:
                     else ChecklistState.WAITING
                 ),
                 self.comparison.reason,
+                unblocked_by=""
+                if comparison_done
+                else (
+                    "press Compute and compare factors — the sphere pair is enough"
+                    if pair_ready
+                    else "assign the sphere signal and its background; no lamp is needed"
+                ),
             )
         )
-        for family in self.required_lamps:
+        return tuple(items)
+
+    def _lamp_items(self) -> tuple[ChecklistItem, ...]:
+        items = []
+        assigned = self.assigned_lamps
+        if not assigned:
+            items.append(
+                ChecklistItem(
+                    "lamp-any",
+                    "At least one lamp signal",
+                    ChecklistState.WAITING,
+                    "no lamp has been assigned yet",
+                    unblocked_by="give any loaded file a lamp role; any lamp name works",
+                )
+            )
+        for lamp in assigned:
             for role, suffix, label in (
-                (MeasurementRole.LAMP_BACKGROUND, "background", "lamp background"),
-                (MeasurementRole.LAMP, "signal", "lamp signal"),
+                (MeasurementRole.LAMP, "signal", "signal"),
+                (MeasurementRole.LAMP_BACKGROUND, "background", "background"),
             ):
-                records = self._records(role, family)
+                records = self._records(role, lamp)
                 items.append(
                     ChecklistItem(
-                        f"lamp-{family}-{suffix}",
-                        f"{family} {label}",
+                        f"lamp-{lamp}-{suffix}",
+                        f"{lamp} lamp {label}",
                         ChecklistState.DONE if records else ChecklistState.WAITING,
-                        records[-1].path.name
+                        ", ".join(record.path.name for record in records)
                         if records
-                        else "classify a measured SIF explicitly",
+                        else f"no file carries the {lamp} {label} role yet",
+                        unblocked_by=""
+                        if records
+                        else f"assign the {lamp} lamp {label} role to a loaded file",
                     )
                 )
+        items.append(self._lamp_suggestion_item(assigned))
+        return tuple(items)
+
+    def _lamp_suggestion_item(self, assigned: Sequence[str]) -> ChecklistItem:
+        """Advice from the previous campaign, which never blocks anything."""
+
+        folded = {lamp.casefold() for lamp in assigned}
+        previous = ", ".join(self.suggested_lamps) or "nothing recorded"
+        consider = [
+            lamp
+            for lamp in (*self.suggested_lamps, *KNOWN_LAMP_NAMES)
+            if lamp.casefold() not in folded
+        ]
+        consider = list(dict.fromkeys(consider))
+        detail = f"last time: {previous}"
+        if consider:
+            detail += f"; consider {', '.join(consider)} if available"
+        if assigned:
+            detail += f". This session measured {', '.join(assigned)}"
+        return ChecklistItem(
+            "lamp-suggestions",
+            "More lamps are a gift, never a gate",
+            ChecklistState.SUGGESTION,
+            detail,
+            blocking=False,
+        )
+
+    def _output_items(self, alignment: CalibrationBenchSession) -> tuple[ChecklistItem, ...]:
         alignment_done = alignment.alignment_state is AlignmentState.ALIGNED
-        items.append(
+        if self.assigned_lamps:
+            alignment_next = (
+                "load a lamp frame and click two known lines in different orders"
+            )
+        else:
+            alignment_next = "assign a lamp role to any loaded file, then click two lines"
+        return (
             ChecklistItem(
                 "alignment",
                 "Lamp alignment solved and reviewed",
                 ChecklistState.DONE if alignment_done else ChecklistState.WAITING,
                 f"{len(alignment.anchors)} accepted anchor(s)",
-            )
-        )
-        items.append(
+                unblocked_by="" if alignment_done else alignment_next,
+            ),
             ChecklistItem(
                 "tomls",
                 "Commented campaign TOMLs generated",
@@ -818,10 +1378,11 @@ class CalibrationCampaignSession:
                 ),
                 ", ".join(path.name for path in self.toml_paths.values())
                 if self.toml_paths
-                else "generate after measurements and alignment are complete",
-            )
-        )
-        items.append(
+                else "generate once the sphere pair, one lamp pair, and the fit are in",
+                unblocked_by=""
+                if self.toml_state is TomlState.GENERATED
+                else "complete the rows above, then press Generate commented TOMLs",
+            ),
             ChecklistItem(
                 "snapshot",
                 "Snapshot saved and validated",
@@ -833,9 +1394,11 @@ class CalibrationCampaignSession:
                     else ChecklistState.WAITING
                 ),
                 self._saved_snapshot_detail(),
-            )
+                unblocked_by=""
+                if self.save_state is SaveState.VALIDATED
+                else "generate the TOMLs for this snapshot identity, then save",
+            ),
         )
-        return tuple(items)
 
     def _saved_snapshot_detail(self) -> str:
         if self.saved_snapshot is None:
@@ -844,16 +1407,31 @@ class CalibrationCampaignSession:
             return self.saved_snapshot.snapshot_id
         return f"{self.saved_snapshot.snapshot_id} — {self.wavelength_correction.reason}"
 
+    def _complete_lamps(self) -> tuple[str, ...]:
+        """Lamps that carry both a signal and a background this session."""
+
+        return tuple(
+            lamp
+            for lamp in self.assigned_lamps
+            if self._records(MeasurementRole.LAMP, lamp)
+            and self._records(MeasurementRole.LAMP_BACKGROUND, lamp)
+        )
+
+    def _primary_lamp(self) -> str:
+        complete = self._complete_lamps()
+        if complete:
+            return complete[0]
+        assigned = self.assigned_lamps
+        return assigned[0] if assigned else ""
+
     def _measurement_pairs_ready(self) -> bool:
+        """One sphere pair and one complete lamp pair are the whole demand."""
+
         if self._one(MeasurementRole.SPHERE) is None:
             return False
         if self._one(MeasurementRole.SPHERE_BACKGROUND) is None:
             return False
-        return all(
-            self._records(MeasurementRole.LAMP, family)
-            and self._records(MeasurementRole.LAMP_BACKGROUND, family)
-            for family in self.required_lamps
-        )
+        return bool(self._complete_lamps())
 
     def _composition_ready(self, alignment: CalibrationBenchSession) -> bool:
         return (
@@ -880,9 +1458,9 @@ class CalibrationCampaignSession:
         assert sphere is not None and sphere_background is not None
         lamp_records = tuple(
             record
-            for family in self.required_lamps
-            for role in (MeasurementRole.LAMP, MeasurementRole.LAMP_BACKGROUND)
-            for record in self._records(role, family)
+            for lamp in self.assigned_lamps
+            for role in LAMP_ROLES
+            for record in self._records(role, lamp)
         )
         transform = alignment.transform
         assert transform is not None
@@ -932,7 +1510,7 @@ class CalibrationCampaignSession:
             f"base_wavelength_file = {_toml_string(self.wavelength_source.name)}",
             f"sphere_file = {_toml_string(sphere.path.name)}",
             f"sphere_background_file = {_toml_string(sphere_background.path.name)}",
-            f"lamps = [{', '.join(_toml_string(item) for item in self.required_lamps)}]",
+            f"lamps = [{', '.join(_toml_string(item) for item in self.assigned_lamps)}]",
             f"n_lines = {len(alignment.anchors)}",
             f"rms_px = {alignment.rms_px:.12g}",
             "",
@@ -1079,9 +1657,10 @@ class CalibrationCampaignSession:
             raise SnapshotError("no rigid transform has been solved yet")
         sphere = self._one(MeasurementRole.SPHERE)
         sphere_background = self._one(MeasurementRole.SPHERE_BACKGROUND)
-        lamp = self._records(MeasurementRole.LAMP, self.required_lamps[0])
-        lamp_background = self._records(
-            MeasurementRole.LAMP_BACKGROUND, self.required_lamps[0]
+        primary = self._primary_lamp()
+        lamp = self._records(MeasurementRole.LAMP, primary) if primary else ()
+        lamp_background = (
+            self._records(MeasurementRole.LAMP_BACKGROUND, primary) if primary else ()
         )
         return AlignmentSettings(
             instrument_id=str(detector).strip().lower(),
@@ -1093,7 +1672,7 @@ class CalibrationCampaignSession:
             created_at=created_at,
             alignment_dataset_id=snapshot_id,
             alignment_source_dir=lamp[-1].path.parent.name if lamp else "",
-            alignment_lamp=", ".join(self.required_lamps),
+            alignment_lamp=", ".join(self.assigned_lamps),
             signal_file=lamp[-1].path.name if lamp else "",
             background_file=lamp_background[-1].path.name if lamp_background else "",
             sphere_file=sphere.path.name if sphere is not None else "",
@@ -1163,7 +1742,7 @@ class CalibrationCampaignSession:
         lamp_files = [
             (record.lamp_family, record.path)
             for record in self.measurements.values()
-            if record.role in {MeasurementRole.LAMP, MeasurementRole.LAMP_BACKGROUND}
+            if record.role in LAMP_ROLES
         ]
         self.save_state = SaveState.SAVING
         staging = Path(tempfile.mkdtemp(prefix=f".{snapshot_id}.wavelength-"))
@@ -1195,7 +1774,7 @@ class CalibrationCampaignSession:
                     "sphere_background": sphere_background.path,
                     "integral": self.integral_source,
                 },
-                lamps=self.required_lamps,
+                lamps=self.assigned_lamps,
                 lamp_files=lamp_files,
                 notes=notes,
                 base_snapshot=base_snapshot,

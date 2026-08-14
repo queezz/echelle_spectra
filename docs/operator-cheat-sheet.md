@@ -109,7 +109,7 @@ developer tools cannot be assumed.
 | Command | Use it for | Normal trip use |
 | --- | --- | --- |
 | `echelle_spectra` | Main five-tab analysis GUI for loading, calibrating, viewing, fitting, and exporting spectra | Yes |
-| `echelle-calib FOLDER` | Separate live calibration bench; watches stable SIF arrivals, classifies measurements, fits alignment, compares sphere response, and builds configuration/snapshot evidence | Yes, during calibration |
+| `echelle-calib [FOLDER]` | Separate live calibration bench; drag SIFs onto it (FOLDER only sets where the file dialog opens, `--watch` adds folder polling), triages every exposure, takes hand-assigned roles for any lamp, fits alignment, compares sphere response, and builds configuration/snapshot evidence | Yes, during calibration |
 | `echelle status` | Summarizes snapshots, registry presence, and durable processing receipts | Yes; safest first command |
 | `echelle snapshot create` | Copies role-named calibration inputs into one immutable, digested snapshot | Yes, usually through the bench |
 | `echelle snapshot validate DIR` | Rechecks snapshot schema, paths, sizes, and SHA-256 digests | Yes |
@@ -149,7 +149,7 @@ $Data = "D:\NIFS"
   --registry "$Data\calibration_registry.toml" `
   --runs "$Data\runs"
 
-# 2. Watch the acquisition folder in the live bench.
+# 2. Open the live bench on the acquisition folder, then drag SIFs onto it.
 & ".\.venv\Scripts\echelle-calib.exe" "$Data\incoming" `
   --output-root "$Data\calibrations" `
   --config-root "$Data\calibration-configs"
@@ -197,7 +197,7 @@ data="/Volumes/NIFS"
   --registry "$data/calibration_registry.toml" \
   --runs "$data/runs"
 
-# 2. Watch the acquisition folder in the live bench.
+# 2. Open the live bench on the acquisition folder, then drag SIFs onto it.
 ./.venv/bin/echelle-calib "$data/incoming" \
   --output-root "$data/calibrations" \
   --config-root "$data/calibration-configs"

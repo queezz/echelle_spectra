@@ -22,9 +22,13 @@ from .calibration_bench import (
     StableSifWatcher,
 )
 from .calibration_campaign import (
+    KNOWN_LAMP_NAMES,
+    PREVIOUS_CAMPAIGN_LAMPS,
     CalibrationCampaignSession,
     ChecklistState,
     ComparisonState,
+    ExposureState,
+    ExposureTriage,
     MeasurementRole,
     TomlState,
     catalog_lines_for_order,
@@ -46,6 +50,24 @@ _DEFAULT_PREVIOUS_SPHERE = _CALIBRATION_DIR / "sphere_cmos_20240305.sif"
 _DEFAULT_PREVIOUS_SPHERE_BACKGROUND = (
     _CALIBRATION_DIR / "sphere_cmos_20240305_bkg.sif"
 )
+
+_ROLE_CHOICES: tuple[tuple[str, MeasurementRole | None], ...] = (
+    ("— unassigned —", None),
+    ("Sphere signal", MeasurementRole.SPHERE),
+    ("Sphere background", MeasurementRole.SPHERE_BACKGROUND),
+    ("Lamp signal", MeasurementRole.LAMP),
+    ("Lamp background", MeasurementRole.LAMP_BACKGROUND),
+    ("Experiment / other", MeasurementRole.OTHER),
+)
+
+_LAMP_ROLES = (MeasurementRole.LAMP, MeasurementRole.LAMP_BACKGROUND)
+
+_TRIAGE_COLORS = {
+    ExposureState.GOOD: "#70d6ae",
+    ExposureState.DIM: "#ffb86b",
+    ExposureState.SATURATED: "#ff8f8f",
+    ExposureState.NO_DATA: "#93a8b8",
+}
 
 
 class FrameLoadThread(QtCore.QThread):
@@ -119,8 +141,12 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         self._line_items: list[object] = []
         self._catalog_items: list[object] = []
         self._anchor_items: list[object] = []
+        self._queue: list[Path] = []
+        self._file_rows: list[Path] = []
+        self.last_folder = Path(watcher.folder) if watcher is not None else Path.cwd()
         self._build_ui()
         self._connect_ui()
+        self.setAcceptDrops(True)
         self.refresh()
 
         self.poll_timer = QtCore.QTimer(self)
@@ -149,7 +175,7 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         title = QtWidgets.QLabel("LIVE CALIBRATION")
         title.setObjectName("benchTitle")
         subtitle = QtWidgets.QLabel(
-            "Measure → classify → identify → compare → configure → validate"
+            "Drop files → triage exposure → assign roles → identify → compare → validate"
         )
         subtitle.setWordWrap(True)
         subtitle.setObjectName("benchSubtitle")
@@ -157,6 +183,7 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         controls_layout.addWidget(subtitle)
 
         self.control_tabs = QtWidgets.QTabWidget()
+        self._build_files_tab()
         self._build_procedure_tab()
         self._build_lamp_tab()
         self._build_save_tab()
@@ -164,6 +191,7 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         root.addWidget(controls)
 
         self.view_tabs = QtWidgets.QTabWidget()
+        self._build_triage_view()
         self._build_alignment_view()
         self._build_line_help_view()
         self._build_sphere_view()
@@ -180,6 +208,10 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
             #benchTitle { color: #80ddff; font-size: 21px; font-weight: 700;
                           letter-spacing: 1px; }
             #benchSubtitle, #benchHelp, #mutedText { color: #93a8b8; }
+            #dropTarget { border: 2px dashed #49b5df; border-radius: 9px;
+                          color: #8fd9ff; font-weight: 700; letter-spacing: 1px;
+                          padding: 12px; }
+            #triageHeadline { font-size: 16px; font-weight: 700; padding: 8px; }
             #stateBadge { color: #7ee2b8; font-weight: 700; }
             #messagePanel { background: #0f141a; border-left: 3px solid #49b5df;
                             padding: 9px; color: #bed4e1; }
@@ -205,13 +237,14 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         layout.setContentsMargins(10, 12, 10, 10)
 
         intro = QtWidgets.QLabel(
-            "Follow top to bottom. Checks come only from explicit measurements, "
-            "computed evidence, generated files, and validator success."
+            "This list is built from the files and roles you actually assigned. "
+            "A row that is not possible yet says what would unblock it, and lamp "
+            "advice never blocks anything."
         )
         intro.setWordWrap(True)
         intro.setObjectName("messagePanel")
         layout.addWidget(intro)
-        checklist_header = QtWidgets.QLabel("Self-ticking procedure · measured evidence")
+        checklist_header = QtWidgets.QLabel("Procedure from your data · measured evidence")
         checklist_header.setStyleSheet("background: #202b36; padding: 8px;")
         layout.addWidget(checklist_header)
         self.checklist_tree = QtWidgets.QListWidget()
@@ -220,67 +253,76 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         layout.addWidget(self.checklist_tree, 1)
         self.control_tabs.addTab(tab, "Procedure")
 
-        self._build_acquisition_tab()
-
-    def _build_acquisition_tab(self) -> None:
+    def _build_files_tab(self) -> None:
         tab = QtWidgets.QWidget()
         layout = QtWidgets.QVBoxLayout(tab)
         layout.setContentsMargins(10, 12, 10, 10)
 
-        status_group = QtWidgets.QGroupBox("Acquisition")
+        self.drop_hint = QtWidgets.QLabel(
+            "DROP SIF FILES HERE\nany names, any order, as many as you like"
+        )
+        self.drop_hint.setAlignment(QtCore.Qt.AlignCenter)
+        self.drop_hint.setWordWrap(True)
+        self.drop_hint.setObjectName("dropTarget")
+        self.drop_hint.setMinimumHeight(92)
+        layout.addWidget(self.drop_hint)
+
+        button_row = QtWidgets.QHBoxLayout()
+        self.add_files_button = QtWidgets.QPushButton("Add SIF files…")
+        self.remove_file_button = QtWidgets.QPushButton("Remove selected")
+        button_row.addWidget(self.add_files_button, 2)
+        button_row.addWidget(self.remove_file_button, 1)
+        layout.addLayout(button_row)
+
+        self.file_table = QtWidgets.QTableWidget(0, 3)
+        self.file_table.setHorizontalHeaderLabels(["File · triage", "Role", "Lamp"])
+        self.file_table.horizontalHeader().setSectionResizeMode(
+            0, QtWidgets.QHeaderView.Stretch
+        )
+        self.file_table.setColumnWidth(1, 138)
+        self.file_table.setColumnWidth(2, 84)
+        self.file_table.verticalHeader().setVisible(False)
+        self.file_table.verticalHeader().setDefaultSectionSize(30)
+        self.file_table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
+        self.file_table.setSelectionMode(QtWidgets.QAbstractItemView.SingleSelection)
+        self.file_table.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
+        layout.addWidget(self.file_table, 1)
+
+        self.show_frame_button = QtWidgets.QPushButton("Open selected file for lamp fitting")
+        layout.addWidget(self.show_frame_button)
+
+        status_group = QtWidgets.QGroupBox("Bench state")
         status_form = QtWidgets.QFormLayout(status_group)
-        self.watch_value = QtWidgets.QLabel("manual")
+        self.watch_value = QtWidgets.QLabel("manual — drag and drop or Add files")
         self.watch_value.setWordWrap(True)
-        self.file_value = QtWidgets.QLabel("Waiting for a stable SIF")
+        self.file_value = QtWidgets.QLabel("no file open")
         self.file_value.setWordWrap(True)
         self.file_state_value = QtWidgets.QLabel("WAITING")
         self.file_state_value.setObjectName("stateBadge")
-        status_form.addRow("Folder", self.watch_value)
-        status_form.addRow("Newest", self.file_value)
+        status_form.addRow("Input", self.watch_value)
+        status_form.addRow("Open frame", self.file_value)
         status_form.addRow("File state", self.file_state_value)
         layout.addWidget(status_group)
 
-        role_group = QtWidgets.QGroupBox("Confirm measurement role")
-        role_layout = QtWidgets.QVBoxLayout(role_group)
-        self.role_suggestion_value = QtWidgets.QLabel(
-            "Load a SIF; filename help never completes the checklist by itself."
+        self.exposure_value = QtWidgets.QLabel(
+            "Exposure guidance for the selected file appears here."
         )
-        self.role_suggestion_value.setWordWrap(True)
-        self.role_suggestion_value.setObjectName("mutedText")
-        role_layout.addWidget(self.role_suggestion_value)
-        role_row = QtWidgets.QHBoxLayout()
-        self.role_combo = QtWidgets.QComboBox()
-        for label, role in (
-            ("Sphere signal", MeasurementRole.SPHERE),
-            ("Sphere background", MeasurementRole.SPHERE_BACKGROUND),
-            ("Lamp signal", MeasurementRole.LAMP),
-            ("Lamp background", MeasurementRole.LAMP_BACKGROUND),
-        ):
-            self.role_combo.addItem(label, role)
-        self.lamp_family_combo = QtWidgets.QComboBox()
-        self.lamp_family_combo.addItems(["ThAr", "Ne", "Hg", "H2"])
-        role_row.addWidget(self.role_combo, 2)
-        role_row.addWidget(self.lamp_family_combo, 1)
-        role_layout.addLayout(role_row)
-        self.confirm_role_button = QtWidgets.QPushButton("Confirm role for loaded SIF")
-        role_layout.addWidget(self.confirm_role_button)
-        self.exposure_value = QtWidgets.QLabel("Exposure guidance appears after confirmation.")
         self.exposure_value.setWordWrap(True)
         self.exposure_value.setObjectName("messagePanel")
-        role_layout.addWidget(self.exposure_value)
-        layout.addWidget(role_group)
+        layout.addWidget(self.exposure_value)
 
         comparison_group = QtWidgets.QGroupBox("Integrating-sphere factors")
         comparison_layout = QtWidgets.QVBoxLayout(comparison_group)
-        self.comparison_value = QtWidgets.QLabel("NOT RUN — classify the sphere pair first.")
+        self.comparison_value = QtWidgets.QLabel(
+            "NOT RUN — the sphere pair alone unblocks this."
+        )
         self.comparison_value.setWordWrap(True)
         self.comparison_value.setObjectName("stateBadge")
         self.compare_button = QtWidgets.QPushButton("Compute and compare factors")
         comparison_layout.addWidget(self.comparison_value)
         comparison_layout.addWidget(self.compare_button)
         layout.addWidget(comparison_group)
-        layout.addStretch(1)
-        self.control_tabs.addTab(tab, "Acquire")
+        self.control_tabs.addTab(tab, "Files")
 
     def _build_lamp_tab(self) -> None:
         tab = QtWidgets.QWidget()
@@ -390,6 +432,39 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         layout.addWidget(self.toml_preview, 1)
         self.control_tabs.addTab(tab, "Save")
 
+    def _build_triage_view(self) -> None:
+        widget = QtWidgets.QWidget()
+        layout = QtWidgets.QVBoxLayout(widget)
+        self.triage_headline = QtWidgets.QLabel(
+            "Drop a SIF onto the bench. Triage needs nothing but a file."
+        )
+        self.triage_headline.setObjectName("triageHeadline")
+        self.triage_headline.setWordWrap(True)
+        layout.addWidget(self.triage_headline)
+        self.triage_detail = QtWidgets.QLabel(
+            "Shoot → drop the file → one glance → adjust the lamp → shoot again."
+        )
+        self.triage_detail.setWordWrap(True)
+        self.triage_detail.setObjectName("messagePanel")
+        layout.addWidget(self.triage_detail)
+
+        graphics = pg.GraphicsLayoutWidget()
+        graphics.setBackground("#10151b")
+        self.histogram_plot = graphics.addPlot(row=0, col=0, title="Raw counts histogram")
+        self.histogram_plot.setLabel("bottom", "counts")
+        self.histogram_plot.setLabel("left", "pixels per bin")
+        self.histogram_plot.getAxis("bottom").enableAutoSIPrefix(False)
+        self.histogram_plot.setLogMode(y=True)
+        self.top_histogram_plot = graphics.addPlot(
+            row=1, col=0, title="Top end — the last 10% before full scale"
+        )
+        self.top_histogram_plot.setLabel("bottom", "counts")
+        self.top_histogram_plot.setLabel("left", "pixels per bin")
+        self.top_histogram_plot.getAxis("bottom").enableAutoSIPrefix(False)
+        self.top_histogram_plot.setLogMode(y=True)
+        layout.addWidget(graphics, 1)
+        self.view_tabs.addTab(widget, "Exposure triage")
+
     def _build_alignment_view(self) -> None:
         graphics = pg.GraphicsLayoutWidget()
         graphics.setBackground("#10151b")
@@ -469,39 +544,198 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         self.order_plot.scene().sigMouseClicked.connect(self._order_plot_clicked)
         self.remove_button.clicked.connect(self._remove_selected_anchor)
         self.clear_button.clicked.connect(self._clear_anchors)
-        self.role_combo.currentIndexChanged.connect(self._role_selection_changed)
-        self.confirm_role_button.clicked.connect(self._confirm_measurement_role)
+        self.add_files_button.clicked.connect(self._pick_files)
+        self.remove_file_button.clicked.connect(self._remove_selected_file)
+        self.show_frame_button.clicked.connect(self._open_selected_file)
+        self.file_table.itemSelectionChanged.connect(self._file_selection_changed)
         self.compare_button.clicked.connect(self._start_sphere_comparison)
         self.generate_tomls_button.clicked.connect(self._generate_tomls)
         self.save_snapshot_button.clicked.connect(self._save_snapshot)
         self.snapshot_id_edit.textChanged.connect(self.refresh_campaign)
 
-    def _role_selection_changed(self) -> None:
-        role = self.role_combo.currentData()
-        self.lamp_family_combo.setEnabled(
-            role in {MeasurementRole.LAMP, MeasurementRole.LAMP_BACKGROUND}
-        )
-
     def _line_family_changed(self) -> None:
-        self.lamp_family_combo.setCurrentText(self.line_family_combo.currentText())
         self.refresh_plots()
 
-    def _confirm_measurement_role(self) -> None:
-        if self.campaign is None or self.session.frame is None:
+    # ------------------------------------------------------------------
+    # Manual input: drag and drop, and a plain file dialog
+    # ------------------------------------------------------------------
+
+    def dragEnterEvent(self, event) -> None:  # noqa: N802 - Qt naming
+        if event.mimeData().hasUrls():
+            event.accept()
+        else:
+            event.ignore()
+
+    def dragMoveEvent(self, event) -> None:  # noqa: N802 - Qt naming
+        if event.mimeData().hasUrls():
+            event.accept()
+        else:
+            event.ignore()
+
+    def dropEvent(self, event) -> None:  # noqa: N802 - Qt naming
+        if not event.mimeData().hasUrls():
+            event.ignore()
+            return
+        event.setDropAction(QtCore.Qt.CopyAction)
+        event.accept()
+        self.add_paths(
+            [url.toLocalFile() for url in event.mimeData().urls() if url.toLocalFile()]
+        )
+
+    def _pick_files(self) -> None:
+        paths, _filter = QtWidgets.QFileDialog.getOpenFileNames(
+            self,
+            "Add SIF files",
+            str(self.last_folder),
+            "Andor SIF (*.sif *.SIF);;All files (*)",
+        )
+        self.add_paths(paths)
+
+    def add_paths(self, paths: Sequence[str | Path]) -> list[Path]:
+        """Queue any dropped or picked files, whatever they are called."""
+
+        accepted: list[Path] = []
+        rejected: list[str] = []
+        for item in paths:
+            source = Path(item)
+            if source.is_dir():
+                accepted.extend(sorted(source.glob("*.[sS][iI][fF]")))
+                continue
+            if not source.is_file():
+                rejected.append(f"{source.name} is not a file")
+                continue
+            accepted.append(source)
+        for source in accepted:
+            self.last_folder = source.parent
+            if source not in self._queue:
+                self._queue.append(source)
+        if rejected:
+            self.message_value.setText("; ".join(rejected))
+        elif accepted:
+            self.message_value.setText(
+                f"Queued {len(accepted)} file(s) for reading and triage."
+            )
+        self._start_next_load()
+        return accepted
+
+    def _start_next_load(self) -> None:
+        if self._load_thread is not None or not self._queue:
+            return
+        self.load_path(self._queue.pop(0))
+
+    # ------------------------------------------------------------------
+    # One manual role control per loaded file
+    # ------------------------------------------------------------------
+
+    def _selected_file(self) -> Path | None:
+        row = self.file_table.currentRow()
+        if 0 <= row < len(self._file_rows):
+            return self._file_rows[row]
+        return None
+
+    def _file_selection_changed(self) -> None:
+        selected = self._selected_file()
+        if selected is not None:
+            self._show_triage(selected)
+
+    def _open_selected_file(self) -> None:
+        selected = self._selected_file()
+        if selected is None:
+            return
+        if self.session.frame is not None and self.session.frame.path == selected:
+            self.message_value.setText(f"{selected.name} is already open for fitting.")
+            return
+        self.add_paths([selected])
+
+    def _remove_selected_file(self) -> None:
+        selected = self._selected_file()
+        if selected is None:
+            return
+        if self.campaign is not None:
+            self.campaign.forget_file(selected)
+        self._file_rows.remove(selected)
+        self.file_table.removeRow(self.file_table.currentRow())
+        self.message_value.setText(f"Removed {selected.name} from the bench.")
+        self.refresh()
+
+    def _add_file_row(self, path: Path) -> None:
+        row = self.file_table.rowCount()
+        self.file_table.insertRow(row)
+        self._file_rows.append(path)
+        self.file_table.setItem(row, 0, QtWidgets.QTableWidgetItem(path.name))
+        role_combo = QtWidgets.QComboBox()
+        for label, role in _ROLE_CHOICES:
+            role_combo.addItem(label, role)
+        lamp_combo = QtWidgets.QComboBox()
+        lamp_combo.setEditable(True)
+        lamp_combo.addItems(list(KNOWN_LAMP_NAMES))
+        lamp_combo.setCurrentText("")
+        self.file_table.setCellWidget(row, 1, role_combo)
+        self.file_table.setCellWidget(row, 2, lamp_combo)
+        role_combo.currentIndexChanged.connect(
+            lambda _index, source=path: self._role_changed(source)
+        )
+        # Picking the pre-filled entry again is a deliberate confirmation, and
+        # it emits no index change, so the operator's click is heard here.
+        role_combo.activated.connect(
+            lambda _index, source=path: self._role_changed(source)
+        )
+        lamp_combo.currentTextChanged.connect(
+            lambda _text, source=path: self._role_changed(source)
+        )
+        self._prefill_role(path, role_combo, lamp_combo)
+
+    def _prefill_role(self, path: Path, role_combo, lamp_combo) -> None:
+        """Offer the filename's guess without assigning anything."""
+
+        if self.campaign is None:
+            return
+        suggestion = self.campaign.observed.get(path)
+        if suggestion is None or not suggestion.is_unambiguous:
+            return
+        role_combo.blockSignals(True)
+        lamp_combo.blockSignals(True)
+        try:
+            index = role_combo.findData(suggestion.roles[0])
+            if index >= 0:
+                role_combo.setCurrentIndex(index)
+            if suggestion.lamp_name:
+                lamp_combo.setCurrentText(suggestion.lamp_name)
+        finally:
+            role_combo.blockSignals(False)
+            lamp_combo.blockSignals(False)
+        lamp_combo.setEnabled(suggestion.roles[0] in _LAMP_ROLES)
+
+    def _role_changed(self, path: Path) -> None:
+        if self.campaign is None or path not in self._file_rows:
+            return
+        row = self._file_rows.index(path)
+        role_combo = self.file_table.cellWidget(row, 1)
+        lamp_combo = self.file_table.cellWidget(row, 2)
+        role = role_combo.currentData()
+        lamp_combo.setEnabled(role in _LAMP_ROLES)
+        if role is None:
+            if self.campaign.remove_classification(path):
+                self.message_value.setText(f"{path.name} is unassigned again.")
+                self.refresh()
             return
         try:
             record = self.campaign.classify_file(
-                self.session.frame.path,
-                self.role_combo.currentData(),
-                lamp_family=self.lamp_family_combo.currentText(),
-                frame=self.session.frame,
+                path,
+                role,
+                lamp_family=lamp_combo.currentText(),
                 saturation_level=self.session.saturation_level,
             )
         except (FileNotFoundError, ValueError) as exc:
-            self.message_value.setText(f"Could not classify measurement: {exc}")
+            self.message_value.setText(f"{path.name} keeps its previous role: {exc}")
             return
+        label = record.role.value
+        if record.lamp_family:
+            label = f"{record.lamp_family} {label}"
+            if self.line_family_combo.findText(record.lamp_family) >= 0:
+                self.line_family_combo.setCurrentText(record.lamp_family)
         self.message_value.setText(
-            f"Confirmed {record.role.value}: {record.path.name}. "
+            f"{record.path.name} is now the {label}. "
             "Dependent comparison/configuration state was reset."
         )
         self.refresh()
@@ -607,12 +841,15 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
                 f"({result.unchanged_polls}/{self.watcher.required_unchanged_polls})."
             )
         elif result.ready_path is not None:
-            self.load_path(result.ready_path)
+            self.add_paths([result.ready_path])
 
     def load_path(self, path: str | Path) -> None:
-        """Start an asynchronous load for a stable SIF."""
+        """Start an asynchronous read of one SIF, whatever it is called."""
 
-        if self.loader is None or self._load_thread is not None:
+        if self._load_thread is not None:
+            return
+        if self.loader is None:
+            self.message_value.setText("No SIF reader is configured for this bench.")
             return
         source = Path(path)
         self.session.begin_file_load(source)
@@ -628,13 +865,20 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
     def _frame_loaded(self, frame: BenchFrame) -> None:
         self.session.accept_frame(frame)
         if self.campaign is not None:
-            suggestion = self.campaign.observe_file(frame.path)
-            self.role_suggestion_value.setText(suggestion.reason)
-            if suggestion.is_unambiguous:
-                index = self.role_combo.findData(suggestion.roles[0])
-                if index >= 0:
-                    self.role_combo.setCurrentIndex(index)
+            record = self.campaign.record_frame(
+                frame, saturation_level=self.session.saturation_level
+            )
+            if record.path not in self._file_rows:
+                self._add_file_row(record.path)
+            self._select_file_row(record.path)
+            self.message_value.setText(record.triage.headline)
         self.refresh()
+
+    def _select_file_row(self, path: Path) -> None:
+        if path not in self._file_rows:
+            return
+        self.file_table.selectRow(self._file_rows.index(path))
+        self._show_triage(path)
 
     @QtCore.pyqtSlot(str, str)
     def _frame_failed(self, path: str, reason: str) -> None:
@@ -646,6 +890,7 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         if self._load_thread is not None:
             self._load_thread.deleteLater()
         self._load_thread = None
+        self._start_next_load()
 
     def _order_changed(self, order_idx: int) -> None:
         self.session.set_selected_order(order_idx)
@@ -674,11 +919,54 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         self.message_value.setText("All anchors cleared.")
         self.refresh()
 
+    def _show_triage(self, path: Path) -> None:
+        """Render one file's exposure verdict; roles play no part in it."""
+
+        record = None if self.campaign is None else self.campaign.loaded.get(path)
+        if record is None:
+            return
+        triage = record.triage
+        color = _TRIAGE_COLORS[triage.state]
+        self.triage_headline.setText(f"{path.name}\n{triage.headline}")
+        self.triage_headline.setStyleSheet(f"color: {color};")
+        self.triage_detail.setText("\n".join(triage.details))
+        self._draw_histogram(self.histogram_plot, triage, triage.histogram)
+        self._draw_histogram(self.top_histogram_plot, triage, triage.top_histogram)
+        guidance = record.exposure
+        peak = "—" if guidance.peak_value is None else f"{guidance.peak_value:.0f} counts"
+        self.exposure_value.setText(
+            f"{path.name} · {guidance.state.value.upper()} · peak {peak}. "
+            f"{guidance.next_action}"
+        )
+
+    @staticmethod
+    def _draw_histogram(plot, triage: ExposureTriage, histogram) -> None:
+        plot.clear()
+        counts = np.maximum(np.asarray(histogram.counts, dtype=float), 0.5)
+        plot.plot(
+            np.asarray(histogram.edges, dtype=float),
+            counts,
+            stepMode="center",
+            fillLevel=0,
+            brush=pg.mkBrush("#1f4d63"),
+            pen=pg.mkPen("#76d6ff", width=1.2),
+        )
+        plot.addLine(
+            x=triage.saturation.saturation_level,
+            pen=pg.mkPen("#ffb86b", style=QtCore.Qt.DashLine),
+        )
+        plot.addLine(
+            x=triage.full_scale,
+            pen=pg.mkPen("#ff8f8f", style=QtCore.Qt.DashLine),
+        )
+
     def refresh(self) -> None:
         """Render the current domain state without changing it."""
 
         if self.watcher is not None:
-            self.watch_value.setText(self.watcher.folder.name or ".")
+            self.watch_value.setText(
+                f"drag and drop, Add files, or watching {self.watcher.folder.name or '.'}"
+            )
         if self.session.frame is not None:
             self.file_value.setText(self.session.frame.path.name)
         elif self.session.loading_path is not None:
@@ -702,11 +990,11 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
             )
         if self.session.file_state is FileLoadState.FAILED:
             self.message_value.setText(
-                f"Could not load newest stable SIF: {self.session.last_error}. "
-                "The last good frame remains visible; waiting for the next file."
+                f"Could not read that SIF: {self.session.last_error}. "
+                "The last good frame remains visible; drop another file when ready."
             )
         elif self.session.file_state is FileLoadState.LOADING:
-            self.message_value.setText("Loading stable SIF and extracting order spectra…")
+            self.message_value.setText("Reading SIF, extracting orders, triaging exposure…")
         elif self.session.alignment_state is AlignmentState.COLLECTING:
             self.message_value.setText("One anchor accepted. Add another order/line to solve.")
         elif self.session.alignment_state is AlignmentState.ALIGNED:
@@ -724,9 +1012,13 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
 
         enabled = self.campaign is not None
         busy = self._campaign_thread is not None
-        self.confirm_role_button.setEnabled(
-            enabled and self.session.frame is not None and not busy
+        self.add_files_button.setEnabled(self.loader is not None)
+        selected = self._selected_file()
+        self.remove_file_button.setEnabled(selected is not None)
+        self.show_frame_button.setEnabled(
+            selected is not None and self.loader is not None and self._load_thread is None
         )
+        self.drop_hint.setVisible(not self._file_rows)
         self.compare_button.setEnabled(enabled and not busy)
         self.generate_tomls_button.setEnabled(enabled and not busy)
         if not enabled:
@@ -737,7 +1029,7 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
             return
 
         assert self.campaign is not None
-        self._refresh_current_measurement()
+        self._refresh_file_table()
         self._refresh_comparison_summary()
         self._refresh_checklist()
         self.save_state_value.setText(
@@ -757,28 +1049,35 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
                 )
         self._refresh_sphere_plot()
 
-    def _refresh_current_measurement(self) -> None:
+    def _refresh_file_table(self) -> None:
+        """Show each loaded file's verdict and the role it currently carries."""
+
         assert self.campaign is not None
-        if self.session.frame is not None:
-            suggestion = self.campaign.observed.get(self.session.frame.path)
-            if suggestion is not None:
-                self.role_suggestion_value.setText(suggestion.reason)
-            record = self.campaign.measurements.get(self.session.frame.path)
+        for row, path in enumerate(self._file_rows):
+            record = self.campaign.loaded.get(path)
+            measurement = self.campaign.measurements.get(path)
+            marks = []
             if record is not None:
-                index = self.role_combo.findData(record.role)
-                if index >= 0:
-                    self.role_combo.setCurrentIndex(index)
-                if record.lamp_family:
-                    self.lamp_family_combo.setCurrentText(record.lamp_family)
-                    self.line_family_combo.setCurrentText(record.lamp_family)
-                guidance = record.exposure
-                if guidance is not None:
-                    peak = (
-                        "—" if guidance.peak_value is None else f"{guidance.peak_value:.0f} counts"
-                    )
-                    self.exposure_value.setText(
-                        f"{guidance.state.value.upper()} · peak {peak}. {guidance.next_action}"
-                    )
+                marks.append(record.triage.state.value.upper())
+                if record.triage.saturation.anomalous_pixels:
+                    marks.append(f"{record.triage.saturation.anomalous_pixels} anomalies")
+            if measurement is None:
+                marks.append("no role yet")
+            elif measurement.lamp_family:
+                marks.append(f"{measurement.lamp_family} {measurement.role.value}")
+            else:
+                marks.append(measurement.role.value)
+            if path == getattr(self.session.frame, "path", None):
+                marks.append("open")
+            item = self.file_table.item(row, 0)
+            item.setText(f"{path.name}\n{' · '.join(marks)}" if marks else path.name)
+            if record is not None:
+                item.setForeground(QtGui.QColor(_TRIAGE_COLORS[record.triage.state]))
+                item.setToolTip(f"{path}\n{record.triage.headline}")
+            lamp_combo = self.file_table.cellWidget(row, 2)
+            lamp_combo.setEnabled(
+                measurement is not None and measurement.role in _LAMP_ROLES
+            )
 
     def _refresh_comparison_summary(self) -> None:
         assert self.campaign is not None
@@ -802,14 +1101,18 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
             ChecklistState.DONE: "✓",
             ChecklistState.WAITING: "○",
             ChecklistState.ATTENTION: "!",
+            ChecklistState.SUGGESTION: "·",
         }
         colors = {
             ChecklistState.DONE: QtGui.QColor("#70d6ae"),
             ChecklistState.WAITING: QtGui.QColor("#8fa5b5"),
             ChecklistState.ATTENTION: QtGui.QColor("#ffb86b"),
+            ChecklistState.SUGGESTION: QtGui.QColor("#8fd9ff"),
         }
         for item in self.campaign.checklist(self.session):
             text = f"{symbols[item.state]}  {item.label} — {item.detail}"
+            if item.unblocked_by:
+                text += f"\n     unblocked by: {item.unblocked_by}"
             row = QtWidgets.QListWidgetItem()
             row.setToolTip(f"{item.label}\n{item.detail}")
             label = QtWidgets.QLabel(text)
@@ -1017,18 +1320,28 @@ def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="echelle-calib",
         description=(
-            "Watch for stable Andor SIF files and interactively fit a rigid "
-            "wavelength-calibration alignment."
+            "Triage Andor SIF exposures, assign measurement roles by hand, and "
+            "interactively fit a rigid wavelength-calibration alignment."
         ),
     )
     parser.add_argument(
-        "watch_folder",
+        "folder",
         nargs="?",
         type=Path,
         default=Path.cwd(),
-        help="folder written by the acquisition software (default: current folder)",
+        help="folder the Add files dialog opens in (default: current folder)",
     )
-    parser.add_argument("--file", type=Path, help="load one SIF immediately and keep watching")
+    parser.add_argument(
+        "--file",
+        type=Path,
+        action="append",
+        help="load one SIF at start-up; repeat for several",
+    )
+    parser.add_argument(
+        "--watch",
+        action="store_true",
+        help="also poll the folder for new stable SIFs (optional convenience)",
+    )
     parser.add_argument("--pattern", type=Path, default=_DEFAULT_PATTERN)
     parser.add_argument("--wavelength", type=Path, default=_DEFAULT_WAVELENGTH)
     parser.add_argument("--integral", type=Path, default=_DEFAULT_INTEGRAL)
@@ -1041,8 +1354,12 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--lamp",
         action="append",
-        choices=("ThAr", "Ne", "Hg", "H2"),
-        help="required lamp family; repeat for several (default: ThAr)",
+        metavar="NAME",
+        help=(
+            "lamp to suggest from the previous campaign; any name is accepted "
+            "and none is ever required (default: "
+            f"{', '.join(PREVIOUS_CAMPAIGN_LAMPS)})"
+        ),
     )
     parser.add_argument(
         "--snapshot-id",
@@ -1084,8 +1401,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     """Launch the calibration bench."""
 
     args = _build_parser().parse_args(argv)
-    if not args.watch_folder.is_dir():
-        raise SystemExit(f"watch folder not found: {args.watch_folder}")
+    if not args.folder.is_dir():
+        raise SystemExit(f"folder not found: {args.folder}")
     if not args.pattern.is_file():
         raise SystemExit(f"pattern file not found: {args.pattern}")
     if not args.wavelength.is_file():
@@ -1107,14 +1424,18 @@ def main(argv: Sequence[str] | None = None) -> int:
         pattern_source=args.pattern,
         wavelength_source=args.wavelength,
         integral_source=args.integral,
-        required_lamps=args.lamp or ("ThAr",),
+        suggested_lamps=args.lamp or PREVIOUS_CAMPAIGN_LAMPS,
         previous_sphere=args.previous_sphere,
         previous_sphere_background=args.previous_sphere_background,
     )
-    watcher = StableSifWatcher(
-        args.watch_folder,
-        required_unchanged_polls=args.stable_polls,
-        minimum_age_s=args.minimum_age_s,
+    watcher = (
+        StableSifWatcher(
+            args.folder,
+            required_unchanged_polls=args.stable_polls,
+            minimum_age_s=args.minimum_age_s,
+        )
+        if args.watch
+        else None
     )
     loader = FrameLoader(pattern)
     pg.setConfigOptions(antialias=True, imageAxisOrder="col-major")
@@ -1134,9 +1455,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         valid_from=args.valid_from,
         poll_interval_ms=args.poll_ms,
     )
+    window.last_folder = args.folder
     window.show()
-    if args.file is not None:
-        QtCore.QTimer.singleShot(0, lambda: window.load_path(args.file))
+    if args.file:
+        QtCore.QTimer.singleShot(0, lambda: window.add_paths(args.file))
     return int(application.exec_())
 
 

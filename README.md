@@ -66,12 +66,16 @@ its Python 3.12.13 runtime and pinned offline installation contract.
 Use the separate pyqtgraph bench while acquiring calibration lamps:
 
 ```bash
-echelle-calib path/to/acquisition-folder
+echelle-calib path/to/calibration-folder
 ```
 
-It waits for the newest SIF to stop changing, then carries the complete bench
-procedure: explicitly classify sphere/background/lamp measurements, follow the
-self-ticking checklist and exposure advice, identify lines from the shared
+Drag SIFs onto the window (or press **Add SIF files…**; the folder argument only
+chooses where that dialog opens, and `--watch` adds optional folder polling).
+Every file is triaged for exposure the moment it lands — clustered saturation,
+counted cosmic-ray anomalies, remaining headroom, and the counts histogram —
+before it has any role. Then carry the complete bench procedure: assign
+sphere/background/lamp roles by hand with any lamp name, follow the checklist
+built from your own data and its exposure advice, identify lines from the shared
 packaged catalogs, fit the live rigid alignment, compare new absolute factors
 with the previous sphere pair, generate commented hand-editable TOMLs, and save
 then validate a complete snapshot through the established snapshot API. The

@@ -1,4 +1,4 @@
-"""UI-independent tests for Packet 5 calibration campaign memory."""
+"""UI-independent tests for calibration campaign memory and exposure triage."""
 
 from __future__ import annotations
 
@@ -28,7 +28,10 @@ from echelle_spectra.calibration_campaign import (
     catalog_lines_for_order,
     compute_absolute_calibration,
     evaluate_exposure,
+    measure_saturation_clusters,
+    normalize_lamp_name,
     suggest_file_roles,
+    triage_exposure,
 )
 from echelle_spectra.calibration_registry import (
     CalibrationSourceIdentity,
@@ -143,7 +146,7 @@ def _campaign(tmp_path: Path, sources: dict[str, Path]) -> CalibrationCampaignSe
         pattern_source=sources["pattern.txt"],
         wavelength_source=sources["wavelength.txt"],
         integral_source=sources["integral.txt"],
-        required_lamps=("Th-Ar",),
+        suggested_lamps=("Th-Ar",),
         previous_sphere=sources["previous_sphere.sif"],
         previous_sphere_background=sources["previous_sphere_bg.sif"],
     )
@@ -177,6 +180,241 @@ def _classify_complete(
     )
 
 
+#: The owner's real 2025-09-26 calibration folder: Ne bright/dim pairs and a
+#: sphere pair, with the names the acquisition software actually wrote.
+_REAL_2025_NAMES = (
+    "Ne-0.02s-x3-bright-lines.sif",
+    "Ne-0.02s-x3-bright-lines_bg.sif",
+    "Ne-0.1s-x3-dimm-lines.sif",
+    "Ne-0.1s-x3-dimm-lines-bg.sif",
+    "sphere-0.1s-x3.sif",
+    "sphere-0.1s-x3-bg.sif",
+)
+
+
+def _real_2025_folder(tmp_path: Path) -> dict[str, Path]:
+    """Mirror the real Ne-only campaign folder, references included."""
+
+    folder = tmp_path / "20250926_calib"
+    folder.mkdir()
+    sources = {}
+    for name in _REAL_2025_NAMES:
+        path = folder / name
+        path.write_bytes((name + "\n").encode())
+        sources[name] = path
+    for name, text in (
+        ("pattern_CMOS_20250926.txt", "pattern\n"),
+        ("wavelength.txt", _CURATED_TABLE),
+        ("integrating_sphere.txt", "integral\n"),
+    ):
+        path = folder / name
+        path.write_text(text, encoding="utf-8")
+        sources[name] = path
+    return sources
+
+
+def _ne_campaign(sources: dict[str, Path]) -> CalibrationCampaignSession:
+    return CalibrationCampaignSession(
+        pattern_source=sources["pattern_CMOS_20250926.txt"],
+        wavelength_source=sources["wavelength.txt"],
+        integral_source=sources["integrating_sphere.txt"],
+    )
+
+
+def _assign_real_2025_roles(campaign: CalibrationCampaignSession) -> None:
+    """Assign every role by hand, exactly as the operator would click them."""
+
+    roles = {
+        "sphere-0.1s-x3.sif": (MeasurementRole.SPHERE, ""),
+        "sphere-0.1s-x3-bg.sif": (MeasurementRole.SPHERE_BACKGROUND, ""),
+        "Ne-0.02s-x3-bright-lines.sif": (MeasurementRole.LAMP, "Ne"),
+        "Ne-0.02s-x3-bright-lines_bg.sif": (MeasurementRole.LAMP_BACKGROUND, "Ne"),
+        "Ne-0.1s-x3-dimm-lines.sif": (MeasurementRole.LAMP, "Ne"),
+        "Ne-0.1s-x3-dimm-lines-bg.sif": (MeasurementRole.LAMP_BACKGROUND, "Ne"),
+    }
+    for name, (role, lamp) in roles.items():
+        source = campaign.pattern_source.parent / name
+        campaign.classify_file(source, role, lamp_family=lamp)
+
+
+def test_real_2025_ne_folder_reaches_a_registrable_snapshot_without_thar(tmp_path):
+    sources = _real_2025_folder(tmp_path)
+    campaign = _ne_campaign(sources)
+    alignment = _aligned_session(tmp_path)
+    _assign_real_2025_roles(campaign)
+    assert campaign.assigned_lamps == ("Ne",)
+
+    campaign.compute_sphere_comparison(_calculator)
+    campaign.write_tomls(tmp_path / "configs", "20250926_cmos", alignment)
+    snapshot = campaign.save_snapshot(
+        tmp_path / "calibrations",
+        snapshot_id="20250926_cmos",
+        detector="cmos",
+        alignment=alignment,
+    )
+
+    assert campaign.save_state is SaveState.VALIDATED
+    checklist = campaign.checklist(alignment)
+    assert all(
+        item.state is ChecklistState.DONE for item in checklist if item.blocking
+    ), [item.key for item in checklist if item.blocking and item.state is not ChecklistState.DONE]
+    keys = {item.key for item in checklist}
+    assert "lamp-Ne-signal" in keys and "lamp-Ne-background" in keys
+    assert not any("ThAr" in key for key in keys)
+    assert snapshot.lamps == ("Ne",)
+    registry_path = tmp_path / "calibration-registry.toml"
+    registry_path.write_text(
+        'schema = "echelle-calibration-registry/v1"\n'
+        "\n[[epochs]]\n"
+        'snapshot_id = "20250926_cmos"\n',
+        encoding="utf-8",
+    )
+    registry = load_calibration_registry(
+        registry_path, snapshots_root=tmp_path / "calibrations"
+    )
+    epoch = registry.resolve(
+        CalibrationSourceIdentity(
+            Path("20251001_lamp.sif"), acquisition_date=date(2025, 10, 1)
+        )
+    )
+    assert epoch.snapshot_id == "20250926_cmos"
+    manifest_text = (snapshot.root / "snapshot.toml").read_text(encoding="utf-8")
+    campaign_toml = (tmp_path / "configs" / "20250926_cmos" / "campaign.toml").read_text(
+        encoding="utf-8"
+    )
+    assert "ThAr" not in manifest_text
+    assert "ThAr" not in campaign_toml
+
+
+def test_a_thar_pair_adds_its_own_steps_to_the_same_checklist(tmp_path):
+    sources = _real_2025_folder(tmp_path)
+    campaign = _ne_campaign(sources)
+    alignment = _aligned_session(tmp_path)
+    _assign_real_2025_roles(campaign)
+    ne_only = {item.key for item in campaign.checklist(alignment)}
+
+    for name, role in (
+        ("ThAr-0.3s-x3.sif", MeasurementRole.LAMP),
+        ("ThAr-0.3s-x3-bg.sif", MeasurementRole.LAMP_BACKGROUND),
+    ):
+        path = sources["wavelength.txt"].parent / name
+        path.write_bytes((name + "\n").encode())
+        campaign.classify_file(path, role, lamp_family="ThAr")
+
+    with_thar = {item.key for item in campaign.checklist(alignment)}
+
+    assert campaign.assigned_lamps == ("Ne", "ThAr")
+    assert with_thar - ne_only == {"lamp-ThAr-signal", "lamp-ThAr-background"}
+
+
+def test_the_previous_campaigns_lamps_are_advice_and_never_block(tmp_path):
+    sources = _real_2025_folder(tmp_path)
+    campaign = _ne_campaign(sources)
+    alignment = _aligned_session(tmp_path)
+    _assign_real_2025_roles(campaign)
+
+    suggestion = {item.key: item for item in campaign.checklist(alignment)}[
+        "lamp-suggestions"
+    ]
+
+    assert suggestion.state is ChecklistState.SUGGESTION
+    assert not suggestion.blocking
+    assert "last time: Ne" in suggestion.detail
+    assert "consider ThAr" in suggestion.detail
+    assert campaign.ready_for_snapshot("20250926_cmos", alignment) is False
+    campaign.compute_sphere_comparison(_calculator)
+    campaign.write_tomls(tmp_path / "configs", "20250926_cmos", alignment)
+    assert campaign.ready_for_snapshot("20250926_cmos", alignment) is True
+
+
+def test_every_unfinished_step_names_what_unblocks_it(tmp_path):
+    sources = _real_2025_folder(tmp_path)
+    campaign = _ne_campaign(sources)
+    alignment = _aligned_session(tmp_path)
+
+    items = {item.key: item for item in campaign.checklist(alignment)}
+
+    assert all(
+        item.unblocked_by
+        for item in items.values()
+        if item.blocking and item.state is ChecklistState.WAITING
+    )
+    assert "sphere" in items["sphere-comparison"].unblocked_by
+    assert "no lamp is needed" in items["sphere-comparison"].unblocked_by
+    assert "any lamp name works" in items["lamp-any"].unblocked_by
+    campaign.classify_file(
+        sources["sphere-0.1s-x3.sif"], MeasurementRole.SPHERE
+    )
+    campaign.classify_file(
+        sources["sphere-0.1s-x3-bg.sif"], MeasurementRole.SPHERE_BACKGROUND
+    )
+    after = {item.key: item for item in campaign.checklist(alignment)}
+    assert "Compute and compare factors" in after["sphere-comparison"].unblocked_by
+
+
+@pytest.mark.parametrize("lamp", ["Kr", "Xe-2", "ne", "TH-AR"])
+def test_any_lamp_name_is_accepted_and_normalized_only_when_known(tmp_path, lamp):
+    sources = _real_2025_folder(tmp_path)
+    campaign = _ne_campaign(sources)
+    source = sources["Ne-0.02s-x3-bright-lines.sif"]
+
+    record = campaign.classify_file(source, MeasurementRole.LAMP, lamp_family=lamp)
+
+    assert record.lamp_family == normalize_lamp_name(lamp)
+    assert campaign.assigned_lamps == (record.lamp_family,)
+    assert f"lamp-{record.lamp_family}-signal" in {
+        item.key for item in campaign.checklist(_aligned_session(tmp_path))
+    }
+
+
+def test_a_meaninglessly_named_file_still_takes_any_role(tmp_path):
+    sources = _real_2025_folder(tmp_path)
+    campaign = _ne_campaign(sources)
+    nameless = sources["wavelength.txt"].parent / "IMG_0042.sif"
+    nameless.write_bytes(b"nameless\n")
+
+    suggestion = campaign.observe_file(nameless)
+    record = campaign.classify_file(
+        nameless, MeasurementRole.LAMP, lamp_family="Kr"
+    )
+
+    assert not suggestion.is_unambiguous
+    assert "assign one by hand" in suggestion.reason
+    assert record.role is MeasurementRole.LAMP
+    assert record.lamp_family == "Kr"
+
+
+def test_filename_help_prefills_the_real_2025_names(tmp_path):
+    sources = _real_2025_folder(tmp_path)
+
+    bright = suggest_file_roles(sources["Ne-0.02s-x3-bright-lines.sif"])
+    bright_bg = suggest_file_roles(sources["Ne-0.02s-x3-bright-lines_bg.sif"])
+    dim_bg = suggest_file_roles(sources["Ne-0.1s-x3-dimm-lines-bg.sif"])
+    sphere_bg = suggest_file_roles(sources["sphere-0.1s-x3-bg.sif"])
+
+    assert bright.roles == (MeasurementRole.LAMP,) and bright.lamp_name == "Ne"
+    assert bright_bg.roles == (MeasurementRole.LAMP_BACKGROUND,)
+    assert bright_bg.lamp_name == "Ne"
+    assert dim_bg.roles == (MeasurementRole.LAMP_BACKGROUND,)
+    assert sphere_bg.roles == (MeasurementRole.SPHERE_BACKGROUND,)
+
+
+def test_loaded_frames_are_triaged_before_any_role_exists(tmp_path):
+    sources = _real_2025_folder(tmp_path)
+    campaign = _ne_campaign(sources)
+    frame = _triage_frame(tmp_path, "whatever.sif", _cosmic_singles)
+
+    record = campaign.record_frame(frame)
+
+    assert record.triage.state is ExposureState.GOOD
+    assert record.triage.saturation.anomalous_pixels == 3
+    assert campaign.loaded[frame.path] is record
+    assert not campaign.measurements
+    items = {item.key: item for item in campaign.checklist(_aligned_session(tmp_path))}
+    assert items["files"].state is ChecklistState.DONE
+    assert "1 file(s) triaged" in items["files"].detail
+
+
 def test_filename_help_never_ticks_an_ambiguous_role(tmp_path):
     sources = _sources(tmp_path)
     campaign = _campaign(tmp_path, sources)
@@ -191,7 +429,8 @@ def test_filename_help_never_ticks_an_ambiguous_role(tmp_path):
     }
     checklist = {item.key: item for item in campaign.checklist(alignment)}
     assert checklist["sphere-background"].state is ChecklistState.WAITING
-    assert checklist["lamp-ThAr-background"].state is ChecklistState.WAITING
+    # No lamp was assigned, so the procedure asks for a lamp without naming one.
+    assert checklist["lamp-any"].state is ChecklistState.WAITING
 
 
 def test_role_suggestions_are_help_not_automatic_classification(tmp_path):
@@ -201,33 +440,141 @@ def test_role_suggestions_are_help_not_automatic_classification(tmp_path):
     assert suggestion.roles == (MeasurementRole.SPHERE_BACKGROUND,)
 
 
-@pytest.mark.parametrize(
-    ("peak", "expected"),
-    [
-        (65535.0, ExposureState.SATURATED),
-        (1000.0, ExposureState.DIM),
-        (30000.0, ExposureState.GOOD),
-    ],
-)
-def test_exposure_guidance_names_next_action(tmp_path, peak, expected):
-    images = np.zeros((1, 8, 8), dtype=float)
-    images[0, 3, 3] = peak
-    frame = BenchFrame(
-        tmp_path / "lamp.sif",
+def _triage_frame(tmp_path: Path, name: str, painter) -> BenchFrame:
+    """Build a synthetic detector frame with a realistic background floor."""
+
+    rng = np.random.default_rng(11)
+    images = rng.normal(300.0, 12.0, size=(1, 64, 64))
+    painter(images)
+    return BenchFrame(
+        tmp_path / name,
         images,
         images[0],
-        (np.zeros(8),),
+        (np.zeros(64),),
         {"ExposureTime": 0.2},
     )
-    result = evaluate_exposure(frame)
+
+
+def _bright_line(images: np.ndarray, level: float = 45000.0) -> None:
+    images[0, 30:34, 20:24] = level
+
+
+def _healthy(images: np.ndarray) -> None:
+    _bright_line(images)
+
+
+def _saturated_cluster(images: np.ndarray) -> None:
+    _bright_line(images)
+    images[0, 10:13, 40] = 65535.0
+
+
+def _cosmic_singles(images: np.ndarray) -> None:
+    _bright_line(images)
+    for row, column in ((5, 5), (50, 7), (20, 60)):
+        images[0, row, column] = 65535.0
+
+
+def _too_dim(images: np.ndarray) -> None:
+    _bright_line(images, level=700.0)
+
+
+@pytest.mark.parametrize(
+    ("name", "painter", "expected", "clusters", "anomalies"),
+    [
+        ("healthy.sif", _healthy, ExposureState.GOOD, 0, 0),
+        ("saturated.sif", _saturated_cluster, ExposureState.SATURATED, 1, 0),
+        ("cosmic.sif", _cosmic_singles, ExposureState.GOOD, 0, 3),
+        ("dim.sif", _too_dim, ExposureState.DIM, 0, 0),
+    ],
+)
+def test_triage_judges_clusters_not_lone_full_scale_pixels(
+    tmp_path, name, painter, expected, clusters, anomalies
+):
+    triage = triage_exposure(_triage_frame(tmp_path, name, painter))
+
+    assert triage.state is expected
+    assert triage.saturation.cluster_count == clusters
+    assert triage.saturation.anomalous_pixels == anomalies
+    assert triage.headline
+    assert triage.histogram.counts.sum() == 64 * 64
+    assert triage.top_histogram.edges[-1] >= triage.full_scale
+    assert 0.0 < triage.headroom_fraction <= 1.0
+    if expected is ExposureState.GOOD:
+        # The lone full-scale pixels are anomalies, so headroom comes from the
+        # brightest real pixel and the frame stays usable.
+        assert triage.saturation.clean_peak_counts == pytest.approx(45000.0)
+        assert triage.is_usable
+    if anomalies:
+        assert "anomalies" in triage.headline
+        assert "not saturation" in triage.headline
+
+
+def test_a_lone_spike_is_never_mistaken_for_signal(tmp_path):
+    dark = np.zeros((1, 8, 8), dtype=float)
+    dark[0, 2, 2] = 65535.0
+    frame = BenchFrame(tmp_path / "spike.sif", dark, dark[0], (np.zeros(8),), {})
+
+    triage = triage_exposure(frame)
+
+    # The frame is dark apart from one cosmic hit, so it is dim, not saturated,
+    # and its headroom comes from the real pixels rather than from the spike.
+    assert triage.state is ExposureState.DIM
+    assert triage.saturation.anomalous_pixels == 1
+    assert triage.saturation.cluster_count == 0
+    assert triage.peak_counts == pytest.approx(0.0)
+
+
+def test_a_frame_of_nothing_but_a_spike_is_still_judged(tmp_path):
+    only = np.full((1, 1, 1), 65535.0)
+    frame = BenchFrame(tmp_path / "one.sif", only, only[0], (np.zeros(1),), {})
+
+    triage = triage_exposure(frame)
+
+    assert triage.state is not ExposureState.NO_DATA
+    assert triage.peak_counts == pytest.approx(65535.0)
+    assert triage.saturation.anomalous_pixels == 1
+
+
+def test_saturation_clustering_is_per_frame_four_connectivity(tmp_path):
+    images = np.zeros((2, 8, 8), dtype=float)
+    # The same pixel saturated in both frames is one repeated hot pixel, and
+    # two diagonally touching pixels are two separate cosmic hits.
+    images[0, 4, 4] = 65535.0
+    images[1, 4, 4] = 65535.0
+    images[0, 1, 1] = 65535.0
+    images[0, 2, 2] = 65535.0
+
+    clusters = measure_saturation_clusters(images)
+
+    assert clusters.cluster_count == 0
+    assert clusters.anomalous_pixels == 4
+    assert not clusters.is_saturated
+
+    images[1, 6, 6] = 65535.0
+    images[1, 6, 7] = 65535.0
+    joined = measure_saturation_clusters(images)
+    assert joined.cluster_count == 1
+    assert joined.cluster_pixels == 2
+    assert joined.largest_cluster_pixels == 2
+
+
+@pytest.mark.parametrize(
+    ("painter", "expected", "phrase"),
+    [
+        (_saturated_cluster, ExposureState.SATURATED, "Lower exposure"),
+        (_too_dim, ExposureState.DIM, "Increase exposure"),
+        (_healthy, ExposureState.GOOD, "Continue"),
+        (_cosmic_singles, ExposureState.GOOD, "Continue"),
+    ],
+)
+def test_exposure_guidance_names_next_action(tmp_path, painter, expected, phrase):
+    result = evaluate_exposure(_triage_frame(tmp_path, "lamp.sif", painter))
+
     assert result.state is expected
-    assert result.next_action
-    if expected is ExposureState.SATURATED:
-        assert "Lower exposure" in result.next_action
-    elif expected is ExposureState.DIM:
-        assert "Increase exposure" in result.next_action
-    else:
-        assert "Continue" in result.next_action
+    assert phrase in result.next_action
+    if painter is _cosmic_singles:
+        assert result.anomalous_pixels == 3
+        assert result.saturated_pixels == 0
 
 
 def test_shared_catalog_line_help_maps_packaged_thar_rows():
@@ -538,7 +885,7 @@ def test_packaged_2025_watch_to_validated_snapshot_rehearsal(tmp_path):
         pattern_source=pattern_path,
         wavelength_source=wavelength_path,
         integral_source=integral_path,
-        required_lamps=("ThAr",),
+        suggested_lamps=("ThAr",),
         previous_sphere=sphere_path,
         previous_sphere_background=sphere_background_path,
     )

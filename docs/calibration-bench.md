@@ -1,107 +1,164 @@
 # Live Calibration Bench
 
 `echelle-calib` is a separate pyqtgraph window for calibration work at the
-instrument. It keeps acquisition, procedure, line-identification, sphere-factor,
+instrument. It keeps file triage, procedure, line-identification, sphere-factor,
 configuration, and snapshot state outside the established five-tab analysis GUI.
 The Qt callbacks are adapters over UI-independent campaign and alignment state.
 
+The bench takes whatever you throw at it. It has no required lamp, no required
+filename, and no required folder: files arrive by hand, roles are assigned by
+hand, and the procedure is derived from what you actually loaded.
+
 ## Start a campaign
 
-Point the bench at the folder written by the acquisition software:
+```bash
+echelle-calib
+```
+
+The optional folder argument only chooses where the **Add SIF files…** dialog
+opens first:
 
 ```bash
-echelle-calib path/to/acquisition-folder
+echelle-calib path/to/todays-calibration-folder
 ```
 
 The accepted 2025 CMOS pattern and aligned wavelength table, packaged
-integrating-sphere reference, historical 2024 sphere pair, and ThAr checklist
-are defaults. Override them explicitly when rehearsing another detector or
-campaign:
+integrating-sphere reference, and historical 2024 sphere pair are defaults.
+Override them explicitly when rehearsing another detector or campaign:
 
 ```bash
-echelle-calib path/to/acquisition-folder \
+echelle-calib path/to/calibration-folder \
   --pattern path/to/pattern.txt \
   --wavelength path/to/wavelength.txt \
   --integral path/to/integrating-sphere.txt \
   --previous-sphere path/to/previous-sphere.sif \
   --previous-sphere-background path/to/previous-sphere-bg.sif \
-  --lamp ThAr --lamp Ne \
+  --lamp Ne --lamp ThAr \
   --snapshot-id 20260901_cmos \
   --valid-from 2026-09-01 \
   --output-root path/to/calibrations \
   --config-root path/to/calibration-configs
 ```
 
-Load one fixture immediately while keeping the folder watch active:
+`--lamp` names lamps to *suggest*, not to demand; any name is accepted and none
+is ever required. Load files at start-up with a repeatable `--file`, and enable
+the optional folder watch with `--watch`:
 
 ```bash
-echelle-calib path/to/fixture-campaign --file path/to/lamp.sif
+echelle-calib path/to/calibration-folder --file path/to/lamp.sif --watch
 ```
 
 Run `echelle-calib --help` for polling, stability, saturation, SNR, campaign,
 configuration, and snapshot controls.
 
-## Safe file arrival and explicit roles
+## Getting files onto the bench
 
-The watcher chooses the newest case-insensitive `.sif` file by modification
-time, with filename as a deterministic tie-breaker. A candidate is loadable
-only when:
+Primary input is manual, because at acquisition time files are misnamed,
+renamed later, appear after the fact, and get retried:
 
-1. its byte size and nanosecond modification time are identical across two
-   consecutive polls by default; and
-2. its modification time is at least one second old by default.
+- **drag and drop** one or many SIFs onto the window — the same drop machinery
+  the main GUI uses; dropping a folder queues the SIFs inside it;
+- **Add SIF files…** opens an ordinary file dialog in the current folder;
+- `--watch` additionally polls a folder and loads each newly stable SIF. This is
+  a convenience, never a requirement.
 
-Growth or a timestamp change restarts the unchanged-poll count. One unchanged
-fingerprint is emitted only once. A missing/unreadable folder and a SIF load
-failure become explicit states instead of crashing the event loop. A failed
-newer load preserves the last good detector frame and anchors; a later good
-file recovers. A successfully loaded new frame starts a fresh anchor set because
-anchors belong to that measurement.
+Every file is read on a worker thread, one at a time, and lands as a row in the
+**Files** table. The frames themselves are not retained: only the verdict is, so
+a whole campaign folder can sit on the bench at once. **Open selected file for
+lamp fitting** re-reads one row when you want to click lines on it.
 
-Filename matching is help, not evidence. On the **Acquire** tab the bench may
-suggest sphere signal, sphere background, lamp signal, or lamp background, but
-the operator must press **Confirm role for loaded SIF**. Ambiguous names offer
-several choices and tick nothing. Lamp roles also require an explicit ThAr, Ne,
-Hg, or H2 family. This prevents a convenient but unsupported filename guess from
-completing the procedure.
+A SIF that cannot be read becomes an explicit failure message and leaves the
+last good frame in place; the queue continues with the next file.
 
-These rules make polling repeatable and testable. They do not measure real USB
-throughput or prove how a particular acquisition writer closes files.
+When the watcher is enabled it chooses the newest case-insensitive `.sif` file
+by modification time, with filename as a deterministic tie-breaker, and emits it
+only after its byte size and nanosecond modification time repeat across two
+consecutive polls and it is at least one second old. These rules make polling
+repeatable and testable. They do not measure real USB throughput or prove how a
+particular acquisition writer closes files.
+
+## Exposure triage is the front door
+
+Triage needs nothing but a file — no role, no lamp, no folder. As soon as a
+frame is read, the **Exposure triage** view shows one verdict line, the raw
+counts histogram, and a second histogram of the last 10% before full scale, so
+the top end stays legible where the background peak would otherwise dwarf it.
+This replaces squinting at the acquisition software: shoot, drop the file, one
+glance, adjust the lamp, shoot again.
+
+Saturation is judged by clustering alone:
+
+- a **connected cluster of two or more full-scale pixels** (four-connectivity
+  inside one frame) is real saturation and fails the frame;
+- an **isolated full-scale pixel is an anomaly** — a cosmic ray or a hot pixel —
+  counted and reported, never held against the exposure. A pixel that saturates
+  in every frame of a stack stays a repeated anomaly, because clusters are never
+  linked across frames.
+
+The verdict states:
+
+- **SATURATED** — how many full-scale pixels in how many clusters; lower the
+  exposure and shoot again;
+- **TOO DIM FOR LINES** — the brightest real pixel as a percentage of full scale
+  and as a multiple of the frame's own noise floor: right for a background, too
+  weak for a lamp;
+- **HEALTHY** — headroom from the brightest **non-anomalous** pixel, as
+  "X% of full scale — about N× brighter is still safe";
+- **NO DATA** — no finite raw pixels; reacquire.
+
+The noise floor is a robust median/MAD estimate over a strided pixel sample of
+the frame. The verdict is acquisition guidance, not a camera-timing validation.
+
+## Roles are assigned by hand, one control per file
+
+Each row of the **Files** table carries its own role control and its own lamp
+name: sphere signal, sphere background, lamp signal, lamp background, or
+experiment/other for a frame that is simply parked on the bench. The lamp name
+offers ThAr, Ne, Hg, and H2 as ready-made choices and accepts any other name you
+type — the known list is convenience, never a permitted set.
+
+Filename patterns only **pre-fill** these controls. `Ne-0.02s-x3-bright-lines_bg.sif`
+pre-selects a Ne lamp background; `IMG_0042.sif` pre-selects nothing and still
+takes any role you pick. A pre-filled row shows `no role yet` until you confirm
+it in the control, so a filename can never complete the procedure by itself.
 
 ## On-screen procedure
 
-The **Procedure** tab derives its check marks from campaign state in this order:
+The **Procedure** tab is built from the files and roles that exist, not from a
+fixed lamp list:
 
-1. load the pattern, wavelength table, and integrating-sphere reference;
-2. measure and explicitly classify the sphere signal;
-3. measure and explicitly classify the matching sphere background;
-4. compute candidate absolute factors and compare them with the previous pair;
-5. for every requested lamp, classify a matching background and signal;
-6. solve and review the lamp alignment with at least two accepted anchors;
-7. generate the commented campaign, alignment, and export TOMLs;
-8. save and validate the snapshot.
+1. pattern, wavelength table, and integrating-sphere reference are loaded;
+2. SIFs are on the bench and triaged;
+3. the sphere signal and its background carry their roles;
+4. candidate absolute factors are computed and compared with the previous pair —
+   the sphere pair alone unblocks this, no lamp needed;
+5. for **every lamp you actually assigned**, its signal and background rows;
+6. the lamp alignment is solved with at least two accepted anchors;
+7. the commented campaign, alignment, and export TOMLs are generated;
+8. the snapshot is saved and validated.
 
-For practical lamp work, acquire/classify the background before the signal so
-the newest frame visible for click fitting is the lamp signal. A checked item
-always names its supporting filename or numerical result. Changing any
-classification invalidates comparison/configuration/save readiness rather than
-leaving stale green checks.
+A Ne-only campaign therefore reaches "snapshot saved and validated" with every
+tick green and no mention of any lamp it did not measure. The previous
+campaign's lamps appear as one non-blocking advisory row — "last time: Ne;
+consider ThAr, Hg, H2 if available" — because every extra lamp measured at the
+bench is a future refinement, and one calibration is enough to ship.
 
-## Saturation and exposure guidance
+Every row that is not yet possible names what would unblock it, so no surface is
+ever dead: the sphere factors need only the sphere pair, the lamp rows need only
+any one classified lamp, and triage needs only a file. With nothing loaded, the
+drop target and the **Add SIF files…** button are the primary surface.
 
-Role confirmation inspects finite raw detector pixels, not the extracted curve.
-The guidance panel reports the raw peak and one of:
+A checked item always names its supporting filename or numerical result.
+Changing any classification invalidates comparison/configuration/save readiness
+rather than leaving stale green checks.
 
-- **SATURATED** — lower exposure and reacquire; fitted saturated windows remain
-  refused before they can enter the anchor set;
-- **DIM** — increase exposure toward a useful unsaturated peak;
-- **GOOD** — continue to line identification and anchor fitting;
-- **NO DATA** — reacquire because no finite raw pixels are available.
+## Exposure guidance for a classified frame
 
-When SIF metadata carries an exposure time, the advice includes an approximate
-next exposure targeting 70% of the configured saturation level. Background
-frames instead tell the operator to keep the paired signal at the same exposure.
-This is acquisition guidance, not a camera-timing validation.
+Once a file carries a role, its guidance panel restates the triage verdict as a
+next acquisition action. When SIF metadata carries an exposure time, the advice
+includes an approximate next exposure targeting 70% of the configured saturation
+level. Background frames instead tell the operator to keep the paired signal at
+the same exposure.
 
 ## Line identification and live alignment
 
@@ -121,6 +178,12 @@ rows for identification help. They do not silently become fit anchors. Accepted
 anchors still use the curated calibration table and established fitting,
 saturation, detector-point, and rigid-transform functions. A low selected-anchor
 RMS does not replace wavelength-table QC or Balmer/Fulcher plasma validation.
+
+Note the boundary this leaves: clickable anchors come from the curated
+wavelength table, which is the ThAr table for the packaged 2025 defaults. With a
+lamp whose curated rows do not exist, the catalog sticks still identify lines but
+each accepted anchor is measured against the nearest curated row, so review the
+per-anchor residuals before trusting the solved transform.
 
 ## Sphere factors and `insufficient data`
 
@@ -213,10 +276,14 @@ quietly using stale configuration.
 
 ## Tested evidence boundary
 
-Automated coverage pins watcher, classification, checklist, exposure, shared-line,
-comparison, TOML, save, validation, failure, and recovery states without Qt;
-focused off-screen tests cover every Packet 5 view. Tests also pin that a
-nonzero transform changes the saved table's digest and reproduces the solved
+Automated coverage pins triage, watcher, classification, checklist, exposure,
+shared-line, comparison, TOML, save, validation, failure, and recovery states
+without Qt; focused off-screen tests cover the bench views, the drag-and-drop
+path, and per-file role assignment. Triage verdicts are pinned against synthetic
+frames for clustered saturation, lone cosmic-ray pixels, a too-dim frame, and a
+healthy one, and a fixture folder mirroring the real 2025 Ne-only campaign
+reaches a saved, validated, registrable snapshot with no ThAr anywhere. Tests
+also pin that a nonzero transform changes the saved table's digest and reproduces the solved
 shift when the table is read back, that a transform moving nothing copies the
 base bytes, that the saved snapshot resolves through a calibration registry
 unedited, and that the snapshot's `alignment.toml` round-trips. The complete fixture rehearsal
@@ -227,3 +294,9 @@ placeholder because no 2025 lamp-background SIF is packaged.
 That rehearsal proves the software path to a validated snapshot. It does not
 prove live camera behavior, acquisition-writer timing, real USB throughput, NIFS
 field operation, lamp response, or hardware performance.
+
+The bench has additionally been driven head-less over the real 2025-09-26
+Ne-only folder — six SIFs dropped through the real input path, triaged, given
+roles by hand, fitted, compared, saved, validated, and resolved through a
+registry. That run exercises the software against real detector data; it is
+still not a live-instrument or field-operation claim.
