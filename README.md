@@ -103,6 +103,13 @@ outputs, receipts, progress, and failures. See the
 verifies one immutable snapshot per source and writes complete recalibration
 provenance into each cube.
 
+The current checkout also contains an **unreleased Packets 9–13 implementation
+candidate** for drive catalogs, cube-derived LHD text, post-hoc cube
+recalibration, sampled drift/refinement evidence, a read-only reading room, and
+historical binders. See the [candidate contract](docs/harbor-candidate.md) and
+[requirement reconciliation](docs/harbor-reconciliation.md). These surfaces do
+not constitute releases 1.7.0–1.11.0 or a shipped Harbor train.
+
 ---
 
 ## CMOS Workflow

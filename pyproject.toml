@@ -62,6 +62,7 @@ echelle-validate-lines = "echelle_spectra.line_validation_cli:main"
 echelle-wavelength-qc = "echelle_spectra.wavelength_qc_cli:main"
 echelle-nist-overlay = "echelle_spectra.nist_overlay_cli:main"
 echelle-spectrocube = "echelle_spectra.spectrocube_cli:main"
+echelle-cube2txt = "echelle_spectra.campaign_tools_cli:txt_main"
 
 [project.optional-dependencies]
 # Dev tools you already use + a few safe additions
@@ -153,6 +154,7 @@ where = ["src"]
   "resources/*.txt",
   "resources/*.py",
   "resources/line_catalogs/*.toml",
+  "resources/historical_manifests/*.toml",
   "resources/graphics/*",
   "resources/calibration_files/*",
   "resources/calibration_files/alignments/*",

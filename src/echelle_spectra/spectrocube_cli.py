@@ -297,6 +297,15 @@ def _build_parser(*, prog: str = "echelle-spectrocube") -> argparse.ArgumentPars
             "Snapshot root used with --registry (default: calibrations beside the registry)."
         ),
     )
+    p.add_argument(
+        "--drift-verdict",
+        default=None,
+        metavar="JSON",
+        help=(
+            "Sampled drift evidence required before registry-backed bulk processing; "
+            "insufficient or unaccepted shifted evidence is refused."
+        ),
+    )
     return p
 
 
@@ -421,6 +430,8 @@ def _settings_from_args(args: argparse.Namespace) -> tuple[argparse.Namespace, d
         args.output = plan.get("output") or plan.get("output_dir")
     if args.pattern == "*.SIF" and plan.get("pattern"):
         args.pattern = plan["pattern"]
+    if args.drift_verdict is None and plan.get("drift_verdict"):
+        args.drift_verdict = plan["drift_verdict"]
     args.overwrite = bool(args.overwrite or plan.get("overwrite", False))
     args.dry_run = bool(args.dry_run or plan.get("dry_run", False))
     args.verbose = bool(args.verbose or plan.get("verbose", False))
@@ -578,6 +589,21 @@ def _resume_message(receipt: RunReceipt, target_label: str | None) -> str:
     return f"Interrupted safely. Resume with --run-dir {receipt.directory}"
 
 
+def _write_drive_catalog(
+    out_dir: Path, receipt: RunReceipt | None, target_label: str | None
+) -> None:
+    if receipt is None:
+        return
+    from .catalog import build_drive_catalog
+
+    catalog = build_drive_catalog(
+        out_dir,
+        volume_label=receipt.volume_label,
+        receipt_dir=receipt.directory,
+    )
+    _emit_target(f"Catalog:     {catalog}", target_label=target_label)
+
+
 def _run_batch_target(
     args: argparse.Namespace,
     settings: dict,
@@ -601,6 +627,28 @@ def _run_batch_target(
             stream=sys.stderr,
         )
         return 1
+
+    if registry is not None and len(sif_files) > 1:
+        from .drift import DriftError, require_sampled_verdict
+
+        if not args.drift_verdict:
+            _emit_target(
+                "ERROR: registry-backed bulk processing requires --drift-verdict from a "
+                "sampled epoch audit.",
+                target_label=target_label,
+                stream=sys.stderr,
+            )
+            return 1
+        try:
+            selected_ids = {registry.resolve_source(path).snapshot_id for path in sif_files}
+            require_sampled_verdict(args.drift_verdict, selected_ids)
+        except (CalibrationRegistryError, DriftError, OSError, ValueError) as exc:
+            _emit_target(
+                f"ERROR: bulk drift gate failed: {exc}",
+                target_label=target_label,
+                stream=sys.stderr,
+            )
+            return 1
 
     if not args.dry_run:
         out_dir.mkdir(parents=True, exist_ok=True)
@@ -702,6 +750,7 @@ def _run_batch_target(
     if stop_event is not None and stop_event.is_set():
         if receipt is not None:
             receipt.finish("interrupted")
+            _write_drive_catalog(out_dir, receipt, target_label)
         return 130
 
     cal_dir = Path(settings["calibration_dir"]) if settings.get("calibration_dir") else None
@@ -727,6 +776,7 @@ def _run_batch_target(
                 stop_event.set()
             if receipt is not None:
                 receipt.finish("interrupted")
+                _write_drive_catalog(out_dir, receipt, target_label)
                 _emit_target(
                     _resume_message(receipt, target_label),
                     target_label=target_label,
@@ -751,6 +801,7 @@ def _run_batch_target(
                         reason=f"calibration could not load: {exc}",
                     )
                 receipt.finish("partial")
+                _write_drive_catalog(out_dir, receipt, target_label)
             return 1
 
     calibration_cache: dict[str, object] = {}
@@ -765,6 +816,7 @@ def _run_batch_target(
         if stop_event is not None and stop_event.is_set():
             if receipt is not None:
                 receipt.finish("interrupted")
+                _write_drive_catalog(out_dir, receipt, target_label)
                 _emit_target(
                     _resume_message(receipt, target_label),
                     target_label=target_label,
@@ -784,6 +836,7 @@ def _run_batch_target(
                 stop_event.set()
             if receipt is not None:
                 receipt.finish("interrupted")
+                _write_drive_catalog(out_dir, receipt, target_label)
                 _emit_target(
                     _resume_message(receipt, target_label),
                     target_label=target_label,
@@ -879,6 +932,7 @@ def _run_batch_target(
                         reason="keyboard interrupt",
                     )
                     receipt.finish("interrupted")
+                    _write_drive_catalog(out_dir, receipt, target_label)
                     _emit_target(
                         _resume_message(receipt, target_label),
                         target_label=target_label,
@@ -915,6 +969,7 @@ def _run_batch_target(
     if failed:
         if receipt is not None:
             receipt.finish("partial")
+            _write_drive_catalog(out_dir, receipt, target_label)
         failure_lines = [f"{len(failed)} failure(s):", *(f"  {path}" for path in failed)]
         failure_lines.append(f"{n_ok}/{len(sif_files)} exported successfully.")
         _emit_target(
@@ -930,6 +985,7 @@ def _run_batch_target(
     else:
         if receipt is not None:
             receipt.finish("completed")
+            _write_drive_catalog(out_dir, receipt, target_label)
         skipped = f", {n_skipped} skipped" if n_skipped else ""
         _emit_target(
             _color(f"Done. {n_exported}/{total} exported successfully{skipped}.", "32"),

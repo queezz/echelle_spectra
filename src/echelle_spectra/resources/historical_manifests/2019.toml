@@ -1,0 +1,47 @@
+schema = "echelle-historical-calibration/v1"
+snapshot_id = "20190529_cmos"
+detector = "cmos"
+acquired_date = "2019-05-29"
+notes = "Thin retrospective binder. Historical source files retain their original names and locations."
+
+[[artifacts]]
+role = "pattern"
+path = "pattern_cmos.txt"
+source_name = "pattern_cmos.txt"
+size_bytes = 332800
+sha256 = "3994f8e0e2a6fd11799023e99cc60f1d2be0849b3117c34563a50e3d8187e4e7"
+
+[[artifacts]]
+role = "wavelength"
+path = "Th_wavelength_CMOS.txt"
+source_name = "Th_wavelength_CMOS.txt"
+size_bytes = 8306
+sha256 = "97c4d5e2fd3e56aac4a4fa1f31ce63ac7076c3c229d04d5653f22a0e8f551aba"
+
+[[artifacts]]
+role = "sphere"
+path = "sphere_CMOS.sif"
+source_name = "sphere_CMOS.sif"
+size_bytes = 66359718
+sha256 = "60a57397e36057aecd3c002bcd8ca336ca64b09575a7c23a573c020300552fd1"
+
+[[artifacts]]
+role = "sphere_background"
+path = "sphere_CMOS_bkg.sif"
+source_name = "sphere_CMOS_bkg.sif"
+size_bytes = 66359723
+sha256 = "33f4ae28658f714e81013f1b39e58e298da7afc2cacb614e29e264299ef72f2f"
+
+[[artifacts]]
+role = "integral"
+path = "integrating_sphere.txt"
+source_name = "integrating_sphere.txt"
+size_bytes = 524
+sha256 = "cd2efc11ba9af3582b5bcdabec3a3cdbd971a55b1fc7fab4062ebebe3013198d"
+
+[[artifacts]]
+role = "lamp"
+path = "ThAr_10.0s_16bit.sif"
+source_name = "ThAr_10.0s_16bit.sif"
+size_bytes = 22122862
+sha256 = "f7aedea9abe795a3e476a098298f1fd4e8cc402ca1616cc0887f1695c4d198c6"

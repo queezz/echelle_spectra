@@ -96,5 +96,7 @@ nav:
   - Development:
       - Developer notes: development.md
       - Portable NIFS kit: portable-kit.md
+      - Harbor Packets 9–13 candidate: harbor-candidate.md
+      - Harbor reconciliation: harbor-reconciliation.md
   - Archaeology & Refactor:
       - Repository archaeology report: archaeology/report.md

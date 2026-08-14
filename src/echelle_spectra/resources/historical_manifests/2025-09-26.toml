@@ -1,0 +1,47 @@
+schema = "echelle-historical-calibration/v1"
+snapshot_id = "20250926_cmos"
+detector = "cmos"
+acquired_date = "2025-09-26"
+notes = "2025 pattern/alignment with the explicitly inherited 2024 sphere pair; historical filenames remain unchanged."
+
+[[artifacts]]
+role = "pattern"
+path = "pattern_CMOS_20250926.txt"
+source_name = "pattern_CMOS_20250926.txt"
+size_bytes = 330240
+sha256 = "777bcea713052a41f933fb935df3434ea05cefc68fef9a1ede4b8445cde0757f"
+
+[[artifacts]]
+role = "wavelength"
+path = "alignments/Th_wavelength_CMOS_20240305_aligned_to_20250926.txt"
+source_name = "Th_wavelength_CMOS_20240305_aligned_to_20250926.txt"
+size_bytes = 10821
+sha256 = "9dcbe62159219df643484b9b0d0276b427eab70071bddaa96272dbc0f2627ee3"
+
+[[artifacts]]
+role = "sphere"
+path = "sphere_cmos_20240305.sif"
+source_name = "sphere_cmos_20240305.sif"
+size_bytes = 66359707
+sha256 = "d4aad88baab1cf6c8988a9a1cfd4b881d813e171ec2976b20f928d4eabadc01e"
+
+[[artifacts]]
+role = "sphere_background"
+path = "sphere_cmos_20240305_bkg.sif"
+source_name = "sphere_cmos_20240305_bkg.sif"
+size_bytes = 66359718
+sha256 = "84458e65f34ec90dd3a010f4946a4e711444af606a1ac2ce9e9af16e5850d036"
+
+[[artifacts]]
+role = "integral"
+path = "integrating_sphere.txt"
+source_name = "integrating_sphere.txt"
+size_bytes = 524
+sha256 = "cd2efc11ba9af3582b5bcdabec3a3cdbd971a55b1fc7fab4062ebebe3013198d"
+
+[[artifacts]]
+role = "alignment_settings"
+path = "alignments/lhd_cmos_alignment_20250926.settings.toml"
+source_name = "lhd_cmos_alignment_20250926.settings.toml"
+size_bytes = 781
+sha256 = "28eb36d29bf8c6472fa35e62dc6d4aadd520f74b7851bfa418f55d6e9b58cd2d"

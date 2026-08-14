@@ -1,6 +1,5 @@
 import ctypes
 import sys
-from datetime import datetime
 from pathlib import Path
 
 import numpy as np
@@ -9,6 +8,7 @@ from PyQt5.QtWidgets import QApplication, QMainWindow
 from pyqtgraph.Qt import QtCore, QtGui
 
 from . import __version__, _config
+from .lhd_text import render_lhd_header, write_lhd_text
 from .resources import window_layout
 from .tools import echelle as ech
 from .tools import emissionbands as eb
@@ -45,7 +45,6 @@ class EchelleSpectraGUI(QMainWindow, window_layout.Ui_MainWindow):
         self.setup_bands()
 
         # define auxiliary class attributes
-        self.header = self.get_header_template()
         self.shot_dict = {}
         self.shot_range = []
         self.frame_current = 0
@@ -132,36 +131,10 @@ class EchelleSpectraGUI(QMainWindow, window_layout.Ui_MainWindow):
             getattr(self, path).mkdir(parents=True, exist_ok=True)
 
         self.path_calibration = self.config["base_path"] / "resources/calibration_files"
-        self.path_header_template = (
-            self.config["base_path"] / "resources/header_template.txt"
-        )
         self.path_last_shot = self.config["base_path"] / ".last_shot"
 
         if self.config["debug"]:
             print(self.config)
-
-    def get_header_template(self):
-        """Get header template used when saving data
-
-        Usage:
-
-        header = self.header.format(
-            diag_name = 'alfa',
-            shot = 10,
-            date = 2019,
-            dimno = 1,
-            dimname = 'time',
-            dimsize = 1,
-            dimunits = 's',
-            nval = 20,
-            vnames = 'a b c',
-            vunit = 'W/m',
-            trigdelay = 2.75,
-            cycletime = 0.25
-            )
-        """
-        with open(self.path_header_template, "r") as fl:
-            return fl.read()
 
     def write_last_shot(self):
         """Write last loaded shot number to file"""
@@ -567,27 +540,25 @@ class EchelleSpectraGUI(QMainWindow, window_layout.Ui_MainWindow):
         if Path(pth).is_file() and not self.overwrite.isChecked():
             return
 
-        header = self.header.format(
-            diag_name=self.config["diag_name"],
+        header = render_lhd_header(
+            diagnostic=self.config["diag_name"],
             shot=shot,
-            date=datetime.now().strftime("%m/%d/%Y %H:%M"),
-            dimno=1,
-            dimname="Time",
-            dimsize=data.shape[0],
-            dimunits="s",
-            nval=data.shape[1] - 1,
-            vnames=",".join([f"'{name}'" for name in names]),
-            vunit=",".join(["'W/m^2'"] * len(names)),
-            trigdelay=self.trigger_delay.value(),
-            cycletime=self.em.info["CycleTime"],
-        ).strip()
-        np.savetxt(
+            dimension_name="Time",
+            dimension_size=data.shape[0],
+            dimension_unit="s",
+            value_names=names,
+            value_units=["W/m^2"] * len(names),
+            provenance={"source_file": str(self.spectra.fpth)},
+            comments=(
+                f"time = {self.trigger_delay.value()} + frameNo*{self.em.info['CycleTime']} (s)",
+            ),
+        )
+        write_lhd_text(
             pth,
             data,
-            delimiter=", ",
             header=header,
-            comments="",
-            fmt=["%.5f"] + ["%.6e"] * len(names),
+            formats=["%.5f"] + ["%.6e"] * len(names),
+            overwrite=self.overwrite.isChecked(),
         )
 
     def save_spectrocube(self):

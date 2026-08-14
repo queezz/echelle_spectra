@@ -447,6 +447,17 @@ def test_registry_batch_resolves_and_records_one_snapshot_per_source(
     runs = tmp_path / "runs"
     calibrations = {"20240101_cmos": object(), "20250101_cmos": object()}
     exports: list[tuple[str, str]] = []
+    drift = tmp_path / "drift.json"
+    drift.write_text(
+        json.dumps(
+            {
+                "schema": "echelle-drift-evidence/v1",
+                "verdict": "aligned",
+                "snapshot_ids": ["20240101_cmos", "20250101_cmos"],
+            }
+        ),
+        encoding="utf-8",
+    )
 
     def build(folder: Path, _camera: str, **_kwargs):
         return calibrations[Path(folder).name]
@@ -474,6 +485,8 @@ def test_registry_batch_resolves_and_records_one_snapshot_per_source(
                 str(registry),
                 "--calibrations",
                 str(snapshots),
+                "--drift-verdict",
+                str(drift),
             ]
         )
     assert result.value.code == 0

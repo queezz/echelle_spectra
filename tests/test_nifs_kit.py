@@ -352,4 +352,5 @@ def test_all_existing_console_entry_points_remain_declared() -> None:
         "echelle-wavelength-qc",
         "echelle-nist-overlay",
         "echelle-spectrocube",
+        "echelle-cube2txt",
     }

@@ -115,6 +115,12 @@ developer tools cannot be assumed.
 | `echelle snapshot validate DIR` | Rechecks snapshot schema, paths, sizes, and SHA-256 digests | Yes |
 | `echelle snapshot show DIR` | Prints a compact snapshot summary | Yes |
 | `echelle process INPUT -o OUTPUT` | Converts one SIF, a folder, or several drives to SpectroCube NetCDF and records resumable receipts | Yes |
+| `echelle catalog build/merge` | Writes per-drive catalogs and a durable all-years index with volume labels | Candidate; audit/catalog work |
+| `echelle txt CUBE OUTPUT` / `echelle-cube2txt` | Writes canonical provenance-complete LHD text from a saved cube | Candidate; no raw SIF needed |
+| `echelle recal-cube CUBE --new-snapshot DIR` | Applies safe wavelength/factor snapshot deltas and refuses geometry changes | Candidate; reviewed repair only |
+| `echelle drift audit/refine` | Samples Balmer/Fulcher centroids, emits a four-state verdict, and accepts immutable `-rN` refinements | Candidate; required before registry bulk runs |
+| `echelle web --catalog INDEX --output DIR` | Builds the static read-only reading room and command composer | Candidate; never controls workers |
+| `echelle historical` | Validates the three thin historical calibration binders | Candidate; inspection only |
 | `echelle-pattern SPHERE BACKGROUND` | Previews or writes a detector order-pattern fit | Specialist recalibration |
 | `echelle-align SIGNAL BACKGROUND SPHERE SPHERE_BG` | Previews or saves a rigid wavelength-table alignment | Specialist recalibration |
 | `echelle-validate-lines SIF` | Checks a calibrated experimental spectrum against Balmer and optional Fulcher lines | Calibration QC |

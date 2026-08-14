@@ -1,0 +1,49 @@
+# Harbor requirement reconciliation
+
+Status: unreleased implementation candidate at package version 1.6.0. “Fixture”
+below means automated synthetic/local evidence, not instrument or field
+acceptance.
+
+| Packet / requirement | Code surface | Focused acceptance | Document / evidence status |
+| --- | --- | --- | --- |
+| 0 immutable digested snapshots | `snapshot.py`, `snapshot_cli.py` | `test_snapshot.py`, `test_snapshot_cli.py` | `calibration-snapshots.md`; previously released evidence |
+| 1 durable receipt/resume | `campaign_run.py`, `spectrocube_cli.py` | `test_campaign_run.py` | `campaign-runs.md`; previously released evidence |
+| 2 one reader per drive | `spectrocube_cli.py` multi-target executor | `test_campaign_run.py` | `campaign-runs.md`; previously released evidence |
+| 3 shared line knowledge | `tools/line_catalog.py`, `tools/line_overlay.py` | `test_line_catalog.py`, `test_line_overlay.py` | `known-line-overlays.md`; previously released evidence |
+| 4 live bench core | `calibration_bench.py`, `calibration_bench_gui.py` | bench domain/offscreen tests | `calibration-bench.md`; previously released evidence |
+| 5 bench campaign memory | `calibration_campaign.py`, bench GUI | `test_calibration_campaign.py` | `calibration-bench.md`; previously released evidence |
+| 6 portable kit | `kit/`, `scripts/build_nifs_kit.py`, reproducible builder | kit/reproducibility tests | `portable-kit.md`; no new rehearsal in this pass |
+| 7 neutral optional fields | external SpectroCube 0.2.0 (unchanged) | external 0.2.0 contract suite | external `SPEC.md`; dependency remains pinned at `0b02ac9` |
+| 8 registry + complete cube provenance | `calibration_registry.py`, `tools/spectrocube_export.py` | registry/complete-provenance tests | `calibration-epoch-registry.md`; Packet 8 contracts preserved |
+| 9 per-drive catalog | `catalog.build_drive_catalog`, automatic batch hook | `test_catalog_cube_text_and_missing_drive_reading_room` | `harbor-candidate.md` |
+| 9 merged missing-drive index | `catalog.merge_catalogs`, reading-room availability refresh | disconnected catalog fixture | `harbor-candidate.md` |
+| 9 cube-derived canonical text | `lhd_text.py`, `campaign_tools_cli.txt_main` | canonical header/cube fixture | `harbor-candidate.md` |
+| 9 replace divergent headers | legacy `Spectrum.save` and GUI call `lhd_text`; old resource removed | Ruff/import plus canonical writer fixture | `harbor-candidate.md` |
+| 10 wavelength/factor deltas | `recalibration.recalibrate_dataset/cube` | A→B wavelength and factor fixture | `harbor-candidate.md` |
+| 10 old/new provenance + manifest | recalibration history attrs and adjacent manifest | history event assertions; installed-file gate deferred | `harbor-candidate.md` |
+| 10 geometry refusal | pattern digest comparison | changed-pattern refusal names raw SIF | `harbor-candidate.md` |
+| 11 interval/shot sampling | `drift.select_sample_paths`, audit CLI | shifted synthetic cube and sample-rule evidence | `harbor-candidate.md` |
+| 11 four verdicts + thresholds | `drift.centroid_evidence/verdict_from_evidence` | all four verdict branches | `harbor-candidate.md` |
+| 11 repair/refinement | repair command + `create_refinement_snapshot` | immutable `-r1` and accepted evidence fixture | `harbor-candidate.md` |
+| 11 pre-bulk gate | `require_sampled_verdict`, registry bulk hook | shifted refusal and aligned acceptance | `harbor-candidate.md` |
+| 12 browsing/verdict cards | `reading_room.py` static HTML/data build | missing drive and evidence fixture | `harbor-candidate.md` |
+| 12 composer/no worker control | browser-local text composer only | page assertion; visual/perimeter gate deferred | `harbor-candidate.md` |
+| 12 procedure/vocabulary/provenance | default Markdown embedding and built-in verdict vocabulary | static build fixture | `harbor-candidate.md` plus existing operator/snapshot/registry docs |
+| 13 historical absorption | `historical.py`, three bundled TOMLs | exact names/sizes/SHA-256 validation | `harbor-candidate.md` |
+| 13 connected fixture path | snapshot + receipt + catalog + text + drift/refinement + optional recalibration domain + web | `test_refinement_historical_and_connected_fixture_path` and adjacent focused tests | this reconciliation |
+
+## Deferred validation ledger
+
+| Gate | Candidate state | Required later evidence |
+| --- | --- | --- |
+| Fable correctness/coverage review | pending | review correctness, missing acceptance, unsafe assumptions, and integration defects |
+| Full source suite | 270 passed with established NumPy/netCDF warnings | repeat after review if implementation changes |
+| Wheel/sdist, Twine, archive inspection | deliberately omitted | external build outputs, identities, metadata, contents |
+| Clean and offline installation | deliberately omitted | fresh external kit/runtime installs without repository state |
+| Reproducibility build | deliberately omitted | independent byte-identical artifacts |
+| Windows/macOS portable-kit/native rehearsal | deliberately omitted | matching native executions and payload checks |
+| Real 2026 snapshot and cube recalibration | unavailable in fixture pass | immutable real snapshot and A→B result |
+| Sampled real historical epoch | unavailable in fixture pass | per-shot Balmer/Fulcher evidence and honest verdict |
+| Reading-room visual/perimeter/accessibility gate | deliberately omitted | viewport, keyboard, missing/error, and content perimeter evidence |
+| Expensive strict documentation/visual gates | deliberately omitted | final strict docs and visual evidence |
+| Release versions/tags/push/Harbor shipment | forbidden in this pass | owner-reviewed release certification and explicit owner actions |
