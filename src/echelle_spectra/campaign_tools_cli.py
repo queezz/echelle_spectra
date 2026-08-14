@@ -5,7 +5,6 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from pathlib import Path
 
 
 def txt_main(argv: list[str] | None = None, *, prog: str = "echelle-cube2txt") -> int:
@@ -195,25 +194,34 @@ def web_main(argv: list[str] | None = None, *, prog: str = "echelle web") -> int
     parser.add_argument("--catalog", required=True)
     parser.add_argument("--output", required=True)
     parser.add_argument("--drift", action="append", default=[])
-    parser.add_argument("--document", action="append", default=[])
+    parser.add_argument(
+        "--document",
+        action="append",
+        default=[],
+        metavar="MARKDOWN",
+        help=(
+            "Extra Markdown rendered after the packaged vocabulary, procedure and "
+            "provenance documents, which are always included."
+        ),
+    )
+    parser.add_argument(
+        "--registry",
+        metavar="TOML",
+        help="Ordered epoch registry read to pre-fill the composer and name the epochs.",
+    )
+    parser.add_argument(
+        "--calibrations",
+        metavar="DIR",
+        help="Snapshot root used with --registry (default: calibrations beside the registry).",
+    )
     args = parser.parse_args(argv)
-    documents = args.document
-    if not documents:
-        documents = [
-            str(path)
-            for path in (
-                Path("docs/operator-cheat-sheet.md"),
-                Path("docs/calibration-snapshots.md"),
-                Path("docs/calibration-epoch-registry.md"),
-                Path("docs/harbor-candidate.md"),
-            )
-            if path.is_file()
-        ]
     path = build_reading_room(
         args.catalog,
         args.output,
         drift_paths=args.drift,
-        document_paths=documents,
+        document_paths=args.document,
+        registry_path=args.registry,
+        calibrations_root=args.calibrations,
     )
     print(path)
     return 0

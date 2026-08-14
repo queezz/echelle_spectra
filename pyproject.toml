@@ -155,6 +155,7 @@ where = ["src"]
   "resources/*.py",
   "resources/line_catalogs/*.toml",
   "resources/historical_manifests/*.toml",
+  "resources/reading_room/*.md",
   "resources/graphics/*",
   "resources/calibration_files/*",
   "resources/calibration_files/alignments/*",

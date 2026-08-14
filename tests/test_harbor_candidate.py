@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 import numpy as np
@@ -230,10 +231,18 @@ def test_catalog_cube_text_and_missing_drive_reading_room(tmp_path: Path) -> Non
     page = build_reading_room(merged, tmp_path / "web", document_paths=[])
     rendered = page.read_text(encoding="utf-8")
     assert "never executes commands" in rendered
-    assert "USB-B" in rendered
-    data = json.loads((page.parent / "reading-room.json").read_text(encoding="utf-8"))
-    missing = {source["volume_label"]: source["available"] for source in data["catalog"]["sources"]}
-    assert missing == {"USB-A": True, "USB-B": False}
+    # The page is the whole artifact: no sidecar, and each drive's own state is
+    # rendered on the drive's own card.
+    assert not (page.parent / "reading-room.json").exists()
+    states = {
+        label: classes
+        for classes, label in re.findall(
+            r'<article class="card ([^"]*)"><h3 class="card-title">([^<]+)</h3>', rendered
+        )
+    }
+    # USB-A answered but travelled without a receipt: unmeasured, not empty.
+    assert "state-unmeasured" in states["USB-A"]
+    assert "state-missing-drive" in states["USB-B"]
 
 
 def test_snapshot_delta_recalibration_and_geometry_refusal(tmp_path: Path) -> None:

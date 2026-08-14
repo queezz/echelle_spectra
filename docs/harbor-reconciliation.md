@@ -26,9 +26,9 @@ acceptance.
 | 11 four verdicts + thresholds | `drift.centroid_evidence/verdict_from_evidence` | all four verdict branches | `harbor-candidate.md` |
 | 11 repair/refinement | repair command + `create_refinement_snapshot` | immutable `-r1` and accepted evidence fixture | `harbor-candidate.md` |
 | 11 pre-bulk gate | `require_sampled_verdict`, registry bulk hook | shifted refusal and aligned acceptance | `harbor-candidate.md` |
-| 12 browsing/verdict cards | `reading_room.py` static HTML/data build | missing drive and evidence fixture | `harbor-candidate.md` |
-| 12 composer/no worker control | browser-local text composer only | page assertion; visual/perimeter gate deferred | `harbor-candidate.md` |
-| 12 procedure/vocabulary/provenance | default Markdown embedding and built-in verdict vocabulary | static build fixture | `harbor-candidate.md` plus existing operator/snapshot/registry docs |
+| 12 browsing/verdict cards | `reading_room.py` one-file static build: two sticky rails, `sec-` anchors, local Find, v2 drift evidence rendering | `test_reading_room_page.py` rail/anchor/Find, four-honesty-state, unrecognized-verdict and evidence cases; missing-drive fixture | `harbor-candidate.md` |
+| 12 composer/no worker control | rail composer filling one shared command template; plan TOML read back by the composed `echelle process --plan` | both shell shapes and full copy payload per command; page contains no execution or network surface; visual/perimeter gate deferred | `harbor-candidate.md` |
+| 12 procedure/vocabulary/provenance | `resources/reading_room/*.md` as the single source, rendered by the stdlib Markdown renderer from the installed package | packaged-resource build from an unrelated working directory; renderer subset case | `harbor-candidate.md`; the docs tree does not restate the packaged canon |
 | 13 historical absorption | `historical.py`, three bundled TOMLs, `snapshot import-historical` | all three epochs import, register, and resolve a dated source; missing artifact refused by name | `calibration-epoch-registry.md` |
 | 13 connected fixture path | snapshot + receipt + catalog + text + drift/refinement + optional recalibration domain + web | `test_refinement_historical_and_connected_fixture_path` and adjacent focused tests | this reconciliation |
 

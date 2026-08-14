@@ -124,14 +124,45 @@ for the gate and the authorization each receipt records.
 ## Reading room
 
 ```console
-echelle web --catalog all-years.json --drift epoch-drift.json --output reading-room
+echelle web --catalog all-years.json --drift epoch-drift.json --registry calibration_registry.toml --output reading-room
 ```
 
-The static reading room filters years, epochs, volume labels, and run states;
-shows missing-drive cards and the complete four-state drift vocabulary; drills
-into per-line evidence; embeds procedure/provenance Markdown; and composes
-editable plan TOML plus paste-ready terminal commands. It has no endpoint or
-code path that executes a plan, starts a worker, or controls a running batch.
+`echelle web` writes one self-contained `index.html` — no sidecar, no second
+file, nothing fetched at open time — laid out to the house web UI grammar: the
+main column is what a person reads, the left rail holds the controls (year,
+epoch, drive and run-state filters, plus the composer), and the right rail
+holds current scope, a local Find over the catalog table, the state legend and
+an "On this page" index. Both rails are sticky at an offset derived from the
+page's own header metrics, and stack above the content below 900px.
+
+The composer is pre-filled from the page's own data — drives and epochs from
+the catalog, epoch ids from `--registry`, verdict paths from `--drift` — and
+writes a plan TOML plus three commands: the bulk `echelle process --plan` run
+that reads that plan, the `echelle drift audit` that must precede it, and an
+`echelle-calib` bench check. Every command row leads with plain words, keeps
+the literal command behind a show/hide toggle, offers PowerShell and POSIX
+shapes, and copies the whole command whether the toggle is open or closed. The
+raw-SIF input folder is the one field the page cannot fill, and it says so
+rather than guessing.
+
+Drift cards render the v2 evidence in full: verdict, per-shot residual table,
+`interval_warning`, per-order corrections, thresholds, quorum reasons, skipped
+cubes, the composed repair sequence as meaning-first rows, and per-line
+evidence behind a fold whose exit stays in reach (Escape closes any fold).
+Missing drive, unmeasured, empty and `insufficient-data` are four different
+renderings, a sampled drive is visibly distinct from a verdict-authorized one
+and from `ungated (no registry)`, and a verdict word the page does not know
+renders as `unrecognized: <value>` rather than as a state it does know.
+
+The vocabulary, procedure and provenance documents have exactly one source:
+`src/echelle_spectra/resources/reading_room/*.md`, shipped as package data and
+rendered by a small stdlib Markdown renderer from the *installed* package, so
+a travel kit with no repository checkout still opens a complete reading room.
+This documentation tree does not restate them.
+
+The page has no endpoint or code path that executes a plan, starts a worker, or
+controls a running batch. Its visual and Perimeter Walk review remains deferred
+with the rest of the candidate's validation work.
 
 ## Historical binders
 
