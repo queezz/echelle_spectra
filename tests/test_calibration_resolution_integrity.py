@@ -11,6 +11,7 @@ and snapshot recalibration — is the production implementation.
 from __future__ import annotations
 
 import json
+import warnings
 from pathlib import Path
 
 import numpy as np
@@ -436,3 +437,85 @@ class TestRealPipelineCube:
             np.asarray(revised["applied_absolute_calibration_factor"].values) > 0
         )
         assert np.all(np.isfinite(np.asarray(revised["intensity"].values)))
+
+
+#: A column where the sphere measured exactly its own background: net response
+#: zero, so the absolute factor there is undefined rather than merely negative.
+ZERO_RESPONSE_PIXEL = 24
+
+
+@pytest.fixture
+def zero_response_detector(monkeypatch: pytest.MonkeyPatch) -> dict[str, np.ndarray]:
+    """The same synthetic pipeline with one dead integrating-sphere column."""
+
+    frames = _detector_frames()
+    lower_centers, _upper_centers = _order_centers()
+    center = lower_centers[ZERO_RESPONSE_PIXEL]
+    rows = np.arange(center - DV, center + DV + 1)
+    inside = (rows >= 0) & (rows < DIMO)
+    # Give one sphere column exactly the background's own value, pixel for
+    # pixel, so their difference there is zero rather than merely small.
+    frames["sphere"][0][rows[inside], ZERO_RESPONSE_PIXEL] = 30.0 / (2 * DV + 1)
+
+    def read_image(fpth, spec="black", crop=(0, -1), exptime=1):
+        name = Path(str(fpth)).name.casefold()
+        if name.endswith("_bg.sif"):
+            images = frames["background"]
+        elif name.endswith("sphere.sif"):
+            images = frames["sphere"]
+        else:
+            images = frames["shot"]
+        info = {
+            "NumberOfFrames": int(images.shape[0]),
+            "xbin": 1,
+            "ybin": 1,
+            "size": np.array([DIMW, DIMO]),
+            "ExposureTime": EXPOSURE_S,
+            "CycleTime": 1.0,
+        }
+        return images.copy(), info
+
+    monkeypatch.setattr(echelle_module, "read_image", read_image)
+    return frames
+
+
+class TestADeadSphereColumnIsDroppedNotWarned:
+    """Packet F13 — a zero sphere response is a dropped column, not a warning."""
+
+    def test_absolute_calibration_makes_it_nan_without_a_runtime_warning(
+        self, tmp_path: Path, zero_response_detector
+    ) -> None:
+        snapshot = _snapshot(tmp_path, "20250101_cmos")
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", RuntimeWarning)
+            calibration = build_calibration(
+                snapshot.root, "CMOS", calibration_files=snapshot.calibration_files()
+            )
+
+        factor = calibration.absolute["wmsr"]
+        assert calibration.zero_response_columns == 1
+        assert int(np.count_nonzero(~np.isfinite(factor))) == 1
+        # The noise-negative column the F2 fixture carries keeps its negative
+        # factor: only the undefined one became NaN.
+        assert int(np.count_nonzero(factor <= 0)) == 1
+
+    def test_the_dead_column_is_dropped_and_counted_at_export(
+        self, tmp_path: Path, zero_response_detector
+    ) -> None:
+        snapshot = _snapshot(tmp_path, "20250101_cmos")
+        calibration = build_calibration(
+            snapshot.root, "CMOS", calibration_files=snapshot.calibration_files()
+        )
+        spectrum = load_spectrum(_shot_file(tmp_path), calibration=calibration)
+
+        cube = _export(spectrum, snapshot)
+
+        pixels = np.asarray(cube.ds["detector_pixel"].values)
+        orders = np.asarray(cube.ds["echelle_order"].values)
+        factor = np.asarray(cube.ds["applied_absolute_calibration_factor"].values)
+        assert cube.ds.attrs["dropped_nonfinite_wavelength_columns"] >= 1
+        assert not np.any((orders == ORDER_IDS[0]) & (pixels == ZERO_RESPONSE_PIXEL))
+        assert not np.any((orders == ORDER_IDS[0]) & (pixels == NEGATIVE_FACTOR_PIXEL))
+        assert np.all(np.isfinite(factor)) and np.all(factor > 0)
+        assert cube.validate().ok, str(cube.validate())

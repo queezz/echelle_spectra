@@ -32,6 +32,7 @@ from .calibration_campaign import (
     MeasurementRole,
     TomlState,
     catalog_lines_for_order,
+    catalog_mismatch_warning,
     default_validity,
 )
 from .snapshot import SnapshotError
@@ -352,6 +353,13 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         order_layout.addWidget(help_text)
         layout.addWidget(order_group)
 
+        self.reference_value = QtWidgets.QLabel(
+            "No lamp catalog is scoping the fit yet."
+        )
+        self.reference_value.setWordWrap(True)
+        self.reference_value.setObjectName("messagePanel")
+        layout.addWidget(self.reference_value)
+
         fit_group = QtWidgets.QGroupBox("Rigid alignment")
         fit_form = QtWidgets.QFormLayout(fit_group)
         self.alignment_state_value = QtWidgets.QLabel("WAITING FOR FRAME")
@@ -554,7 +562,26 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         self.snapshot_id_edit.textChanged.connect(self.refresh_campaign)
 
     def _line_family_changed(self) -> None:
+        self._refresh_reference()
         self.refresh_plots()
+
+    def _refresh_reference(self) -> None:
+        """State which catalog anchors this fit, and when it is not the lamp's."""
+
+        reference = self.session.reference
+        if reference is None:
+            self.reference_value.setText(
+                "No lamp catalog is scoping the fit yet — assign a lamp role to "
+                "the open file so anchors reference that lamp's own lines."
+            )
+            return
+        text = reference.message
+        warning = catalog_mismatch_warning(
+            self.line_family_combo.currentText(), reference.lamp
+        )
+        if warning:
+            text = f"{text}\nWARNING — {warning}"
+        self.reference_value.setText(text)
 
     # ------------------------------------------------------------------
     # Manual input: drag and drop, and a plain file dialog
@@ -716,6 +743,7 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         lamp_combo.setEnabled(role in _LAMP_ROLES)
         if role is None:
             if self.campaign.remove_classification(path):
+                self.campaign.scope_alignment_to_lamp(self.session)
                 self.message_value.setText(f"{path.name} is unassigned again.")
                 self.refresh()
             return
@@ -734,6 +762,7 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
             label = f"{record.lamp_family} {label}"
             if self.line_family_combo.findText(record.lamp_family) >= 0:
                 self.line_family_combo.setCurrentText(record.lamp_family)
+        self.campaign.scope_alignment_to_lamp(self.session)
         self.message_value.setText(
             f"{record.path.name} is now the {label}. "
             "Dependent comparison/configuration state was reset."
@@ -868,6 +897,9 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
             record = self.campaign.record_frame(
                 frame, saturation_level=self.session.saturation_level
             )
+            # The newly opened frame may belong to another lamp than the last
+            # one, so the reference set follows the frame rather than lagging it.
+            self.campaign.scope_alignment_to_lamp(self.session)
             if record.path not in self._file_rows:
                 self._add_file_row(record.path)
             self._select_file_row(record.path)
@@ -1003,6 +1035,7 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
             )
         elif self.session.alignment_state is AlignmentState.FAILED:
             self.message_value.setText(f"Alignment failed: {self.session.last_error}")
+        self._refresh_reference()
         self._refresh_anchor_table()
         self.refresh_plots()
         self.refresh_campaign()

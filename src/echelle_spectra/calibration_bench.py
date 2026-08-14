@@ -13,9 +13,12 @@ from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 from time import time_ns
-from typing import Callable
+from typing import TYPE_CHECKING, Callable
 
 import numpy as np
+
+if TYPE_CHECKING:  # pragma: no cover - the campaign owns lamp naming, not this
+    from .calibration_campaign import LampReferenceSet
 
 from .tools.calibration_alignment import (
     CalibrationTableLine,
@@ -320,6 +323,9 @@ class CalibrationBenchSession:
             raise ValueError("pattern must have shape (detector columns, orders)")
         self.pattern = pattern_array
         self.lines = tuple(lines)
+        #: The assigned lamp's own rows, once one is known.  ``None`` means no
+        #: lamp has been named yet and every curated row is still clickable.
+        self.reference: LampReferenceSet | None = None
         self.saturation_level = float(saturation_level)
         self.minimum_snr = float(minimum_snr)
         self.fit_window_radius_px = int(fit_window_radius_px)
@@ -387,21 +393,62 @@ class CalibrationBenchSession:
             raise IndexError(f"order {order_idx} is outside the loaded pattern")
         self.selected_order = int(order_idx)
 
+    def use_lamp_reference(self, reference: LampReferenceSet | None) -> None:
+        """Scope click-to-fit to the rows one assigned lamp's own catalog holds.
+
+        Anchors already accepted against another lamp's rows are dropped: they
+        measured this frame against lines it never emitted, and keeping them
+        would carry that error straight into the solved transform.
+        """
+
+        self.reference = reference
+        if reference is None:
+            return
+        allowed = {
+            (line.order_idx, line.center_pixel, line.wavelength_nm)
+            for line in reference.lines
+        }
+        stale = [key for key in self.anchors if key not in allowed]
+        for key in stale:
+            del self.anchors[key]
+        if stale:
+            self._recompute_alignment()
+
+    def reference_lines(self) -> tuple[CalibrationTableLine, ...]:
+        """Return the rows a click may snap to: the assigned lamp's own."""
+
+        if self.reference is None:
+            return self.lines
+        return tuple(self.reference.lines)
+
     def lines_for_order(self, order_idx: int | None = None) -> tuple[CalibrationTableLine, ...]:
         selected = self.selected_order if order_idx is None else int(order_idx)
-        return tuple(line for line in self.lines if line.order_idx == selected)
+        return tuple(line for line in self.reference_lines() if line.order_idx == selected)
 
     def fit_anchor_at(self, order_idx: int, clicked_pixel: float) -> AnchorFitResult:
-        """Fit the nearest known line around the clicked detector pixel."""
+        """Fit the nearest line of the assigned lamp around the clicked pixel."""
 
         if self.frame is None:
             return AnchorFitResult(False, "no SIF frame loaded")
+        reference = self.reference
+        if reference is not None and not reference.is_referenceable:
+            return AnchorFitResult(False, reference.message)
         candidates = self.lines_for_order(order_idx)
         if not candidates:
-            return AnchorFitResult(False, "no calibration rows for this order")
+            scope = (
+                f"no {reference.catalog_label} rows"
+                if reference is not None and reference.catalog_label
+                else "no calibration rows"
+            )
+            return AnchorFitResult(False, f"{scope} for this order")
         line = min(candidates, key=lambda item: abs(item.center_pixel - clicked_pixel))
         if abs(line.center_pixel - clicked_pixel) > self.click_match_radius_px:
-            return AnchorFitResult(False, "click is not near a known calibration row")
+            known = (
+                f"{reference.catalog_label} calibration row"
+                if reference is not None and reference.catalog_label
+                else "known calibration row"
+            )
+            return AnchorFitResult(False, f"click is not near a {known}")
 
         probe_line = CalibrationTableLine(
             line.order_idx,

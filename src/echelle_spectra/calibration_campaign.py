@@ -42,11 +42,12 @@ from .tools.calibration_alignment import (
     save_alignment_settings,
     write_wavelength_table,
 )
-from .tools.line_catalog import SpectralLine, load_line_table
+from .tools.line_catalog import LINE_FAMILY_LABELS, SpectralLine, load_line_table
 
 __all__ = [
     "ALIGNMENT_SETTINGS_FILENAME",
     "KNOWN_LAMP_NAMES",
+    "LAMP_TABLE_SPECIES",
     "PREVIOUS_CAMPAIGN_LAMPS",
     "AbsoluteCalibrationResult",
     "CalibrationCampaignSession",
@@ -59,19 +60,23 @@ __all__ = [
     "ExposureState",
     "ExposureTriage",
     "FileRoleSuggestion",
+    "LampReferenceSet",
     "LoadedFrameRecord",
     "MeasurementRecord",
     "MeasurementRole",
+    "ReferenceState",
     "SaturationClusters",
     "SaveState",
     "TomlState",
     "WavelengthCorrection",
     "catalog_family_for_lamp",
     "catalog_lines_for_order",
+    "catalog_mismatch_warning",
     "compute_absolute_calibration",
     "counts_histogram",
     "default_validity",
     "evaluate_exposure",
+    "lamp_reference_set",
     "measure_saturation_clusters",
     "normalize_lamp_name",
     "suggest_file_roles",
@@ -155,6 +160,15 @@ class TomlState(Enum):
     NOT_GENERATED = "not-generated"
     GENERATED = "generated"
     FAILED = "failed"
+
+
+class ReferenceState(Enum):
+    """Lifecycle of the reference rows one assigned lamp earns."""
+
+    UNSCOPED = "unscoped"
+    MATCHED = "matched"
+    NO_ROWS = "no-rows"
+    NO_CATALOG = "no-catalog"
 
 
 class SaveState(Enum):
@@ -330,6 +344,31 @@ class CatalogOrderLine:
     detector_pixel: float
 
 
+@dataclass(frozen=True)
+class LampReferenceSet:
+    """The curated lookup rows one assigned lamp's own catalog contributes.
+
+    Click-to-fit measures every candidate and accepted anchor against these
+    rows and no others, so a neon frame is never referenced against a thorium
+    line.  A lamp the packaged catalogs have never met contributes no rows at
+    all and says why, which is a better answer than another element's lines.
+    """
+
+    lamp: str
+    catalog_family: str
+    catalog_label: str
+    species: tuple[str, ...]
+    lines: tuple[CalibrationTableLine, ...]
+    state: ReferenceState
+    message: str
+
+    @property
+    def is_referenceable(self) -> bool:
+        """Whether an anchor may be looked up against this set at all."""
+
+        return self.state in {ReferenceState.UNSCOPED, ReferenceState.MATCHED}
+
+
 _LAMP_ALIASES = {
     "thar": "ThAr",
     "th": "ThAr",
@@ -346,6 +385,20 @@ _LAMP_ALIASES = {
 _LAMP_NAME_EXTRA_CHARACTERS = "+-_."
 
 _CATALOG_FAMILIES = {"ThAr": "thar", "Ne": "ne", "Hg": "hg", "H2": "fulcher"}
+
+#: Which curated wavelength-table species each lamp may legitimately emit.
+#:
+#: ThAr, Ne, and Hg carry their NIST lamp preset's own spectra, spelled as the
+#: curated table spells them.  ``ThBlend`` is deliberately absent: it is a
+#: weighted compound centroid of two transitions rather than one line, so it is
+#: never an anchor.  H2 carries the molecular Fulcher rows together with the
+#: atomic Balmer rows a hydrogen discharge shows beside them.
+LAMP_TABLE_SPECIES: dict[str, tuple[str, ...]] = {
+    "ThAr": ("ThI", "ThII", "ArI", "ArII"),
+    "Ne": ("NeI", "NeII"),
+    "Hg": ("HgI", "HgII"),
+    "H2": ("H2", "H-a", "H-g"),
+}
 
 
 def normalize_lamp_name(value: str) -> str:
@@ -379,6 +432,101 @@ def catalog_family_for_lamp(lamp_name: str) -> str | None:
         return _CATALOG_FAMILIES.get(normalize_lamp_name(lamp_name))
     except ValueError:
         return None
+
+
+def lamp_reference_set(
+    lamp_name: str, lines: Sequence[CalibrationTableLine]
+) -> LampReferenceSet:
+    """Return the curated rows *lamp_name* earns from a wavelength table.
+
+    A lamp the catalogs know keeps only its own species' rows, which is what
+    stops a nearest-row lookup from ever crossing lamps.  A free-text lamp with
+    no catalog keeps none and states that plainly, and a lamp whose catalog
+    exists but whose species this particular table never carries says that too.
+    """
+
+    rows = tuple(lines)
+    text = str(lamp_name).strip()
+    if not text:
+        return LampReferenceSet(
+            "",
+            "",
+            "",
+            (),
+            rows,
+            ReferenceState.UNSCOPED,
+            f"no lamp is assigned, so all {len(rows)} curated rows stay clickable; "
+            "assign a lamp role so anchors reference that lamp's own lines",
+        )
+    try:
+        lamp = normalize_lamp_name(text)
+    except ValueError:
+        lamp = text
+    family = catalog_family_for_lamp(lamp)
+    if family is None:
+        return LampReferenceSet(
+            lamp,
+            "",
+            "",
+            (),
+            (),
+            ReferenceState.NO_CATALOG,
+            f"no line catalog for {lamp} — anchors cannot be auto-referenced",
+        )
+    label = LINE_FAMILY_LABELS.get(family, lamp)
+    species = LAMP_TABLE_SPECIES[lamp]
+    scoped = tuple(row for row in rows if row.species in species)
+    if not scoped:
+        return LampReferenceSet(
+            lamp,
+            family,
+            label,
+            species,
+            (),
+            ReferenceState.NO_ROWS,
+            f"{lamp} has a packaged {label} catalog, but none of the {len(rows)} "
+            f"curated rows carry its species ({', '.join(species)}) — anchors "
+            "cannot be auto-referenced from this table",
+        )
+    return LampReferenceSet(
+        lamp,
+        family,
+        label,
+        species,
+        scoped,
+        ReferenceState.MATCHED,
+        f"{len(scoped)} of {len(rows)} curated rows are {label} lines "
+        f"({', '.join(species)}); anchors reference {label} only",
+    )
+
+
+def catalog_mismatch_warning(active_catalog: str, assigned_lamp: str) -> str:
+    """Return a warning when the shown catalog is not the assigned lamp's own.
+
+    The fit itself always uses the assigned lamp's rows.  This only tells the
+    operator that the identification help beside those rows belongs to a
+    different lamp, so the blue sticks and the clickable rows disagree on
+    purpose rather than by accident.
+    """
+
+    lamp = str(assigned_lamp).strip()
+    active = str(active_catalog).strip()
+    if not lamp or not active:
+        return ""
+    try:
+        lamp = normalize_lamp_name(lamp)
+    except ValueError:  # a free-text lamp is compared as the operator typed it
+        pass
+    try:
+        active = normalize_lamp_name(active)
+    except ValueError:
+        pass
+    if active.casefold() == lamp.casefold():
+        return ""
+    return (
+        f"the {active} line help on screen is not {lamp}'s own catalog; "
+        f"anchors are still referenced against {lamp} lines only"
+    )
 
 
 def _lamp_name_in_filename(stem: str) -> str:
@@ -1009,6 +1157,34 @@ class CalibrationCampaignSession:
             )
         )
 
+    def lamp_for_frame(self, alignment: CalibrationBenchSession) -> str:
+        """Return the lamp the frame currently open for fitting was assigned.
+
+        A frame that carries no lamp role of its own falls back to the session's
+        primary lamp, so a bench holding exactly one lamp keeps referencing it
+        even while another file is on screen.
+        """
+
+        frame = alignment.frame
+        if frame is not None:
+            record = self.measurements.get(Path(frame.path))
+            if record is not None and record.lamp_family:
+                return record.lamp_family
+        return self._primary_lamp()
+
+    def scope_alignment_to_lamp(
+        self, alignment: CalibrationBenchSession
+    ) -> LampReferenceSet:
+        """Point the bench's click-to-fit at the open frame's own lamp catalog."""
+
+        lamp = self.lamp_for_frame(alignment)
+        current = alignment.reference
+        if current is not None and current.lamp == lamp:
+            return current
+        reference = lamp_reference_set(lamp, alignment.lines)
+        alignment.use_lamp_reference(reference)
+        return reference
+
     def classify_file(
         self,
         path: str | Path,
@@ -1350,22 +1526,47 @@ class CalibrationCampaignSession:
             blocking=False,
         )
 
-    def _output_items(self, alignment: CalibrationBenchSession) -> tuple[ChecklistItem, ...]:
-        alignment_done = alignment.alignment_state is AlignmentState.ALIGNED
-        if self.assigned_lamps:
-            alignment_next = (
-                "load a lamp frame and click two known lines in different orders"
-            )
-        else:
-            alignment_next = "assign a lamp role to any loaded file, then click two lines"
-        return (
-            ChecklistItem(
+    def _alignment_item(self, alignment: CalibrationBenchSession) -> ChecklistItem:
+        """Report the fit together with the catalog that actually anchored it."""
+
+        reference = alignment.reference
+        count = len(alignment.anchors)
+        anchors = f"{count} anchor" + ("" if count == 1 else "s")
+        rms = "" if alignment.rms_px is None else f", RMS {alignment.rms_px:.2f} px"
+        if reference is not None and not reference.is_referenceable:
+            return ChecklistItem(
                 "alignment",
                 "Lamp alignment solved and reviewed",
-                ChecklistState.DONE if alignment_done else ChecklistState.WAITING,
-                f"{len(alignment.anchors)} accepted anchor(s)",
-                unblocked_by="" if alignment_done else alignment_next,
-            ),
+                ChecklistState.ATTENTION,
+                f"{anchors}; {reference.message}",
+                unblocked_by=(
+                    f"assign one of {', '.join(KNOWN_LAMP_NAMES)} to this frame, or "
+                    "add this lamp's rows to the curated wavelength table"
+                ),
+            )
+        if reference is not None and reference.catalog_label:
+            detail = f"{anchors} vs {reference.catalog_label} catalog{rms}"
+        else:
+            detail = (
+                f"{anchors} against the whole curated table{rms} — "
+                "no lamp catalog is scoping the fit yet"
+            )
+        done = alignment.alignment_state is AlignmentState.ALIGNED
+        if self.assigned_lamps:
+            next_step = "load a lamp frame and click two known lines in different orders"
+        else:
+            next_step = "assign a lamp role to any loaded file, then click two lines"
+        return ChecklistItem(
+            "alignment",
+            "Lamp alignment solved and reviewed",
+            ChecklistState.DONE if done else ChecklistState.WAITING,
+            detail,
+            unblocked_by="" if done else next_step,
+        )
+
+    def _output_items(self, alignment: CalibrationBenchSession) -> tuple[ChecklistItem, ...]:
+        return (
+            self._alignment_item(alignment),
             ChecklistItem(
                 "tomls",
                 "Commented campaign TOMLs generated",

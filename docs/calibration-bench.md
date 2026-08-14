@@ -179,11 +179,48 @@ anchors still use the curated calibration table and established fitting,
 saturation, detector-point, and rigid-transform functions. A low selected-anchor
 RMS does not replace wavelength-table QC or Balmer/Fulcher plasma validation.
 
-Note the boundary this leaves: clickable anchors come from the curated
-wavelength table, which is the ThAr table for the packaged 2025 defaults. With a
-lamp whose curated rows do not exist, the catalog sticks still identify lines but
-each accepted anchor is measured against the nearest curated row, so review the
-per-anchor residuals before trusting the solved transform.
+## Anchors reference the lamp you assigned
+
+The gold rows a click may snap to are **the assigned lamp's own lines and
+nothing else**. The panel above the alignment box states which catalog is
+scoping the fit, for example:
+
+```text
+39 of 184 curated rows are Ne lines (NeI, NeII); anchors reference Ne only
+```
+
+The lamp comes from the file currently open for fitting; if that file carries no
+lamp role, the bench falls back to the session's single lamp. Assigning a role
+or opening another file re-scopes the fit immediately, and any anchor that was
+accepted against the previous lamp's rows is dropped rather than carried into
+the new transform.
+
+This matters because the packaged wavelength table is a **ThAr** table: its 184
+curated rows are mostly thorium and argon, and every neon line has a thorium row
+a few pixels away. Measuring neon centroids against those neighbours is how the
+same real 2025 folder produced RMS 9.37 px from 125 anchors, against the
+0.54 px that its 39 curated Ne rows give.
+
+Three honesty states replace the old silence:
+
+- **Scoped.** The panel names the catalog and the species it selected on.
+- **Mismatched line help.** When the **Line help** combo shows a different
+  catalog from the assigned lamp, the panel adds
+  `WARNING — the ThAr line help on screen is not Ne's own catalog; anchors are
+  still referenced against Ne lines only`. The blue sticks and the clickable
+  rows disagree on purpose; the fit is unaffected.
+- **No catalog.** A free-text lamp the packaged catalogs have never met states
+  `no line catalog for Kr — anchors cannot be auto-referenced`, refuses clicks
+  with that same reason, and turns the procedure's alignment row into an
+  attention item. A lamp whose catalog exists but whose species this particular
+  table never carries says that instead.
+
+The procedure row names the catalog that anchored the fit, so the evidence
+travels with the checklist:
+
+```text
+✓  Lamp alignment solved and reviewed — 39 anchors vs Ne catalog, RMS 0.54 px
+```
 
 ## Sphere factors and `insufficient data`
 
@@ -300,3 +337,11 @@ Ne-only folder — six SIFs dropped through the real input path, triaged, given
 roles by hand, fitted, compared, saved, validated, and resolved through a
 registry. That run exercises the software against real detector data; it is
 still not a live-instrument or field-operation claim.
+
+Repeating that run with lamp-scoped anchors is what measures the scoping: the
+same folder, the same bright Ne frame, every curated Ne row clicked, gives 39
+accepted anchors at RMS 0.536 px with all 39 within 2 px of their expected
+pixel, where the lamp-blind lookup gave 125 anchors at RMS 9.372 px with 47
+within 2 px. The solved shift is +0.024 px, which says the packaged table was
+already aligned to this data and the old 9 px scatter was an artefact of
+measuring neon against thorium.

@@ -406,6 +406,9 @@ class Calibrations:
         self.sphere_exposure_time = exptime
         self.spectrometer = spec
         self.crop = crop
+        # Sphere columns whose net response was exactly zero, counted by
+        # absolute_calibration so a dropped column is reported, never silent.
+        self.zero_response_columns = 0
         # print(os.listdir(folder))
 
     def start_cut(self):
@@ -725,12 +728,20 @@ class Calibrations:
         self.bkgr.correct_order_shapes()
         self.bkgr.calculate_spectra()
 
-        y = self.sphr.spectra[0] - self.bkgr.spectra[0]
+        y = np.asarray(self.sphr.spectra[0] - self.bkgr.spectra[0], dtype=float)
         x = self.sphr.wavelength
-        # np.nans Warning here:
-        wmsr = (
-            self.integral(x) * self.sphr.info["ExposureTime"] / y * 1e-2
-        )  # W/(m2 sr nm)
+        # A sphere-minus-background column of exactly zero measured no response
+        # at all.  Dividing by it raises a RuntimeWarning and hands the exporter
+        # an infinite factor, so make it NaN instead: the column then travels as
+        # the non-finite one it is and is dropped and counted downstream exactly
+        # like any other non-positive factor.  Noise-negative columns keep their
+        # negative factor, which that same drop mask already accounts for.
+        self.zero_response_columns = int(np.count_nonzero(y == 0.0))
+        response = np.where(y == 0.0, np.nan, y)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            wmsr = (
+                self.integral(x) * self.sphr.info["ExposureTime"] / response * 1e-2
+            )  # W/(m2 sr nm)
         wm = wmsr * 4 * np.pi  # W/(m2 sr nm)
         phmsr = (
             wmsr * x * 1e-9 / (speed_of_light * Planck)
