@@ -118,7 +118,7 @@ developer tools cannot be assumed.
 | `echelle catalog build/merge` | Writes per-drive catalogs and a durable all-years index with volume labels | Candidate; audit/catalog work |
 | `echelle txt CUBE OUTPUT` / `echelle-cube2txt` | Writes canonical provenance-complete LHD text from a saved cube | Candidate; no raw SIF needed |
 | `echelle recal-cube CUBE --new-snapshot DIR` | Applies safe wavelength/factor snapshot deltas and refuses geometry changes | Candidate; reviewed repair only |
-| `echelle drift audit/refine` | Samples Balmer/Fulcher centroids, emits a four-state verdict, and accepts immutable `-rN` refinements | Candidate; required before any registry run |
+| `echelle drift audit/refine` | Samples Balmer/Fulcher centroids, solves one rigid detector shift in pixels, emits a four-state verdict, and accepts immutable `-rN` refinements | Candidate; required before any registry run |
 | `echelle web --catalog INDEX --output DIR` | Builds the static read-only reading room and command composer | Candidate; never controls workers |
 | `echelle historical` | Validates the three thin historical calibration binders | Candidate; inspection only |
 | `echelle-pattern SPHERE BACKGROUND` | Previews or writes a detector order-pattern fit | Specialist recalibration |
@@ -169,8 +169,10 @@ $Data = "D:\NIFS"
 # 5. Take the sample for real by repeating step 4 without --dry-run.
 #    Nothing else may run yet: these cubes are the audit's input.
 
-# 6. Audit the sample into one immutable verdict file.
-.\echelle.ps1 drift audit (Get-ChildItem "$Data\cubes\*.nc").FullName `
+# 6. Audit the sample into one immutable verdict file. The audit takes the
+#    cube folder itself, so no shell glob is involved.
+.\echelle.ps1 drift audit "$Data\cubes" `
+  --calibrations "$Data\calibrations" `
   -o "$Data\epoch-drift.json"
 
 # 7. Process the whole drive under that verdict.
@@ -215,8 +217,11 @@ data="/Volumes/NIFS"
 # 5. Take the sample for real by repeating step 4 without --dry-run.
 #    Nothing else may run yet: these cubes are the audit's input.
 
-# 6. Audit the sample into one immutable verdict file.
-./echelle drift audit "$data"/cubes/*.nc -o "$data/epoch-drift.json"
+# 6. Audit the sample into one immutable verdict file. The audit takes the
+#    cube folder itself, so no shell glob is involved.
+./echelle drift audit "$data/cubes" \
+  --calibrations "$data/calibrations" \
+  -o "$data/epoch-drift.json"
 
 # 7. Process the whole drive under that verdict.
 ./echelle process "$data/shots" \
@@ -306,7 +311,7 @@ ERROR: registry-backed processing requires a sampled epoch audit
 (--drift-verdict) or an explicit unverified first sample (--sample N).
   Take the sampled evidence this gate needs:
     echelle process "D:\NIFS\shots" --registry "D:\NIFS\calibration_registry.toml" ...
-    echelle drift audit "D:\NIFS\cubes\*.nc" -o drift-evidence.json
+    echelle drift audit "D:\NIFS\cubes" -o drift-evidence.json
   Then repeat this command with --drift-verdict drift-evidence.json
 ```
 
@@ -322,7 +327,9 @@ Two related refusals:
   20250926_cmos-r1` — the audit's shift was accepted, so only the refinement is
   authorized. Repoint the registry entry at the `-rN` snapshot.
 - `bulk processing refused: sampled verdict is insufficient-data` — the sample
-  measured too few usable lines. Sample more or different shots; insufficient
+  measured too few usable lines. A verdict needs at least three resolved lines
+  (blends excluded) from three different Echelle orders, with at least one in
+  each half of the audited range. Sample more or different shots; insufficient
   evidence is never read as aligned.
 
 ### Processing finds no files

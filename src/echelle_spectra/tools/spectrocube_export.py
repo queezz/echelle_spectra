@@ -101,6 +101,64 @@ def _file_digest(path: Path | None) -> dict[str, object] | None:
     }
 
 
+def _alignment_rms_px(snapshot: "Snapshot") -> float | None:
+    """Return the snapshot's own alignment RMS in detector pixels, if it has one.
+
+    The bench records it twice: as ``rms_px`` in the manifest's ``[alignment]``
+    table, and inside the ``alignment.toml`` settings file it saves beside the
+    calibration artifacts.  The manifest is authoritative; the settings file is
+    the fallback for a snapshot whose manifest predates the table.
+    """
+    alignment = snapshot.manifest.get("alignment")
+    if isinstance(alignment, dict) and alignment.get("rms_px") is not None:
+        try:
+            value = float(alignment["rms_px"])
+        except (TypeError, ValueError):
+            value = float("nan")
+        if np.isfinite(value) and value > 0:
+            return value
+    settings_path = snapshot.root / "alignment.toml"
+    if not settings_path.is_file():
+        return None
+    from echelle_spectra.tools.calibration_alignment import load_alignment_settings
+
+    try:
+        value = float(load_alignment_settings(settings_path).rms_px)
+    except (KeyError, OSError, TypeError, ValueError):
+        return None
+    return value if np.isfinite(value) and value > 0 else None
+
+
+def _wavelength_accuracy_nm(
+    snapshot: "Snapshot",
+    records_by_order: dict[int, dict[str, object]],
+    detector_pixel: np.ndarray,
+    echelle_order: np.ndarray,
+) -> float | None:
+    """Convert the alignment RMS into the wavelength accuracy of this cube.
+
+    The alignment is solved in detector pixels, so its accuracy only becomes a
+    wavelength once a dispersion is chosen.  The median of the represented
+    orders' dispersions is that scale: a reader converting the value back for
+    one order recovers the RMS to within the dispersion spread, and the drift
+    audit does exactly that when it decides how fine a misalignment this
+    calibration can honestly claim.
+    """
+    rms_px = _alignment_rms_px(snapshot)
+    if rms_px is None:
+        return None
+    dispersions = []
+    for order, record in records_by_order.items():
+        samples = detector_pixel[echelle_order == order]
+        if samples.size == 0:
+            continue
+        derivative = np.polyder(np.asarray(record["coefficients"], dtype=float))
+        dispersions.append(abs(float(np.polyval(derivative, float(np.median(samples))))))
+    if not dispersions:
+        return None
+    return float(rms_px * float(np.median(dispersions)))
+
+
 def _shot_number_from_spectrum(spectrum: object) -> str | None:
     shotnumber = getattr(spectrum, "shotnumber", None)
     if shotnumber not in (None, ""):
@@ -413,6 +471,7 @@ def to_spectrocube(
 
     aligned: dict[str, np.ndarray] = {}
     polynomial_payload: dict[str, object] | None = None
+    wavelength_accuracy_nm: float | None = None
     if snapshot is not None:
         detector_pixel = getattr(spectrum, "detector_pixel", None)
         echelle_order = getattr(spectrum, "echelle_order", None)
@@ -534,6 +593,12 @@ def to_spectrocube(
             "snapshot_id": snapshot.snapshot_id,
             "wavelength_artifact_sha256": wavelength_artifact.sha256,
         }
+        wavelength_accuracy_nm = _wavelength_accuracy_nm(
+            snapshot,
+            {order: records_by_order[order] for order in sorted(represented_orders)},
+            aligned["detector_pixel"],
+            aligned["echelle_order"],
+        )
         for order_id in sorted(represented_orders):
             samples = aligned["echelle_order"] == order_id
             reconstructed = np.polyval(
@@ -668,6 +733,12 @@ def to_spectrocube(
     if snapshot is not None:
         attrs.update(snapshot.provenance_attrs())
         attrs["wavelength_polynomials_json"] = _json_attr(polynomial_payload)
+        if wavelength_accuracy_nm is not None:
+            # How well this cube's wavelength scale is known, from the rigid
+            # alignment the snapshot recorded.  The drift audit reads it so it
+            # never reports a misalignment finer than the calibration behind it.
+            attrs["wavelength_accuracy_nm"] = wavelength_accuracy_nm
+            attrs["wavelength_accuracy_source"] = "snapshot alignment rms_px"
 
     sc = SpectroCube.from_arrays(
         wavelength=wavelength,

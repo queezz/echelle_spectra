@@ -44,6 +44,7 @@ __all__ = [
     "fit_rigid_transform",
     "detector_points_from_lines",
     "apply_rigid_correction_to_lines",
+    "shift_lines_in_pixels",
     "write_wavelength_table",
     "save_alignment_settings",
     "load_alignment_settings",
@@ -801,6 +802,19 @@ def fit_rigid_transform(
     return transform, rms_px
 
 
+def _moved_line(line: CalibrationTableLine, dx_px: float) -> CalibrationTableLine:
+    """Return one row slid along the dispersion axis, keeping its wavelength."""
+    return CalibrationTableLine(
+        order_idx=line.order_idx,
+        pixel_from=line.pixel_from + dx_px,
+        pixel_to=line.pixel_to + dx_px,
+        center_pixel=line.center_pixel + dx_px,
+        wavelength_nm=line.wavelength_nm,
+        species=line.species,
+        comment=line.comment,
+    )
+
+
 def apply_rigid_correction_to_lines(
     lines: Sequence[CalibrationTableLine],
     pattern: np.ndarray,
@@ -809,21 +823,24 @@ def apply_rigid_correction_to_lines(
     """Return new lookup rows whose center pixels are moved by ``transform``."""
     expected = detector_points_from_lines(lines, pattern)
     corrected = transform.apply(expected)
-    adjusted: List[CalibrationTableLine] = []
-    for line, point in zip(lines, corrected):
-        dx = float(point[0] - line.center_pixel)
-        adjusted.append(
-            CalibrationTableLine(
-                order_idx=line.order_idx,
-                pixel_from=line.pixel_from + dx,
-                pixel_to=line.pixel_to + dx,
-                center_pixel=float(point[0]),
-                wavelength_nm=line.wavelength_nm,
-                species=line.species,
-                comment=line.comment,
-            )
-        )
-    return adjusted
+    return [
+        _moved_line(line, float(point[0] - line.center_pixel))
+        for line, point in zip(lines, corrected)
+    ]
+
+
+def shift_lines_in_pixels(
+    lines: Sequence[CalibrationTableLine], dx_px: float
+) -> List[CalibrationTableLine]:
+    """Return lookup rows translated by ``dx_px`` along the dispersion axis.
+
+    This is the pure-translation case of :func:`apply_rigid_correction_to_lines`
+    and moves every row by the same amount, so no order pattern is needed: with
+    no rotation, a row's detector ``y`` never enters its corrected ``x``.  A
+    caller that measured one rigid detector shift — the drift audit, say — uses
+    this instead of building a synthetic pattern for the general routine.
+    """
+    return [_moved_line(line, float(dx_px)) for line in lines]
 
 
 def _toml_quote(value: str) -> str:

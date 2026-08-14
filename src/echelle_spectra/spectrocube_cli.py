@@ -549,10 +549,10 @@ def _gate_refusal(
             f"ERROR: {reason}",
             "  Take the sampled evidence this gate needs:",
             f"    {' '.join(sample_command)}",
-            f"    echelle drift audit {_shell_quote(Path(output) / '*.nc')} -o drift-evidence.json",
+            # The audit takes the cube directory itself, so this line is the
+            # same on PowerShell and on a POSIX shell: no glob is expanded.
+            f"    echelle drift audit {_shell_quote(output)} -o drift-evidence.json",
             "  Then repeat this command with --drift-verdict drift-evidence.json",
-            "  PowerShell passes cube paths as "
-            f"(Get-ChildItem {_shell_quote(Path(output) / '*.nc')}).FullName",
         ]
     )
 

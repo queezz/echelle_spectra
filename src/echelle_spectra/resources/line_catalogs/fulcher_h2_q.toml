@@ -7,6 +7,8 @@ source_reference = "https://doi.org/10.5281/zenodo.21372039"
 source_resource = "fulcher_extractor/resources/fulcher_alpha_lines.toml"
 upstream_source_table = "early-fulcher-manual-extraction/reference/fulcher-alpha-H2.csv"
 adaptation_note = "Copied without numerical changes from the Fulcher work; interpreted as air wavelengths to match the established Echelle validation convention. The upstream table does not identify a primary publication."
+blend_note = "Each band lists its Q-branch members in rotational order, so a row's position in the array is its Q number. Five wavelengths below coincide across bands within the spectrograph's resolution (0.0000-0.0934 nm apart, against a ~0.03 nm instrumental width), including the exact 626.2495 pair that Q10(1-1) and Q5(2-2) share. Every one of them sits exactly where its own band's rotational progression predicts, so none is a transcription duplicate and deleting a row would silently renumber the rest of its band. They are listed here instead: overlays still draw them, and any consumer measuring a single line centroid must skip them because the measured centroid is the intensity-weighted blend, not either transition."
+blended_wavelengths = [615.9269, 615.9565, 623.7457, 623.8391, 626.2495, 634.0085, 634.0575, 636.4618, 636.5051]
 
 [bands]
 "0-0" = [601.8299, 602.3757, 603.1909, 604.2716, 605.6091, 607.1996, 609.0374, 611.1088, 613.4077, 615.9269, 618.6530]

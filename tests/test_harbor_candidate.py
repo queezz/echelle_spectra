@@ -111,16 +111,41 @@ def _packet8_dataset(snapshot, *, wavelengths: np.ndarray | None = None) -> xr.D
     return ds
 
 
-def _line_cube(path: Path, shift: float | None, snapshot_id: str = "20250101_cmos") -> None:
-    wavelength = np.linspace(400.0, 660.0, 13_001)
-    signal = np.zeros_like(wavelength)
-    if shift is not None:
-        for center in (410.1734, 434.0470, 486.1350, 656.2790):
-            signal += 50.0 * np.exp(-0.5 * ((wavelength - center - shift) / 0.035) ** 2)
-    signal += 0.01 * np.sin(wavelength)
+#: One Balmer line per Echelle order, with the instrument's dispersion scale.
+_DRIFT_ORDERS = ((6, 656.2790), (12, 486.1350), (16, 434.0470), (18, 410.1734))
+_DRIFT_WIDTH_PX = 1024
+
+
+def _drift_dispersion(centre_nm: float) -> float:
+    return 0.0108 * centre_nm / 656.2790
+
+
+def _line_cube(path: Path, shift_px: float | None, snapshot_id: str = "20250101_cmos") -> None:
+    """Write a cube whose lines sit where a shifted detector would put them."""
+
+    pixels = np.arange(_DRIFT_WIDTH_PX, dtype=float)
+    centre_px = (_DRIFT_WIDTH_PX - 1) / 2.0
+    segments, signal, detector_pixel, echelle_order = [], [], [], []
+    for order, centre in _DRIFT_ORDERS:
+        dispersion = _drift_dispersion(centre)
+        wavelength = centre + dispersion * (pixels - centre_px)
+        values = 0.01 * np.sin(wavelength)
+        if shift_px is not None:
+            observed = centre + dispersion * shift_px
+            values = values + 50.0 * np.exp(-0.5 * ((wavelength - observed) / 0.035) ** 2)
+        segments.append(wavelength)
+        signal.append(values)
+        detector_pixel.append(pixels)
+        echelle_order.append(np.full(pixels.size, order, dtype=np.int64))
+    wavelength = np.concatenate(segments)
+    permutation = np.argsort(wavelength, kind="stable")
     xr.Dataset(
-        {"intensity": ("wavelength", signal)},
-        coords={"wavelength": wavelength},
+        {"intensity": ("wavelength", np.concatenate(signal)[permutation])},
+        coords={
+            "wavelength": wavelength[permutation],
+            "detector_pixel": ("wavelength", np.concatenate(detector_pixel)[permutation]),
+            "echelle_order": ("wavelength", np.concatenate(echelle_order)[permutation]),
+        },
         attrs={
             "spectrocube_version": "0.2.0",
             "instrument_id": "echelle",
@@ -129,8 +154,45 @@ def _line_cube(path: Path, shift: float | None, snapshot_id: str = "20250101_cmo
             "wavelength_medium": "air",
             "snapshot_id": snapshot_id,
             "shot_number": path.stem,
+            "wavelength_polynomials_json": json.dumps(
+                {
+                    "schema": "spectrocube.wavelength-polynomials/v1",
+                    "coefficient_order": "descending_power",
+                    "input": "detector_pixel",
+                    "input_units": "pixel",
+                    "output": "wavelength",
+                    "output_units": "nm",
+                    "orders": [
+                        {
+                            "order": order,
+                            "coefficients": [
+                                _drift_dispersion(centre),
+                                centre - _drift_dispersion(centre) * centre_px,
+                            ],
+                        }
+                        for order, centre in _DRIFT_ORDERS
+                    ],
+                }
+            ),
         },
     ).to_netcdf(path)
+
+
+def _pixel_residual(order: int, centre_nm: float, shift_px: float) -> dict:
+    """One resolved detector-space residual, shaped as the audit records it."""
+
+    dispersion = _drift_dispersion(centre_nm)
+    return {
+        "cube": "fixture.nc",
+        "shot_number": "100100",
+        "status": "measured",
+        "echelle_order": order,
+        "expected_nm": centre_nm,
+        "dispersion_nm_per_px": dispersion,
+        "residual_nm": shift_px * dispersion,
+        "pixel_residual_px": shift_px,
+        "alignment_tolerance_px": 0.5,
+    }
 
 
 def test_catalog_cube_text_and_missing_drive_reading_room(tmp_path: Path) -> None:
@@ -203,17 +265,25 @@ def test_snapshot_delta_recalibration_and_geometry_refusal(tmp_path: Path) -> No
 
 def test_all_drift_verdicts_and_bulk_gate(tmp_path: Path) -> None:
     shifted_cube = tmp_path / "shot_42.nc"
-    _line_cube(shifted_cube, 0.1)
+    _line_cube(shifted_cube, 8.0)
     shifted = audit_cubes([shifted_cube])
     assert shifted["verdict"] == "shifted"
     assert "echelle drift refine" in shifted["repair_command"]
-    enough = [
-        {"status": "measured", "residual_nm": value} for value in (0.0, 0.01, -0.01)
+    coverage = (410.0, 660.0)
+    aligned = [
+        _pixel_residual(order, centre, shift)
+        for (order, centre), shift in zip(_DRIFT_ORDERS, (0.0, 0.1, -0.1, 0.2))
     ]
-    assert verdict_from_evidence(enough)[0] == "aligned"
-    assert verdict_from_evidence(
-        [{"status": "measured", "residual_nm": value} for value in (0.4, 0.5)]
-    )[0] == "misaligned-beyond-repair"
+    assert verdict_from_evidence(aligned, coverage_nm=coverage)[0] == "aligned"
+    inconsistent = [
+        _pixel_residual(order, centre, shift)
+        for (order, centre), shift in zip(_DRIFT_ORDERS, (4.0, -4.0, 3.5, -3.2))
+    ]
+    assert (
+        verdict_from_evidence(inconsistent, coverage_nm=coverage)[0]
+        == "misaligned-beyond-repair"
+    )
+    assert verdict_from_evidence(aligned[:2], coverage_nm=coverage)[0] == "insufficient-data"
     assert verdict_from_evidence([{"status": "insufficient-data"}])[0] == "insufficient-data"
 
     evidence = write_drift_evidence(tmp_path / "shifted.json", shifted)
@@ -229,13 +299,13 @@ def test_refinement_historical_and_connected_fixture_path(tmp_path: Path) -> Non
     cube_root = tmp_path / "cubes"
     cube_root.mkdir()
     cube = cube_root / "shot_42.nc"
-    _line_cube(cube, 0.1, snapshot.snapshot_id)
-    evidence_payload = audit_cubes([cube])
+    _line_cube(cube, 8.0, snapshot.snapshot_id)
+    evidence_payload = audit_cubes([cube], evidence_path=tmp_path / "drift.json")
     evidence = write_drift_evidence(tmp_path / "drift.json", evidence_payload)
     refined, accepted = create_refinement_snapshot(
         evidence,
         calibrations_root=tmp_path / "calibrations",
-        accepted_shift_nm=evidence_payload["summary"]["median_shift_nm"],
+        accepted_shift_px=evidence_payload["summary"]["median_shift_px"],
     )
     assert refined.snapshot_id == "20250101_cmos-r1"
     accepted_payload = json.loads(accepted.read_text(encoding="utf-8"))

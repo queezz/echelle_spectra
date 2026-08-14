@@ -71,7 +71,8 @@ echelle process D:\NIFS\shots `
   --volume-label NIFS-A `
   --sample 5
 
-echelle drift audit (Get-ChildItem "D:\NIFS\cubes\*.nc").FullName `
+echelle drift audit D:\NIFS\cubes `
+  --calibrations D:\NIFS\calibrations `
   -o D:\NIFS\epoch-drift.json
 
 # Bulk: authorized by the sampled verdict.

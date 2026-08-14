@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
 
 
@@ -78,38 +79,99 @@ def recal_main(argv: list[str] | None = None, *, prog: str = "echelle recal-cube
 
 
 def drift_main(argv: list[str] | None = None, *, prog: str = "echelle drift") -> int:
-    from .drift import audit_cubes, create_refinement_snapshot, write_drift_evidence
+    from .drift import DriftError, audit_cubes, create_refinement_snapshot, write_drift_evidence
 
     parser = argparse.ArgumentParser(prog=prog, description="Audit science-line drift and accept refinements.")
     commands = parser.add_subparsers(dest="action", metavar="COMMAND")
     audit = commands.add_parser(
         "audit", help="Measure sampled cubes and write one immutable verdict file."
     )
-    audit.add_argument("cubes", nargs="+")
-    audit.add_argument("--every", type=int, default=1)
-    audit.add_argument("--shot", action="append", default=[])
+    audit.add_argument(
+        "cubes",
+        nargs="+",
+        metavar="CUBE_OR_DIR",
+        help="Saved .nc cubes, or a directory whose .nc cubes are all audited.",
+    )
+    audit.add_argument("--every", type=int, default=1, help="Audit every Nth selected cube.")
+    audit.add_argument(
+        "--shot",
+        action="append",
+        default=[],
+        metavar="SHOT",
+        help="Also audit this exact shot; 42 matches shot 42 and never 142.",
+    )
+    audit.add_argument(
+        "--from",
+        dest="date_from",
+        metavar="YYYY-MM-DD",
+        help="Audit cubes acquired on or after this date (cube t_start, else the "
+        "date in source_file, else created_at).",
+    )
+    audit.add_argument(
+        "--to",
+        dest="date_to",
+        metavar="YYYY-MM-DD",
+        help="Audit cubes acquired on or before this date.",
+    )
+    audit.add_argument(
+        "--catalog",
+        metavar="JSON",
+        help="Merged catalog used to name the drives holding beyond-repair shots.",
+    )
+    audit.add_argument(
+        "--calibrations",
+        default="calibrations",
+        metavar="DIR",
+        help="Snapshot root named by the composed repair commands (default: calibrations).",
+    )
     audit.add_argument("-o", "--output", required=True)
     refine = commands.add_parser(
         "refine", help="Accept a shifted verdict and emit an immutable -rN snapshot."
     )
     refine.add_argument("evidence")
     refine.add_argument("--calibrations", required=True)
-    refine.add_argument("--accept-shift", required=True, type=float)
+    refine.add_argument(
+        "--accept-shift",
+        required=True,
+        type=float,
+        metavar="PIXELS",
+        help="Exactly acknowledge the sampled median detector shift, in pixels.",
+    )
     args = parser.parse_args(argv)
     if args.action is None:
         parser.print_help()
         return 0
     if args.action == "audit":
-        payload = audit_cubes(args.cubes, every=args.every, shots=set(args.shot))
+        try:
+            payload = audit_cubes(
+                args.cubes,
+                every=args.every,
+                shots=set(args.shot),
+                date_from=args.date_from,
+                date_to=args.date_to,
+                catalog=args.catalog,
+                evidence_path=args.output,
+                calibrations_root=args.calibrations,
+            )
+        except DriftError as exc:
+            print(f"ERROR: {exc}", file=sys.stderr)
+            return 1
         path = write_drift_evidence(args.output, payload)
         print(f"{payload['verdict']}: {path}")
-        if payload.get("repair_command"):
-            print(payload["repair_command"].replace("DRIFT_EVIDENCE.json", str(path)))
+        if payload.get("interval_warning"):
+            print(f"warning: {payload['interval_warning']}")
+        if payload.get("data_requirement"):
+            print(payload["data_requirement"])
+        for step in payload.get("repair_commands", []):
+            shell = "" if step["shell"] == "any" else f"[{step['shell']}] "
+            print(f"# {shell}{step['purpose']}")
+            if step["command"]:
+                print(step["command"])
         return 0 if payload["verdict"] in {"aligned", "shifted"} else 1
     snapshot, accepted = create_refinement_snapshot(
         args.evidence,
         calibrations_root=args.calibrations,
-        accepted_shift_nm=args.accept_shift,
+        accepted_shift_px=args.accept_shift,
     )
     print(f"snapshot: {snapshot.snapshot_id}\naccepted verdict: {accepted}")
     return 0

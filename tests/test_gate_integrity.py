@@ -310,12 +310,12 @@ def test_accepted_refinement_authorizes_only_the_refined_snapshot(tmp_path: Path
         {
             "verdict": "shifted",
             "snapshot_ids": [BASE_ID],
-            "summary": {"median_shift_nm": 0.1},
+            "summary": {"median_shift_px": 5.0},
         },
     )
 
     refined, accepted = create_refinement_snapshot(
-        evidence, calibrations_root=snapshots, accepted_shift_nm=0.1
+        evidence, calibrations_root=snapshots, accepted_shift_px=5.0
     )
 
     assert refined.snapshot_id == REFINED_ID

@@ -56,6 +56,13 @@ class SpectralLine:
     source_resource: str
     relative_intensity: float | None = None
     notes: str = ""
+    blended: bool = False
+    """True when another catalog line falls inside the instrumental width.
+
+    A blended row is still a real transition and is still drawn by overlays,
+    but a single measured centroid over it belongs to the blend rather than to
+    this line, so calibration measurements must skip it.
+    """
 
 
 def _balmer_lines() -> tuple[SpectralLine, ...]:
@@ -93,9 +100,12 @@ def _fulcher_lines() -> tuple[SpectralLine, ...]:
     )
     payload = tomllib.loads(resource.read_text(encoding="utf-8"))
     notes = str(payload["adaptation_note"])
+    blended = {float(value) for value in payload.get("blended_wavelengths", ())}
+    blend_note = str(payload.get("blend_note", ""))
     result = []
     for band, wavelengths in payload["bands"].items():
         for number, wavelength in enumerate(wavelengths, start=1):
+            is_blended = float(wavelength) in blended
             result.append(
                 SpectralLine(
                     family="fulcher",
@@ -106,7 +116,8 @@ def _fulcher_lines() -> tuple[SpectralLine, ...]:
                     source_name=str(payload["source_name"]),
                     source_reference=str(payload["source_reference"]),
                     source_resource=str(payload["source_resource"]),
-                    notes=notes,
+                    notes=f"{notes} {blend_note}".strip() if is_blended else notes,
+                    blended=is_blended,
                 )
             )
     return tuple(sorted(result, key=lambda line: (line.wavelength_nm, line.label)))

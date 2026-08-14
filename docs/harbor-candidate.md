@@ -51,25 +51,41 @@ SIF data. There is deliberately no approximation for changed geometry.
 ## Drift audit and refinement
 
 ```console
-echelle drift audit cubes/*.nc --every 20 --shot 193778 -o epoch-drift.json
-echelle drift refine epoch-drift.json --calibrations calibrations --accept-shift 0.0842
+echelle drift audit cubes --every 20 --shot 193778 -o epoch-drift.json
+echelle drift refine epoch-drift.json --calibrations calibrations --accept-shift 5.0
 ```
 
-The audit fits baseline-subtracted Balmer and Fulcher centroids and retains
-per-cube/per-line status, centroid, residual, SNR, source reference, and sample
-rule. Thresholds are serialized with every verdict:
+The audit fits baseline-subtracted Balmer and Fulcher centroids over the
+plasma-bright frames only, then leaves wavelength for detector pixels. Each
+line's wavelength residual is divided by the dispersion the cube's own stored
+per-order polynomial has at that line's `detector_pixel`, so one rigid shift is
+fitted in pixels and every boundary is a pixel bound. A rigid detector shift
+moves a blue order by 0.0066 nm/px and H-alpha by 0.0108 nm/px; judging that in
+nanometres condemned repairable shifts and under-corrected accepted ones.
 
 | Verdict | Rule |
 | --- | --- |
-| `aligned` | at least two centroids; median absolute shift ≤ 0.03 nm and every absolute residual ≤ 0.06 nm |
-| `shifted` | median absolute shift ≤ 0.25 nm and every measured shift lies within 0.04 nm of the median |
-| `misaligned-beyond-repair` | sufficient centroids but the aligned/rigid-shift rules fail |
-| `insufficient-data` | fewer than two centroids at SNR ≥ 4 |
+| `aligned` | every line's pixel residual is within 0.5 px, or within the cube's own `wavelength_accuracy_nm` where that is wider |
+| `shifted` | median shift ≤ 25 px and every line lies within 1 px of that median |
+| `misaligned-beyond-repair` | quorum reached but the aligned/rigid-shift rules fail |
+| `insufficient-data` | fewer than three resolved lines, fewer than three orders, or all lines in one half of the audited range |
 
-`insufficient-data` is never treated as aligned. A shifted verdict prints a
-paste-ready refinement command. Exact acknowledgement creates the next
-immutable `-rN` snapshot, adjusts only its copied wavelength table, records the
-base snapshot/evidence digest, and writes a separate accepted verdict.
+Blended catalog rows are skipped, never measured: a duplicated or
+sub-resolution line can no longer manufacture a quorum. Thresholds, per-shot
+medians, per-order corrections, and the skipped cubes are serialized with every
+verdict. Residuals that fall into two separated per-shot groups add an
+`interval_warning` naming the boundary to split at, rather than reading an
+epoch step as beyond repair. `--from`/`--to` select by acquisition date and
+`--shot` matches a whole shot token. A beyond-repair verdict names the drives
+holding the affected shots when `--catalog` supplies the merged index.
+
+`insufficient-data` is never treated as aligned. A shifted verdict composes the
+real repair sequence — refine, repoint the registry, then `recal-cube` for the
+cubes already exported. Exact acknowledgement of the pixel shift creates the
+next immutable `-rN` snapshot by sliding the wavelength table's anchors along
+the detector, so each order's refit turns that one shift into its own
+wavelength correction; the base snapshot/evidence digest is recorded and a
+separate accepted verdict is written.
 
 Every registry-backed run — a folder of any size and the single-file path —
 requires either `--drift-verdict` or an explicit unverified `--sample N` first

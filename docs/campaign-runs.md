@@ -17,8 +17,10 @@ echelle process D:\nifs\shots `
   --volume-label NIFS-A `
   --sample 5
 
-# 2. Audit the sample into one immutable verdict file.
-echelle drift audit (Get-ChildItem "D:\nifs\spectrocubes\*.nc").FullName `
+# 2. Audit the sample into one immutable verdict file. The audit takes the
+#    cube folder itself, so the same line works in any shell.
+echelle drift audit D:\nifs\spectrocubes `
+  --calibrations D:\nifs\calibrations `
   -o D:\nifs\epoch-drift.json
 
 # 3. Process the whole drive under that verdict.
