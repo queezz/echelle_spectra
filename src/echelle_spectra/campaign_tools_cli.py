@@ -190,7 +190,13 @@ def drift_main(argv: list[str] | None = None, *, prog: str = "echelle drift") ->
 def web_main(argv: list[str] | None = None, *, prog: str = "echelle web") -> int:
     from .reading_room import build_reading_room
 
-    parser = argparse.ArgumentParser(prog=prog, description="Build the read-only campaign reading room.")
+    parser = argparse.ArgumentParser(
+        prog=prog,
+        description=(
+            "Build the read-only campaign page: the Now stepper, the drives, the "
+            "calibration evidence, and the packaged reading room."
+        ),
+    )
     parser.add_argument("--catalog", required=True)
     parser.add_argument("--output", required=True)
     parser.add_argument("--drift", action="append", default=[])

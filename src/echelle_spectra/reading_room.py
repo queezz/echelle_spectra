@@ -1,11 +1,20 @@
-"""Build the read-only campaign catalog, composer, and evidence reading room.
+"""Build the read-only campaign flow, catalog, evidence and reading room.
 
 The page is a one-shot static build: ``echelle web`` writes one ``index.html``
-that carries its own CSS and JavaScript and fetches nothing.  Its structure
-follows the house web UI law (fleet's ``WEBUI.md`` and ``WEBUI-COOKBOOK.md``):
+that carries its own CSS and JavaScript and fetches nothing.  It is organized
+by the work rather than by the data: four tabs — **Now** (the campaign as a
+stepper, one independent row per drive), **Drives** (the catalog),
+**Calibration** (epochs and drift evidence in sequence position) and
+**Reading room** (the packaged canon).  Its structure follows the house web UI
+law (fleet's ``WEBUI.md`` and ``WEBUI-COOKBOOK.md``):
 
 * the main column is what a person reads; the rails are what a person presses,
-  with controls on the left and context plus the section index on the right;
+  with controls on the left and context plus the section index on the right,
+  each rail carrying only the active tab's own cargo;
+* a top tab press always returns that tab to its home state, including when a
+  sub-view inside it is open (the view-nesting law's guard exception);
+* the teaching lives once, in each tab's own legend and in the reading room;
+  cards carry facts — chips, counts, and one truncated path;
 * both rails are sticky at an offset derived as the sum of the page's own
   header metrics, and only the rails carry ``align-self: start`` so their grid
   row still spans the content column's full height (the zero-travel trap);
@@ -230,6 +239,8 @@ _SOURCE_STATES = {
     "measured": ("state-measured", "measured"),
 }
 
+#: What each state means, said once on the page: these sentences are the drive
+#: legend's text and appear nowhere else.  A card carries facts, not teaching.
 _SOURCE_NOTES = {
     "missing-drive": (
         "This drive's catalog did not answer when the page was built. Its rows are the "
@@ -240,7 +251,9 @@ _SOURCE_NOTES = {
         "processed here or under what authorization."
     ),
     "empty": "A run was recorded and it published no cubes. That is a measured zero.",
-    "measured": "",
+    "measured": (
+        "The catalog answered, a receipt described the run, and cubes were published."
+    ),
 }
 
 _GATE_STATES = {
@@ -416,7 +429,559 @@ def _composer_values(
         "every": "20",
         "epoch": epochs[0] if epochs else "unassigned",
         "bench": calibrations,
+        "sample": "20",
+        "label": str(primary.get("volume_label", "")) or "unknown",
     }
+
+
+# ---------------------------------------------------------------------------
+# The campaign pipeline
+# ---------------------------------------------------------------------------
+#
+# The Now tab renders the campaign the way it is worked: one calibrate stage
+# per campaign, then one row per connected drive, each advancing on its own
+# because the work is one worker per drive and several drives at once.
+#
+# Every step state below is computed at build time from files this build
+# already reads -- the merged catalog, the run receipts summarised inside it,
+# the registry, and the drift evidence handed to ``--drift``.  Nothing is
+# inferred past what those files say: a step whose completion no file records
+# is rendered ``not recorded`` rather than guessed from a neighbouring fact,
+# and a blocked step names both what is missing and the step that supplies it.
+
+STEP_DONE = "done"
+STEP_READY = "ready"
+STEP_BLOCKED = "blocked"
+STEP_UNRECORDED = "not recorded"
+
+_STEP_CLASSES = {
+    STEP_DONE: "step-done",
+    STEP_READY: "step-ready",
+    STEP_BLOCKED: "step-blocked",
+    STEP_UNRECORDED: "step-unrecorded",
+}
+
+#: Meaning and command template for every step a reader can act on.  The
+#: templates are filled per drive, so a ready step is the command for exactly
+#: that drive's next move rather than a generic example.
+STEP_COMMANDS = {
+    "bench": (
+        "Open the live bench on the snapshot root and fit sphere plus every lamp you "
+        "measured; the bench writes the snapshot the registry then names.",
+        'echelle-calib "{{bench}}"',
+    ),
+    "connect": (
+        "Catalog this drive where it is plugged in now, so the index finds its cubes again.",
+        'echelle catalog build "{{cubes}}" --volume-label "{{label}}"',
+    ),
+    "sample": (
+        "Process the first {{sample}} files as an unverified sample — the legal first "
+        "registry run, and the cubes the drift audit then measures.",
+        'echelle process "{{input}}" -o "{{output}}" --registry "{{registry}}" '
+        '--calibrations "{{calibrations}}" --sample {{sample}} --volume-label "{{label}}" '
+        '--central-index "{{catalog}}"',
+    ),
+    "audit": (
+        "Measure Balmer and Fulcher centroids on this drive's sampled cubes and write one "
+        "immutable verdict file. The bulk run is refused until it exists.",
+        'echelle drift audit "{{cubes}}" --every {{every}} --catalog "{{catalog}}" '
+        '--calibrations "{{calibrations}}" -o "{{verdict}}"',
+    ),
+    "audit-again": (
+        "Audit every cube on this drive: the last sample could not carry a verdict.",
+        'echelle drift audit "{{cubes}}" --every 1 --catalog "{{catalog}}" '
+        '--calibrations "{{calibrations}}" -o "{{verdict}}"',
+    ),
+    "cubes": (
+        "Generate the cubes — the campaign's product. The plan supplies input, output, "
+        "registry, snapshot root and the accepted verdict, so one receipt records the "
+        "evidence that authorized the run.",
+        'echelle process --plan "{{plan}}"',
+    ),
+    "txt": (
+        "Write LHD text at the frozen legacy header from one cube; repeat per cube LHD asks for.",
+        'echelle txt "{{cube}}" "{{txt}}"',
+    ),
+    "merge": (
+        "Fold this drive's catalog into the all-years index so the next build remembers it.",
+        'echelle catalog merge "{{drive_catalog}}" -o "{{catalog}}"',
+    ),
+}
+
+
+def _step(
+    key: str,
+    name: str,
+    state: str,
+    fact: str,
+    *,
+    evidence: str = "",
+    command: str = "",
+    values: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    """One step of the flow: its state, its one fact, and its own command."""
+
+    meaning, template = STEP_COMMANDS[command] if command else ("", "")
+    shapes = (
+        {shell: _fill(template, values or {}, shell) for shell, _ in SHELL_NAMES}
+        if command
+        else {}
+    )
+    return {
+        "key": key,
+        "name": name,
+        "state": state,
+        "fact": fact,
+        "evidence": evidence,
+        "meaning": _fill(meaning, values or {}, "posix") if meaning else "",
+        "shapes": shapes,
+    }
+
+
+def _primary_step(steps: list[dict[str, Any]]) -> int:
+    """Return the index of the step that answers "what do I do first", or -1.
+
+    The first step a reader can act on wins: ready or blocked.  A step whose
+    completion no file records is never the answer — it can never become done
+    from this page's side, so it would pin the arrow to itself for the rest of
+    the campaign, and a drive is done when its cubes exist and are catalogued
+    rather than when its optional LHD text was written.
+    """
+
+    for position, step in enumerate(steps):
+        if step["state"] in {STEP_READY, STEP_BLOCKED}:
+            return position
+    return -1
+
+
+def _epoch_covering(rows: list[dict[str, Any]], today: str) -> dict[str, Any] | None:
+    for row in rows:
+        start, end = row.get("date_from") or "", row.get("date_to") or ""
+        if not start and not end:
+            continue
+        if (not start or start <= today) and (not end or today <= end):
+            return row
+    return None
+
+
+def _calibrate_steps(
+    registry: dict[str, Any],
+    snapshot_ids: list[str],
+    values: dict[str, str],
+    today: str,
+) -> list[dict[str, Any]]:
+    """Compute the campaign's one calibrate stage from registry and catalog."""
+
+    rows = list(registry.get("epoch_rows") or [])
+    named = [str(row["snapshot_id"]) for row in rows]
+    saved = [item for item in snapshot_ids if item and item != "unassigned"]
+    unreadable = registry["status"] == "unreadable"
+    absent = registry["status"] == "not supplied"
+    # One fact decides the first three steps, because no file records the
+    # physical session between them: the snapshot is the only trace it leaves.
+    trace = named or saved
+    if trace:
+        origin = (
+            f"{len(named)} registry epoch(s): {', '.join(named)}"
+            if named
+            else f"cubes name snapshot(s) {', '.join(sorted(set(saved)))}"
+        )
+        lamps = _step("lamps", "Sphere + lamps", STEP_DONE, origin)
+        fit = _step("fit", "Bench fit", STEP_DONE, "the saved snapshot is the fit")
+        snapshot = _step("snapshot", "Snapshot saved", STEP_DONE, origin)
+    elif unreadable:
+        detail = str(registry.get("detail") or "the registry could not be read")
+        lamps = _step("lamps", "Sphere + lamps", STEP_BLOCKED, detail)
+        fit = _step("fit", "Bench fit", STEP_BLOCKED, detail)
+        snapshot = _step("snapshot", "Snapshot saved", STEP_BLOCKED, detail)
+    else:
+        missing = (
+            "no registry was given to this build, so no snapshot is in reach"
+            if absent
+            else "no snapshot is in reach"
+        )
+        lamps = _step("lamps", "Sphere + lamps", STEP_UNRECORDED, missing)
+        fit = _step(
+            "fit",
+            "Bench fit",
+            STEP_READY,
+            "nothing has been fitted where this page can see it",
+            command="bench",
+            values=values,
+        )
+        snapshot = _step("snapshot", "Snapshot saved", STEP_UNRECORDED, missing + "; the bench writes it")
+    if named:
+        covering = _epoch_covering(rows, today)
+        dated = [row for row in rows if row.get("date_from") or row.get("date_to")]
+        if covering is not None:
+            epoch = _step(
+                "epoch",
+                "Registry epoch",
+                STEP_DONE,
+                f"{covering['snapshot_id']} covers today ({today})",
+            )
+        elif not dated:
+            epoch = _step(
+                "epoch",
+                "Registry epoch",
+                STEP_DONE,
+                f"{len(named)} epoch(s), all shot-bounded — coverage of today is not recorded",
+            )
+        else:
+            epoch = _step(
+                "epoch",
+                "Registry epoch",
+                STEP_READY,
+                f"no epoch covers today ({today}); this campaign needs its own snapshot",
+                command="bench",
+                values=values,
+            )
+    elif unreadable:
+        epoch = _step("epoch", "Registry epoch", STEP_BLOCKED, str(registry.get("detail") or ""))
+    elif saved:
+        epoch = _step(
+            "epoch",
+            "Registry epoch",
+            STEP_BLOCKED,
+            "no registry names these snapshots — supply one with --registry",
+        )
+    else:
+        epoch = _step(
+            "epoch",
+            "Registry epoch",
+            STEP_UNRECORDED,
+            "not supplied to this build; Snapshot saved supplies its entry",
+        )
+    return [lamps, fit, snapshot, epoch]
+
+
+def _cube_names(source: dict[str, Any]) -> set[str]:
+    return {str(cube.get("path", "")).rsplit("/", 1)[-1] for cube in source.get("cubes", [])}
+
+
+def _evidence_for_drive(
+    source: dict[str, Any], drift: list[dict[str, Any]]
+) -> dict[str, Any] | None:
+    """Attach one drift verdict to the drive whose cubes it actually measured.
+
+    Evidence names the cubes it sampled by file name and nothing else, so that
+    name is the only honest join back to a drive.  Evidence whose cubes match no
+    drive stays unattributed and is read in the Calibration tab instead of being
+    hung on a drive by a shared epoch, which several drives can share.
+    """
+
+    names = _cube_names(source)
+    matched = [
+        entry
+        for entry in drift
+        if names
+        & {
+            str(item.get("cube", ""))
+            for key in ("sampled_cubes", "per_shot")
+            for item in (entry["evidence"].get(key) or [])
+        }
+    ]
+    if not matched:
+        return None
+    return max(matched, key=lambda entry: str(entry["evidence"].get("created_at") or ""))
+
+
+def _drive_values(
+    base: dict[str, str], source: dict[str, Any], *, evidence: dict[str, Any] | None
+) -> dict[str, str]:
+    """Fill the command templates for exactly one drive."""
+
+    root = _posix(source.get("drive_root", "")) or base["output"]
+    label = str(source.get("volume_label", "unknown"))
+    cubes = [str(cube.get("path", "")) for cube in source.get("cubes", [])]
+    first = cubes[0] if cubes else ""
+    slug = _SLUG.sub("-", label.lower()).strip("-") or "drive"
+    values = dict(base)
+    values.update(
+        {
+            "output": root,
+            "cubes": root,
+            "label": label,
+            "verdict": evidence["path"] if evidence else f"drift-{slug}.json",
+            "drive_catalog": _posix(
+                Path(root) / (str(source.get("catalog_path") or "echelle-catalog.json"))
+            ),
+            "cube": _posix(Path(root) / first) if first else f"{root}/<cube>.nc",
+            "txt": (
+                _posix(Path(root) / first)[:-3] + ".txt"
+                if first.endswith(".nc")
+                else f"{root}/<cube>.txt"
+            ),
+        }
+    )
+    return values
+
+
+def _evidence_link(entry: dict[str, Any], anchor: str) -> str:
+    """Link one drive's step to the evidence card that proves it.
+
+    The label is the file's own name and the whole path stays in the title, the
+    same compression every other path on the page gets.
+    """
+
+    path = str(entry["path"])
+    return (
+        f'<a class="xlink" href="#{_e(anchor)}" data-tab="calibration" '
+        f'title="{_e(path)}">{_e(path.rsplit("/", 1)[-1])}</a>'
+    )
+
+
+def _verdict_step(
+    evidence: dict[str, Any] | None, values: dict[str, str], anchor: str, gate: str
+) -> dict[str, Any]:
+    """Render the branch this drive's verdict actually points at."""
+
+    if evidence is None:
+        if gate == GATE_VERDICT:
+            # The receipt proves a verdict authorized this run; the file that
+            # carried it was simply not given to this build.
+            return _step(
+                "verdict",
+                "Verdict",
+                STEP_UNRECORDED,
+                "the receipt was verdict-authorized; no evidence file was given to this build",
+            )
+        return _step(
+            "verdict",
+            "Verdict",
+            STEP_BLOCKED,
+            "no verdict for this drive — Drift audit writes one",
+        )
+    payload = evidence["evidence"]
+    verdict = str(payload.get("verdict", ""))
+    link = _evidence_link(evidence, anchor)
+    if verdict == "aligned":
+        return _step("verdict", "Verdict", STEP_DONE, "aligned — bulk is authorized", evidence=link)
+    if verdict == "insufficient-data":
+        return _step(
+            "verdict",
+            "Verdict",
+            STEP_READY,
+            "insufficient-data — sample more cubes and audit again",
+            evidence=link,
+            command="audit-again",
+            values=values,
+        )
+    if verdict == "shifted":
+        step = _step(
+            "verdict",
+            "Verdict",
+            STEP_READY,
+            "shifted — refine, then repoint the registry",
+            evidence=link,
+        )
+        repair = next(
+            (item for item in (payload.get("repair_commands") or []) if item.get("command")),
+            None,
+        )
+        if repair is not None:
+            command = str(repair["command"])
+            shell = str(repair.get("shell", "any"))
+            step["meaning"] = str(repair.get("purpose", "accept the sampled shift"))
+            step["shapes"] = (
+                {"powershell": command, "posix": command}
+                if shell == "any"
+                else {shell: command}
+            )
+        return step
+    if verdict == "misaligned-beyond-repair":
+        return _step(
+            "verdict",
+            "Verdict",
+            STEP_BLOCKED,
+            str(payload.get("data_requirement") or "beyond repair — the raw SIF data is needed"),
+            evidence=link,
+        )
+    return _step(
+        "verdict",
+        "Verdict",
+        STEP_UNRECORDED,
+        f"unrecognized verdict: {verdict or 'none recorded'}",
+        evidence=link,
+    )
+
+
+def _drive_steps(
+    source: dict[str, Any],
+    *,
+    evidence: dict[str, Any] | None,
+    anchor: str,
+    values: dict[str, str],
+    merged: bool,
+    catalog_path: str,
+) -> list[dict[str, Any]]:
+    """Compute one drive's own position in the per-drive loop."""
+
+    available = bool(source.get("available"))
+    cubes = source.get("cubes", [])
+    run = source.get("run") or {}
+    gate = str(run.get("gate", GATE_UNRECORDED)) if run else ""
+    steps: list[dict[str, Any]] = []
+
+    drive_id = str(source.get("drive_id") or "")
+    steps.append(
+        _step(
+            "connect",
+            "Connect + identify",
+            STEP_DONE,
+            f"catalog answered · id {drive_id or 'not announced, label only'}",
+        )
+        if available
+        else _step(
+            "connect",
+            "Connect + identify",
+            STEP_READY,
+            "this drive's catalog did not answer when the page was built",
+            command="connect",
+            values=values,
+        )
+    )
+
+    if cubes:
+        steps.append(
+            _step(
+                "sample",
+                "Sample N",
+                STEP_DONE,
+                f"{len(cubes)} cube(s) catalogued"
+                + (" · receipt marks an unverified sample" if run.get("sample") else ""),
+            )
+        )
+    elif available:
+        steps.append(
+            _step(
+                "sample",
+                "Sample N",
+                STEP_READY,
+                "no cube is catalogued for this drive yet",
+                command="sample",
+                values=values,
+            )
+        )
+    else:
+        steps.append(
+            _step("sample", "Sample N", STEP_BLOCKED, "needs the drive itself — Connect + identify")
+        )
+
+    if evidence is not None:
+        steps.append(
+            _step(
+                "audit",
+                "Drift audit",
+                STEP_DONE,
+                f"{len(evidence['evidence'].get('sampled_cubes') or [])} cube(s) sampled",
+                evidence=_evidence_link(evidence, anchor),
+            )
+        )
+    elif gate == GATE_VERDICT:
+        steps.append(
+            _step(
+                "audit",
+                "Drift audit",
+                STEP_DONE,
+                "the receipt records a verdict-authorized run; its evidence file is not "
+                "named by this catalog",
+            )
+        )
+    elif cubes and available:
+        steps.append(
+            _step(
+                "audit",
+                "Drift audit",
+                STEP_READY,
+                "cubes are on this drive and no verdict measures them",
+                command="audit",
+                values=values,
+            )
+        )
+    else:
+        steps.append(
+            _step("audit", "Drift audit", STEP_BLOCKED, "needs sampled cubes — Sample N supplies them")
+        )
+
+    steps.append(_verdict_step(evidence, values, anchor, gate))
+    verdict_state = steps[-1]["state"]
+
+    bulk_done = bool(cubes) and bool(run) and not run.get("sample") and run.get("state") == "completed"
+    if bulk_done:
+        counts = ", ".join(f"{value} {key}" for key, value in sorted((run.get("counts") or {}).items()))
+        steps.append(
+            _step(
+                "cubes",
+                "Generate cubes",
+                STEP_DONE,
+                f"{len(cubes)} cube(s) · receipt {run.get('id')} [{run.get('state')}]"
+                + (f" · {counts}" if counts else ""),
+            )
+        )
+    elif cubes and not run:
+        steps.append(
+            _step(
+                "cubes",
+                "Generate cubes",
+                STEP_UNRECORDED,
+                "cubes exist and no receipt says which run made them",
+            )
+        )
+    elif verdict_state == STEP_DONE and available:
+        steps.append(
+            _step(
+                "cubes",
+                "Generate cubes",
+                STEP_READY,
+                "the verdict authorizes the bulk run — this is the product",
+                command="cubes",
+                values=values,
+            )
+        )
+    else:
+        steps.append(
+            _step(
+                "cubes",
+                "Generate cubes",
+                STEP_BLOCKED,
+                "needs an aligned or refined verdict — Verdict supplies it",
+            )
+        )
+
+    steps.append(
+        _step(
+            "txt",
+            "LHD txt",
+            STEP_UNRECORDED,
+            "the side deliverable: no receipt or catalog field records a txt export",
+            command="txt",
+            values=values,
+        )
+        if cubes
+        else _step("txt", "LHD txt", STEP_BLOCKED, "needs cubes — Generate cubes supplies them")
+    )
+
+    steps.append(
+        _step("merge", "Catalog merge", STEP_DONE, f"in {catalog_path.rsplit('/', 1)[-1]}")
+        if merged and source.get("catalog_path")
+        else _step(
+            "merge",
+            "Catalog merge",
+            STEP_READY,
+            "this drive is not folded into an all-years index",
+            command="merge",
+            values=values,
+        )
+    )
+
+    pending = [step for step in steps if step["state"] in {STEP_READY, STEP_BLOCKED}]
+    steps.append(
+        _step("done", "Done", STEP_DONE, "cubes exist, catalogued and recalibratable")
+        if not pending
+        else _step("done", "Done", STEP_BLOCKED, f"waiting on {pending[0]['name']}")
+    )
+    return steps
 
 
 # ---------------------------------------------------------------------------
@@ -424,9 +989,13 @@ def _composer_values(
 # ---------------------------------------------------------------------------
 
 
-def _card(title: str, body: str, *, classes: str = "") -> str:
+def _card(title: str, body: str, *, classes: str = "", identifier: str = "") -> str:
     attribute = f"card {classes}".strip()
-    return f'<article class="{attribute}"><h3 class="card-title">{title}</h3>{body}</article>'
+    anchor = f' id="{_e(identifier)}"' if identifier else ""
+    return (
+        f'<article class="{attribute}"{anchor}>'
+        f'<h3 class="card-title">{title}</h3>{body}</article>'
+    )
 
 
 def _pill(state: str, label: str) -> str:
@@ -495,42 +1064,119 @@ def _catalog_table(rows: list[dict[str, Any]]) -> str:
     )
 
 
+def _chip(text: str) -> str:
+    return f'<span class="chip">{_e(text)}</span>'
+
+
+def _path_chip(value: Any) -> str:
+    """One truncated path. The whole path stays in the title and in the copy."""
+
+    text = str(value or "")
+    if not text:
+        return _chip("root unknown")
+    shown = text if len(text) <= 36 else "…" + text[-35:]
+    return f'<span class="chip path" title="{_e(text)}">{_e(shown)}</span>'
+
+
+def _drive_chips(source: dict[str, Any]) -> str:
+    """Facts only: the states, the counts, and one truncated path."""
+
+    state = source_state(source)
+    classes, label = _SOURCE_STATES[state]
+    run = source.get("run") or {}
+    counts = ", ".join(f"{value} {key}" for key, value in sorted((run.get("counts") or {}).items()))
+    epochs = sorted({str(cube.get("snapshot_id") or "") for cube in source.get("cubes", [])} - {""})
+    chips = [
+        _pill(classes, label),
+        # A drive with no receipt has no gate to report; borrowing the pre-gate
+        # word for it would claim a receipt that never existed.
+        _pill(*_gate_state(run.get("gate", GATE_UNRECORDED))) if run else "",
+        _chip(f"{len(source.get('cubes', []))} cube(s)"),
+        _chip(f"id {source.get('drive_id') or 'not announced'}"),
+        _chip(f"run {run.get('state')}" + (f" · {counts}" if counts else "")) if run else "",
+        _chip(", ".join(epochs[:2]) + ("…" if len(epochs) > 2 else "")) if epochs else "",
+        _path_chip(source.get("drive_root")),
+    ]
+    return f'<p class="chips">{"".join(chips)}</p>'
+
+
 def _source_cards(sources: list[dict[str, Any]]) -> str:
     cards = []
     for source in sources:
-        state = source_state(source)
-        classes, label = _SOURCE_STATES[state]
+        classes, _ = _SOURCE_STATES[source_state(source)]
         run = source.get("run") or {}
-        # A drive with no receipt has no gate to report; borrowing the
-        # pre-gate word for it would claim a receipt that never existed.
-        gate = _pill(*_gate_state(run.get("gate", GATE_UNRECORDED))) if run else ""
-        lines = [
-            f'<p class="state-line">{_pill(classes, label)} {gate} '
-            f'<span class="muted">{_e(len(source.get("cubes", [])))} cube(s)</span></p>'
-        ]
-        note = _SOURCE_NOTES[state]
-        if note:
-            lines.append(f'<p class="note">{_e(note)}</p>')
-        if run:
-            counts = ", ".join(
-                f"{value} {key}" for key, value in sorted((run.get("counts") or {}).items())
-            )
-            lines.append(
-                f'<p class="muted">run {_e(run.get("id"))} [{_e(run.get("state"))}]'
-                f"{(' · ' + _e(counts)) if counts else ''}</p>"
-            )
-            if run.get("drive_warning"):
-                lines.append(f'<p class="warn">{_e(run["drive_warning"])}</p>')
-        lines.append(
-            f'<p class="muted">drive id {_e(source.get("drive_id") or "not announced")} · '
-            f'last root {_e(source.get("drive_root") or "unknown")}</p>'
-        )
+        lines = [_drive_chips(source)]
+        if run.get("drive_warning"):
+            lines.append(f'<p class="warn">{_e(run["drive_warning"])}</p>')
         cards.append(
             _card(_e(source.get("volume_label", "unknown")), "".join(lines), classes=classes)
         )
     if not cards:
         return '<p class="note state-unmeasured">This index names no drives.</p>'
     return f'<div class="card-grid">{"".join(cards)}</div>'
+
+
+# ---------------------------------------------------------------------------
+# The stepper
+# ---------------------------------------------------------------------------
+
+
+def _step_box(step: dict[str, Any], position: int, primary: bool) -> str:
+    state = _STEP_CLASSES[step["state"]]
+    classes = f"step {state}" + (" is-primary" if primary else "")
+    evidence = f'<span class="step-fact">{step["evidence"]}</span>' if step["evidence"] else ""
+    current = ' aria-current="step"' if primary else ""
+    return (
+        f'<li class="{classes}" data-step="{_e(step["key"])}"{current}>'
+        f'<span class="step-no">{position}</span>'
+        f'<span class="step-name">{_e(step["name"])}</span>'
+        f'{_pill(state, step["state"])}'
+        f'<span class="step-fact">{_e(step["fact"])}</span>{evidence}</li>'
+    )
+
+
+def _next_block(step: dict[str, Any], identifier: str) -> str:
+    head = f'<p class="next-label">Do this next — {_e(step["name"])}</p>'
+    if step["shapes"]:
+        return head + _command_row(
+            identifier, step["name"], step["meaning"] or step["fact"], step["shapes"]
+        )
+    return head + f'<p class="note">{_e(step["fact"])}</p>'
+
+
+def _flow(steps: list[dict[str, Any]], identifier: str, *, done_line: str) -> str:
+    primary = _primary_step(steps)
+    boxes = "".join(
+        _step_box(step, position + 1, position == primary)
+        for position, step in enumerate(steps)
+    )
+    if primary < 0:
+        detail = f'<p class="next-label">{_e(done_line)}</p>'
+    else:
+        detail = _next_block(steps[primary], f"{identifier}-{steps[primary]['key']}")
+    return f'<ol class="flow">{boxes}</ol><div class="next">{detail}</div>'
+
+
+def _drive_row(source: dict[str, Any], steps: list[dict[str, Any]], position: int) -> str:
+    return (
+        f'<article class="drive-row" id="drive-{position}" '
+        f'data-drive="{_e(source.get("volume_label", "unknown"))}">'
+        f'<h3 class="drive-name">{_e(source.get("volume_label", "unknown"))}</h3>'
+        f"{_drive_chips(source)}"
+        f'{_flow(steps, f"now-d{position}", done_line="This drive is done: cubes exist, catalogued and recalibratable.")}'
+        "</article>"
+    )
+
+
+def _absent_line(source: dict[str, Any], steps: list[dict[str, Any]]) -> str:
+    primary = _primary_step(steps)
+    following = steps[primary]["name"] if primary >= 0 else "nothing"
+    return (
+        f'<p class="drive-absent">{_pill(*_SOURCE_STATES["missing-drive"])} '
+        f'<strong>{_e(source.get("volume_label", "unknown"))}</strong> '
+        f'<span class="muted">{len(source.get("cubes", []))} cube(s) remembered · '
+        f"next: {_e(following)}</span></p>"
+    )
 
 
 def _simple_table(headers: tuple[str, ...], rows: list[list[str]]) -> str:
@@ -769,7 +1415,7 @@ def _drift_card(entry: dict[str, Any], position: int) -> str:
             _line_drilldown(evidence, identifier),
         ]
     )
-    return _card(_e(label), body, classes=f"verdict {state}")
+    return _card(_e(label), body, classes=f"verdict {state}", identifier=identifier)
 
 
 def _drift_section(drift: list[dict[str, Any]]) -> str:
@@ -779,6 +1425,47 @@ def _drift_section(drift: list[dict[str, Any]]) -> str:
             "Bulk readiness is unmeasured — which is not the same as aligned.</p>"
         )
     return "".join(_drift_card(entry, position) for position, entry in enumerate(drift, start=1))
+
+
+def _bounds(start: Any, end: Any) -> str:
+    if start and end:
+        return f"{start}–{end}"
+    if start:
+        return f"from {start}"
+    if end:
+        return f"to {end}"
+    return "—"
+
+
+def _epoch_table(context: dict[str, Any]) -> str:
+    """The registry's epochs, and any epoch the cubes name that it does not."""
+
+    counts: dict[str, int] = {}
+    for row in context["rows"]:
+        key = str(row.get("snapshot_id") or "unassigned")
+        counts[key] = counts.get(key, 0) + 1
+    epoch_rows = list(context["registry"].get("epoch_rows") or [])
+    named = {str(row["snapshot_id"]) for row in epoch_rows}
+    table_rows = [
+        [
+            str(row["snapshot_id"]),
+            _bounds(row.get("shot_from"), row.get("shot_to")),
+            _bounds(row.get("date_from"), row.get("date_to")),
+            str(counts.get(str(row["snapshot_id"]), 0)),
+        ]
+        for row in epoch_rows
+    ]
+    table_rows.extend(
+        [key, "not in the registry", "not in the registry", str(value)]
+        for key, value in sorted(counts.items())
+        if key not in named
+    )
+    if not table_rows:
+        return (
+            '<p class="note state-unmeasured">No epoch is named by this build: no registry was '
+            "read and no cube claims a snapshot.</p>"
+        )
+    return _simple_table(("Epoch", "Shots", "Dates", "Cubes here"), table_rows)
 
 
 def _document_sections(documents: list[dict[str, str]]) -> str:
@@ -847,8 +1534,7 @@ def _composer_card(
     epoch_options = "".join(f'<option value="{_e(item)}">{_e(item)}</option>' for item in epochs)
     verdict_options = "".join(f'<option value="{_e(item)}">{_e(item)}</option>' for item in verdicts)
     body = (
-        '<p class="muted">Pre-filled from this page\'s own catalog and registry. Nothing here '
-        "runs; Compose only rewrites the text in the main column.</p>"
+        '<p class="muted">Pre-filled from this catalog and registry; Compose rewrites text only.</p>'
         '<div class="fields">'
         f'<label class="field"><span>Drive</span><select id="f-drive">{drive_options}</select></label>'
         f'<label class="field"><span>Epoch</span><select id="f-epoch">{epoch_options}</select></label>'
@@ -884,7 +1570,47 @@ def _scope_card(rows: list[dict[str, Any]]) -> str:
     return _card("Current scope", body)
 
 
+def _send_to_composer_card(drives: list[dict[str, str]]) -> str:
+    """The Drives tab's own composer control: one press, one drive, Now leads it.
+
+    The full composer lives in the Now rail because that is where the ready
+    steps' commands are read.  This card is the compact manual entry from the
+    catalog: choosing a drive here and pressing the button switches Now to that
+    drive's composed commands rather than duplicating the composer's fields.
+    """
+
+    options = "".join(
+        f'<option value="{_e(drive["root"])}">{_e(drive["label"])}</option>' for drive in drives
+    )
+    body = (
+        '<label class="field"><span>Drive</span>'
+        f'<select id="send-drive">{options}</select></label>'
+        '<p class="actions"><button type="button" id="send-compose">Compose in Now</button></p>'
+    )
+    return _card("Compose for one drive", body)
+
+
+def _position_card(context: dict[str, Any]) -> str:
+    body = (
+        f'<p>{_e(context["connected_count"])} drive(s) connected, '
+        f'{_e(context["absent_count"])} remembered.</p>'
+        f'<p>{_e(context["ready_count"])} step(s) ready, '
+        f'{_e(context["blocked_count"])} blocked.</p>'
+        f'<p class="muted">Built {_e(context["generated_at"])}</p>'
+    )
+    return _card("Campaign position", body)
+
+
 def _context_card(context: dict[str, Any]) -> str:
+    body = (
+        f'<p>{_e(context["source_count"])} drive(s), {_e(context["cube_count"])} cube(s).</p>'
+        f'<p class="chips">{_path_chip(context["catalog_path"])}</p>'
+        f'<p class="muted">Built {_e(context["generated_at"])}</p>'
+    )
+    return _card("Context", body)
+
+
+def _registry_card(context: dict[str, Any]) -> str:
     registry = context["registry"]
     if registry["status"] == "read":
         registry_line = (
@@ -904,36 +1630,94 @@ def _context_card(context: dict[str, Any]) -> str:
             "epoch a run would select.</p>"
         )
     body = (
-        f'<p class="muted">Built {_e(context["generated_at"])}</p>'
-        f'<p class="muted">{_e(context["source_count"])} drive(s), {_e(context["cube_count"])} '
-        f'cube(s), {_e(context["drift_count"])} drift verdict(s)</p>'
-        f'<p class="muted">Catalog: {_e(context["catalog_path"])}</p>'
+        f'<p>{_e(len(context["epochs"]))} epoch(s), '
+        f'{_e(context["drift_count"])} drift verdict(s).</p>'
         f"{registry_line}"
     )
-    return _card("Context", body)
+    return _card("Calibration context", body)
 
 
-def _legend_card() -> str:
-    entries = [
-        ("state-missing-drive", "missing drive", "the catalog did not answer"),
-        ("state-unmeasured", "unmeasured", "no receipt; nothing was measured"),
-        ("state-empty", "empty", "measured, and it published zero cubes"),
-        ("state-insufficient-data", "insufficient-data", "a judged verdict, never aligned"),
-        ("state-unrecognized", "unrecognized", "a word this page does not know"),
-    ]
+def _legend(title: str, entries: list[tuple[str, str, str]]) -> str:
+    """One tab's legend — the only place on the page where a state is taught."""
+
     rows = "".join(
-        f'<li>{_pill(state, label)} <span class="muted">{_e(meaning)}</span></li>'
+        f'<li>{_pill(state, label)} <span class="legend-note">{_e(meaning)}</span></li>'
         for state, label, meaning in entries
     )
-    return _card("What the states mean", f'<ul class="legend">{rows}</ul>')
+    return _card(title, f'<ul class="legend">{rows}</ul>')
 
 
-def _index_card(entries: list[tuple[str, str]]) -> str:
+def _step_legend_card() -> str:
+    return _legend(
+        "What a step state means",
+        [
+            (_STEP_CLASSES[STEP_DONE], STEP_DONE, "a file records it; the evidence is linked"),
+            (_STEP_CLASSES[STEP_READY], STEP_READY, "the composed command for exactly this step"),
+            (_STEP_CLASSES[STEP_BLOCKED], STEP_BLOCKED, "what is missing, and the step that supplies it"),
+            (
+                _STEP_CLASSES[STEP_UNRECORDED],
+                STEP_UNRECORDED,
+                "no file on this page can say whether it was done",
+            ),
+        ],
+    )
+
+
+def _drive_legend_card() -> str:
+    return _legend(
+        "What the drive states mean",
+        [
+            ("state-missing-drive", "missing drive", _SOURCE_NOTES["missing-drive"]),
+            ("state-unmeasured", "unmeasured", _SOURCE_NOTES["unmeasured"]),
+            ("state-empty", "empty", _SOURCE_NOTES["empty"]),
+            ("state-measured", "measured", _SOURCE_NOTES["measured"]),
+            (
+                "gate-verdict",
+                "verdict-authorized",
+                "the run was authorized by drift evidence it names.",
+            ),
+            (
+                "gate-sample",
+                "unverified sample",
+                "the legal first registry run; its cubes await a verdict.",
+            ),
+        ],
+    )
+
+
+def _verdict_legend_card() -> str:
+    return _legend(
+        "What a verdict word means",
+        [
+            ("verdict-aligned", "aligned", "the sampled residuals sit inside the tolerance."),
+            ("verdict-shifted", "shifted", "one rigid detector shift, repairable by refinement."),
+            (
+                "verdict-beyond-repair",
+                "misaligned-beyond-repair",
+                "past the repair limit; the raw SIF data is needed.",
+            ),
+            (
+                "state-insufficient-data",
+                "insufficient-data",
+                "a judged verdict, never aligned: the sample could not carry one.",
+            ),
+            (
+                "state-unrecognized",
+                "unrecognized",
+                "a word this page does not know, never dressed as one it does.",
+            ),
+        ],
+    )
+
+
+def _index_card(entries: list[tuple[str, str]], identifier: str) -> str:
     links = "".join(
         f'<a href="#{_e(anchor)}" class="sectnav-link">{_e(title)}</a>' for anchor, title in entries
     )
     return _card(
-        "On this page", f'<nav class="sectnav" id="sectnav">{links}</nav>', classes="rail-card--growing"
+        "On this page",
+        f'<nav class="sectnav" id="{_e(identifier)}">{links}</nav>',
+        classes="rail-card--growing",
     )
 
 
@@ -1007,7 +1791,10 @@ p { margin: .4rem 0; }
   background: var(--panel);
   border-bottom: 1px solid var(--line);
 }
-.topbar .tagline { color: var(--muted); font-size: .82rem; }
+.topbar .tagline { color: var(--muted); font-size: .82rem; margin-left: auto; }
+.tabs { display: flex; gap: .3rem; }
+.tab { padding: .3rem .8rem; font-size: .95rem; }
+.tab[aria-selected="true"] { border-color: var(--accent); background: var(--bg); font-weight: 600; }
 .wrap { padding: var(--gap) 24px 80px; }
 /* The rail grid stretches by default so each rail's row spans the content
    column's full height; only the rails themselves pin to the top. Putting
@@ -1035,6 +1822,13 @@ p { margin: .4rem 0; }
 /* A growing rail card spends only the space the rail can afford, and owns its
    own scroll, so the rail's own overflow stays a backstop rather than the
    working mechanism: the rail never becomes a second page scrollbar. */
+[hidden] { display: none !important; }
+/* Each rail holds one group per tab and shows only the active tab's group, so
+   a rail never carries a neighbouring tab's cargo. */
+.rail-group { display: flex; flex: 1 1 auto; flex-direction: column; gap: 14px; min-height: 0; }
+/* A tab whose controls are empty gives its column back rather than parking an
+   empty rail beside the content. */
+body.no-left .rail-grid { grid-template-columns: minmax(0, 1fr) var(--rail-right); }
 .rail-card--growing { display: flex; flex: 1 1 auto; flex-direction: column; min-height: 0; }
 .rail-card--growing > .fields,
 .rail-card--growing > .sectnav { flex: 1 1 auto; min-height: 0; overflow-y: auto;
@@ -1057,9 +1851,16 @@ section.panel {
   color: var(--muted); }
 .card-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
   gap: .7rem; margin: .6rem 0 1rem; }
-.muted { color: var(--muted); font-size: .85rem; }
-.note { border-left: .2rem solid var(--line); padding-left: .6rem; color: var(--muted);
-  font-size: .87rem; }
+/* Data reads at the page's own size. Small type is for genuinely secondary
+   metadata -- build stamps, shell names, card headings -- and nothing else. */
+.muted { color: var(--muted); font-size: .92rem; }
+.note { border-left: .2rem solid var(--line); padding-left: .6rem; color: var(--muted); }
+.chips { display: flex; flex-wrap: wrap; gap: .3rem; align-items: center; margin: .35rem 0; }
+.chip { display: inline-block; border: 1px solid var(--line); border-radius: .3rem;
+  background: var(--raised); padding: 0 .4rem; font-size: .9rem; white-space: nowrap; }
+.chip.path { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; max-width: 100%;
+  overflow: hidden; text-overflow: ellipsis; }
+.legend-note { color: var(--muted); font-size: .9rem; }
 .warn { border-left: .3rem solid var(--judged); padding: .4rem .6rem; background: var(--raised);
   border-radius: .3rem; }
 .pill { display: inline-block; border: 1px solid currentColor; border-radius: 999px;
@@ -1088,8 +1889,41 @@ section.panel {
 .card.verdict-shifted { border-left: .35rem solid var(--shift); }
 .card.verdict-beyond-repair { border-left: .35rem solid var(--bad); }
 .card.verdict { margin-bottom: 1rem; color: var(--ink); }
+/* The stepper: one horizontal row of boxes per drive, drawn with borders and
+   arrows in CSS -- no library, nothing fetched, and it scrolls inside itself
+   rather than widening the page. */
+.drive-row { border: 1px solid var(--line); border-radius: .5rem; padding: .6rem .7rem;
+  margin-bottom: .9rem; background: var(--panel); }
+.drive-name { font-size: 1.02rem; }
+.drive-absent { display: flex; flex-wrap: wrap; gap: .4rem; align-items: baseline;
+  border-top: 1px solid var(--line); padding: .35rem 0; margin: 0; }
+/* The row wraps rather than scrolling: the whole flow has to be readable at a
+   glance, and a stepper hidden past a horizontal scrollbar is not. */
+.flow { display: flex; flex-wrap: wrap; gap: .9rem; list-style: none; margin: .5rem 0 0;
+  padding: 0 0 .4rem .9rem; }
+.step { position: relative; flex: 1 1 9rem; min-width: 9rem; border: 1px solid var(--line);
+  border-radius: .4rem; padding: .4rem .5rem; background: var(--bg); display: flex;
+  flex-direction: column; gap: .2rem; }
+.step + .step::before { content: "\\2192"; position: absolute; left: -.72rem; top: 50%;
+  transform: translateY(-50%); color: var(--muted); }
+.step-no { font-size: .78rem; color: var(--muted); }
+.step-name { font-weight: 600; }
+.step .pill { align-self: flex-start; }
+.step-fact { color: var(--muted); font-size: .9rem; overflow-wrap: anywhere; }
+.step-done { border-color: var(--good); }
+.step-ready { border-color: var(--accent); }
+.step-blocked { border-color: var(--judged); border-style: dashed; }
+.step-unrecorded { border-color: var(--unmeasured); border-style: dotted; }
+.step.is-primary { border-width: 2px; background: var(--raised); }
+.pill.step-done { color: var(--good); }
+.pill.step-ready { color: var(--accent); }
+.pill.step-blocked { color: var(--judged); }
+.pill.step-unrecorded { color: var(--unmeasured); }
+.next { border-top: 1px solid var(--line); margin-top: .5rem; }
+.next-label { font-weight: 600; margin: .5rem 0 0; }
+.next .cmd { border-top: none; padding-top: .2rem; }
 .scroll-x { overflow-x: auto; }
-table { border-collapse: collapse; width: 100%; font-size: .87rem; }
+table { border-collapse: collapse; width: 100%; font-size: 1rem; }
 th, td { border-bottom: 1px solid var(--line); padding: .32rem .45rem; text-align: left;
   vertical-align: top; }
 th { color: var(--muted); font-weight: 600; }
@@ -1152,6 +1986,8 @@ button:hover { border-color: var(--accent); }
 """
 
 _JS = """
+var state = { tab: 'now' };
+
 function byId(id) { return document.getElementById(id); }
 
 function shellPath(shell, value) {
@@ -1226,13 +2062,14 @@ function filterCatalog() {
   }
 }
 
-function closeFolds() {
+function closeFolds(root) {
+  var scope = root || document;
   var closed = false;
-  Array.prototype.forEach.call(document.querySelectorAll('details[open]'), function (item) {
+  Array.prototype.forEach.call(scope.querySelectorAll('details[open]'), function (item) {
     item.open = false;
     closed = true;
   });
-  Array.prototype.forEach.call(document.querySelectorAll('.fold-toggle'), function (button) {
+  Array.prototype.forEach.call(scope.querySelectorAll('.fold-toggle'), function (button) {
     if (button.getAttribute('aria-expanded') !== 'true') { return; }
     var body = byId(button.getAttribute('aria-controls'));
     if (body) { body.hidden = true; }
@@ -1263,20 +2100,84 @@ function legacyCopy(text, done) {
 }
 
 function markCurrentSection() {
-  /* Scoped to the content column on purpose: sec- ids elsewhere on the page
-     must never join this query. */
-  var targets = document.querySelectorAll('#content [id^="sec-"]');
+  /* Scoped to the active tab's own view: sec- ids in another tab, or anywhere
+     else on the page, must never join this query. */
+  var view = byId('tab-' + state.tab);
+  if (!view) { return; }
+  var targets = view.querySelectorAll('[id^="sec-"]');
   var edge = 90;
   var current = '';
   Array.prototype.forEach.call(targets, function (target) {
     if (target.getBoundingClientRect().top <= edge) { current = target.id; }
   });
-  Array.prototype.forEach.call(document.querySelectorAll('.sectnav-link'), function (link) {
+  var links = document.querySelectorAll('#sectnav-' + state.tab + ' .sectnav-link');
+  Array.prototype.forEach.call(links, function (link) {
     link.classList.toggle('current', link.getAttribute('href') === '#' + current);
   });
 }
 
+function subviewOpen(name) {
+  var view = byId('tab-' + name);
+  if (!view) { return false; }
+  return !!(view.querySelector('details[open]') ||
+    view.querySelector('.fold-toggle[aria-expanded="true"]'));
+}
+
+function showTab(name) {
+  state.tab = name;
+  Array.prototype.forEach.call(document.querySelectorAll('.tabview'), function (view) {
+    view.hidden = view.getAttribute('data-tab') !== name;
+  });
+  Array.prototype.forEach.call(document.querySelectorAll('.rail-group'), function (group) {
+    group.hidden = group.getAttribute('data-tab') !== name;
+  });
+  Array.prototype.forEach.call(document.querySelectorAll('.tab'), function (button) {
+    button.setAttribute('aria-selected', button.getAttribute('data-tab') === name
+      ? 'true' : 'false');
+  });
+  var left = byId('rail-left');
+  var group = document.querySelector('#rail-left .rail-group[data-tab="' + name + '"]');
+  var empty = !group || !group.querySelector('.card');
+  document.body.classList.toggle('no-left', empty);
+  if (left) { left.hidden = empty; }
+  markCurrentSection();
+}
+
+function pressTab(name) {
+  /* The view-nesting law. The cheap no-render guard is right for a tab with
+     nothing open inside it, and silently wrong the moment that tab holds a
+     sub-view: pressing the tab you are already on must still navigate home. */
+  if (name === state.tab && !subviewOpen(name)) { return; }
+  if (name === state.tab) { closeFolds(byId('tab-' + name)); }
+  showTab(name);
+  /* A tab press lands at the top of its destination, never at the depth the
+     previous view was left at. */
+  window.scrollTo(0, 0);
+}
+
+function openElsewhere(link) {
+  var tab = link.getAttribute('data-tab');
+  var target = byId((link.getAttribute('href') || '#').slice(1));
+  if (tab) { showTab(tab); }
+  if (target) { target.scrollIntoView({ block: 'start' }); }
+}
+
 function wire() {
+  Array.prototype.forEach.call(document.querySelectorAll('.tab'), function (button) {
+    button.addEventListener('click', function () {
+      pressTab(button.getAttribute('data-tab'));
+    });
+  });
+  var send = byId('send-compose');
+  if (send) {
+    send.addEventListener('click', function () {
+      var drive = byId('send-drive');
+      var output = byId('f-output');
+      if (drive && drive.value && output) { output.value = drive.value; }
+      compose();
+      pressTab('now');
+    });
+  }
   ['filter-year', 'filter-epoch', 'filter-drive', 'filter-status'].forEach(function (id) {
     byId(id).addEventListener('change', filterCatalog);
   });
@@ -1297,6 +2198,12 @@ function wire() {
   }
   document.addEventListener('click', function (event) {
     if (!event.target || !event.target.closest) { return; }
+    var jump = event.target.closest('.xlink');
+    if (jump) {
+      event.preventDefault();
+      openElsewhere(jump);
+      return;
+    }
     var toggle = event.target.closest('.fold-toggle');
     if (toggle) {
       var body = byId(toggle.getAttribute('aria-controls'));
@@ -1320,80 +2227,185 @@ function wire() {
   window.addEventListener('scroll', markCurrentSection, { passive: true });
   filterCatalog();
   compose();
-  markCurrentSection();
+  showTab(state.tab);
 }
 
 wire();
 """
 
 
-def _page(context: dict[str, Any]) -> str:
-    encoded = json.dumps(context["data"], ensure_ascii=False).replace("</", "<\\/")
-    index_entries = [
-        ("sec-catalog", "Catalog"),
-        ("sec-drift", "Drift evidence"),
-        ("sec-plan", "Composed plan and commands"),
-        ("sec-reading-room", "Reading room"),
-        *[(document["anchor"], document["title"]) for document in context["documents"]],
-    ]
-    left = "".join(
-        [
-            _filter_card(context["rows"], context["sources"]),
-            _composer_card(
-                context["data"]["values"],
-                context["data"]["drives"],
-                context["epochs"],
-                context["verdict_paths"],
-            ),
-        ]
+#: The four tabs, in work order: what to do now, the drives, the calibration
+#: evidence, and the canon last.
+TABS = (
+    ("now", "Now"),
+    ("drives", "Drives"),
+    ("calibration", "Calibration"),
+    ("reading", "Reading room"),
+)
+
+
+def _tab_bar() -> str:
+    buttons = "".join(
+        f'<button type="button" class="tab" data-tab="{_e(key)}" '
+        f'aria-selected="{"true" if key == TABS[0][0] else "false"}">{_e(title)}</button>'
+        for key, title in TABS
     )
-    right = "".join(
-        [
-            _scope_card(context["rows"]),
-            _context_card(context),
-            _legend_card(),
-            _index_card(index_entries),
-        ]
-    )
+    return f'<nav class="tabs" id="tabs" aria-label="Views">{buttons}</nav>'
+
+
+def _group(key: str, cards: str) -> str:
+    hidden = "" if key == TABS[0][0] else " hidden"
+    return f'<div class="rail-group" data-tab="{_e(key)}"{hidden}>{cards}</div>'
+
+
+def _view(key: str, panels: str) -> str:
+    hidden = "" if key == TABS[0][0] else " hidden"
+    return f'<section class="tabview" id="tab-{_e(key)}" data-tab="{_e(key)}"{hidden}>{panels}</section>'
+
+
+def _now_view(context: dict[str, Any]) -> str:
     plan_text = _fill(PLAN_TEMPLATE, context["data"]["values"], "posix")
-    main = "".join(
+    absent = "".join(
+        _absent_line(row["source"], row["steps"]) for row in context["drive_rows"] if row["absent"]
+    )
+    connected = "".join(
+        _drive_row(row["source"], row["steps"], row["position"])
+        for row in context["drive_rows"]
+        if not row["absent"]
+    )
+    if not connected:
+        connected = (
+            '<p class="note state-unmeasured">No drive in this index answered when the page '
+            "was built.</p>"
+        )
+    return "".join(
         [
-            '<section class="panel" id="sec-catalog"><h2>Catalog</h2>',
-            "<p>Every drive this index has ever merged, and every cube it published. A drive that "
-            "did not answer keeps its rows and says so.</p>",
-            _source_cards(context["sources"]),
-            _catalog_table(context["rows"]),
+            '<section class="panel" id="sec-now-calibrate"><h2>Calibrate</h2>',
+            "<p>Once per campaign, at the instrument.</p>",
+            _flow(
+                context["calibrate_steps"],
+                "now-cal",
+                done_line="The calibration is in place for this campaign.",
+            ),
             "</section>",
-            '<section class="panel" id="sec-drift"><h2>Drift evidence</h2>',
-            _drift_section(context["drift"]),
+            '<section class="panel" id="sec-now-drives"><h2>Drives, each on its own step</h2>',
+            "<p>One worker per drive; several at once.</p>",
+            connected,
+            absent,
             "</section>",
             '<section class="panel" id="sec-plan"><h2>Composed plan and commands</h2>',
-            "<p>Editable text, composed from the left rail. This page has no code path that runs "
-            "a plan, starts a worker, or touches a running batch.</p>",
+            "<p>Editable text, composed from the rail.</p>",
             "<h3>Plan TOML</h3>",
             f'<textarea class="plan-out" id="plan-out" spellcheck="false">{_e(plan_text)}</textarea>',
             "<h3>Commands</h3>",
             _composed_commands(context["data"]["values"]),
             "</section>",
-            '<section class="panel" id="sec-reading-room"><h2>Reading room</h2>',
-            "<p>The campaign's own vocabulary, procedure and provenance, rendered from the "
-            "documents that ship inside the installed package.</p>",
-            _document_sections(context["documents"]),
-            "</section>",
+        ]
+    )
+
+
+def _page(context: dict[str, Any]) -> str:
+    encoded = json.dumps(context["data"], ensure_ascii=False).replace("</", "<\\/")
+    navigation = {
+        "now": [
+            ("sec-now-calibrate", "Calibrate"),
+            ("sec-now-drives", "Drives, each on its own step"),
+            ("sec-plan", "Composed plan and commands"),
+        ],
+        "drives": [("sec-drives-cards", "Drives"), ("sec-catalog", "Every cube")],
+        "calibration": [("sec-cal-epochs", "Epochs"), ("sec-drift", "Drift evidence")],
+        "reading": [
+            ("sec-reading-room", "Reading room"),
+            *[(document["anchor"], document["title"]) for document in context["documents"]],
+        ],
+    }
+    left = "".join(
+        [
+            _group(
+                "now",
+                _composer_card(
+                    context["data"]["values"],
+                    context["data"]["drives"],
+                    context["epochs"],
+                    context["verdict_paths"],
+                ),
+            ),
+            _group(
+                "drives",
+                _filter_card(context["rows"], context["sources"])
+                + _send_to_composer_card(context["data"]["drives"]),
+            ),
+            # Calibration and the reading room own no controls of their own. An
+            # empty rail is the honest answer; invented navigation is not.
+            _group("calibration", ""),
+            _group("reading", ""),
+        ]
+    )
+    right = "".join(
+        [
+            _group(
+                "now",
+                _position_card(context)
+                + _step_legend_card()
+                + _index_card(navigation["now"], "sectnav-now"),
+            ),
+            _group(
+                "drives",
+                _scope_card(context["rows"])
+                + _context_card(context)
+                + _drive_legend_card()
+                + _index_card(navigation["drives"], "sectnav-drives"),
+            ),
+            _group(
+                "calibration",
+                _registry_card(context)
+                + _verdict_legend_card()
+                + _index_card(navigation["calibration"], "sectnav-calibration"),
+            ),
+            _group("reading", _index_card(navigation["reading"], "sectnav-reading")),
+        ]
+    )
+    views = "".join(
+        [
+            _view("now", _now_view(context)),
+            _view(
+                "drives",
+                '<section class="panel" id="sec-drives-cards"><h2>Drives</h2>'
+                + _source_cards(context["sources"])
+                + "</section>"
+                + '<section class="panel" id="sec-catalog"><h2>Every cube</h2>'
+                + _catalog_table(context["rows"])
+                + "</section>",
+            ),
+            _view(
+                "calibration",
+                '<section class="panel" id="sec-cal-epochs"><h2>Epochs</h2>'
+                + _epoch_table(context)
+                + "</section>"
+                + '<section class="panel" id="sec-drift"><h2>Drift evidence</h2>'
+                + _drift_section(context["drift"])
+                + "</section>",
+            ),
+            _view(
+                "reading",
+                '<section class="panel" id="sec-reading-room"><h2>Reading room</h2>'
+                + _document_sections(context["documents"])
+                + "</section>",
+            ),
         ]
     )
     return (
         "<!doctype html>\n"
         '<html lang="en"><head><meta charset="utf-8">'
         '<meta name="viewport" content="width=device-width, initial-scale=1">'
-        "<title>Echelle campaign reading room</title>\n"
+        "<title>Echelle campaign</title>\n"
         f"<style>{_CSS}</style></head><body>\n"
-        '<header class="topbar"><h1>Echelle campaign reading room</h1>'
+        f'<header class="topbar"><h1>Echelle campaign</h1>{_tab_bar()}'
         '<span class="tagline">Read-only. This page never executes commands, never starts a '
         "worker, and reaches nothing outside itself.</span></header>\n"
         '<div class="wrap"><div class="rail-grid">'
         f'<aside class="rail rail-left" id="rail-left" aria-label="Controls">{left}</aside>'
-        f'<main class="content" id="content">{main}</main>'
+        f'<main class="content" id="content">{views}</main>'
         f'<aside class="rail rail-right" id="rail-right" aria-label="Context">{right}</aside>'
         "</div></div>\n"
         f"<script>\nconst DATA={encoded};\n{_JS}</script>\n</body></html>\n"
@@ -1455,6 +2467,7 @@ def _registry_context(
             "path": "",
             "detail": "",
             "epochs": [],
+            "epoch_rows": [],
             "calibrations": _posix(calibrations_root) if calibrations_root else "",
         }
     from .calibration_registry import CalibrationRegistryError, load_calibration_registry
@@ -1469,6 +2482,7 @@ def _registry_context(
             "path": _posix(path),
             "detail": str(exc),
             "epochs": [],
+            "epoch_rows": [],
             "calibrations": _posix(root),
         }
     return {
@@ -1476,6 +2490,18 @@ def _registry_context(
         "path": _posix(path),
         "detail": "",
         "epochs": [epoch.snapshot_id for epoch in registry.epochs],
+        # The bounds each epoch already declares, carried through so the page
+        # can say whether one covers today rather than only counting them.
+        "epoch_rows": [
+            {
+                "snapshot_id": epoch.snapshot_id,
+                "shot_from": epoch.shot_from,
+                "shot_to": epoch.shot_to,
+                "date_from": epoch.date_from.isoformat() if epoch.date_from else "",
+                "date_to": epoch.date_to.isoformat() if epoch.date_to else "",
+            }
+            for epoch in registry.epochs
+        ],
         "calibrations": _posix(registry.snapshots_root),
     }
 
@@ -1495,7 +2521,9 @@ def build_reading_room(
     is no sidecar for it to read and nothing for it to fetch.
     """
 
-    catalog = _refresh_availability(load_catalog(catalog_path))
+    loaded = load_catalog(catalog_path)
+    merged = loaded.get("schema") == "echelle-merged-catalog/v1"
+    catalog = _refresh_availability(loaded)
     sources = catalog.get("sources", [])
     drift = [
         {"path": _posix(path), "evidence": json.loads(Path(path).read_text(encoding="utf-8"))}
@@ -1516,12 +2544,46 @@ def build_reading_room(
         drift=drift,
         epochs=epochs,
     )
+    generated_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    drive_rows = []
+    for position, source in enumerate(sources, start=1):
+        evidence = _evidence_for_drive(source, drift)
+        anchor = f"drift-{drift.index(evidence) + 1}" if evidence is not None else ""
+        steps = _drive_steps(
+            source,
+            evidence=evidence,
+            anchor=anchor,
+            values=_drive_values(values, source, evidence=evidence),
+            merged=merged,
+            catalog_path=_posix(catalog_path),
+        )
+        drive_rows.append(
+            {
+                "source": source,
+                "steps": steps,
+                "position": position,
+                "absent": not source.get("available"),
+            }
+        )
+    calibrate_steps = _calibrate_steps(
+        registry,
+        [str(row.get("snapshot_id") or "") for row in rows],
+        values,
+        generated_at[:10],
+    )
+    every_step = [*calibrate_steps, *(step for row in drive_rows for step in row["steps"])]
     context = {
         "catalog_path": _posix(catalog_path),
-        "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "generated_at": generated_at,
         "sources": sources,
         "rows": rows,
         "drift": drift,
+        "calibrate_steps": calibrate_steps,
+        "drive_rows": drive_rows,
+        "connected_count": sum(1 for row in drive_rows if not row["absent"]),
+        "absent_count": sum(1 for row in drive_rows if row["absent"]),
+        "ready_count": sum(1 for step in every_step if step["state"] == STEP_READY),
+        "blocked_count": sum(1 for step in every_step if step["state"] == STEP_BLOCKED),
         "documents": _documents(document_paths),
         "registry": registry,
         "epochs": epochs,

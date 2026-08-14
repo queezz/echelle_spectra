@@ -1,4 +1,4 @@
-"""Packet F7 — the reading room page is built to the house web UI law.
+"""Packet F9 — the page flows as the work does, tab by tab and drive by drive.
 
 Every assertion here reads the one static file ``echelle web`` writes.  The
 live verification the law also demands — the Perimeter Walk, rail
@@ -15,7 +15,9 @@ from pathlib import Path
 
 import pytest
 
-from echelle_spectra.reading_room import build_reading_room, render_markdown
+from echelle_spectra.calibration_registry import REGISTRY_SCHEMA
+from echelle_spectra.reading_room import _SOURCE_NOTES, build_reading_room, render_markdown
+from echelle_spectra.snapshot import ROLE_FILENAMES, create_snapshot
 
 DRIFT_SCHEMA = "echelle-drift-evidence/v1"
 
@@ -186,9 +188,282 @@ def page(tmp_path: Path) -> str:
     return built.read_text(encoding="utf-8")
 
 
+# ---------------------------------------------------------------------------
+# Helpers that slice one region of the built page
+# ---------------------------------------------------------------------------
+
+
+def _element(text: str, marker: str, tag: str = "section") -> str:
+    """Slice the whole element carrying *marker*, nesting included."""
+
+    start = text.rfind(f"<{tag}", 0, text.index(marker) + len(marker))
+    depth = 0
+    for match in re.finditer(rf"<{tag}\b|</{tag}>", text[start:]):
+        depth += -1 if match.group().startswith("</") else 1
+        if depth == 0:
+            return text[start : start + match.end()]
+    raise AssertionError(f"unbalanced <{tag}> around {marker}")
+
+
+def _escaped(text: str) -> str:
+    return html.escape(text, quote=True)
+
+
 def _rail(text: str, identifier: str) -> str:
-    start = text.index(f'id="{identifier}"')
-    return text[start : text.index("</aside>", start)]
+    return _element(text, f'id="{identifier}"', "aside")
+
+
+def _rail_group(text: str, identifier: str, tab: str) -> str:
+    rail = _rail(text, identifier)
+    start = rail.index(f'class="rail-group" data-tab="{tab}"')
+    end = rail.find('class="rail-group"', start + 1)
+    return rail[start:] if end == -1 else rail[start:end]
+
+
+def _view(text: str, tab: str) -> str:
+    rail = text[text.index('id="tab-' + tab + '"') :]
+    end = rail.find('<section class="tabview"')
+    return rail if end == -1 else rail[:end]
+
+
+def _drive_rows(text: str) -> list[str]:
+    return [
+        _element(text, match.group(), "article")
+        for match in re.finditer(r'<article class="drive-row" id="drive-\d+"', text)
+    ]
+
+
+def _steps(row: str) -> list[tuple[str, str, bool]]:
+    """Return (name, state class, primary) for every step box in one flow row."""
+
+    found = []
+    for match in re.finditer(
+        r'<li class="step ([a-z-]+)( is-primary)?"[^>]*>.*?<span class="step-name">([^<]+)<',
+        row,
+        flags=re.S,
+    ):
+        found.append((match.group(3), match.group(1), bool(match.group(2))))
+    return found
+
+
+def _first_not_done(steps: list[tuple[str, str, bool]]) -> tuple[str, str, bool]:
+    return next(item for item in steps if item[1] in {"step-ready", "step-blocked"})
+
+
+# ---------------------------------------------------------------------------
+# Fixtures at three pipeline positions
+# ---------------------------------------------------------------------------
+
+
+def _one_drive_catalog(tmp_path: Path, sources: list[dict[str, object]]) -> Path:
+    path = tmp_path / "index.json"
+    path.write_text(
+        json.dumps(
+            {
+                "schema": "echelle-merged-catalog/v1",
+                "generated_at": "2026-08-14T00:00:00.000+00:00",
+                "sources": sources,
+            }
+        ),
+        encoding="utf-8",
+    )
+    return path
+
+
+def _connected(tmp_path: Path, label: str, **extra: object) -> dict[str, object]:
+    drive = tmp_path / label
+    drive.mkdir(exist_ok=True)
+    (drive / "echelle-catalog.json").write_text("{}", encoding="utf-8")
+    source: dict[str, object] = {
+        "drive_id": f"id-{label}",
+        "volume_label": label,
+        "drive_root": drive.as_posix(),
+        "catalog_path": "echelle-catalog.json",
+        "run": None,
+        "cubes": [],
+    }
+    source.update(extra)
+    return source
+
+
+def _registry(tmp_path: Path, *, covering: bool) -> tuple[Path, Path]:
+    """A real registry whose one epoch does or does not cover today."""
+
+    snapshots = tmp_path / "calibrations"
+    sources = tmp_path / "snapshot-sources"
+    sources.mkdir()
+    files = {}
+    for role in ROLE_FILENAMES:
+        item = sources / f"{role}.dat"
+        item.write_text(f"20260812_cmos/{role}\n", encoding="utf-8")
+        files[role] = item
+    create_snapshot(
+        snapshots,
+        snapshot_id="20260812_cmos",
+        detector="cmos",
+        files=files,
+        lamps=("ThAr",),
+        validity=(
+            {"date_from": "2020-01-01", "date_to": "2099-12-31"}
+            if covering
+            else {"date_from": "2020-01-01", "date_to": "2020-12-31"}
+        ),
+    )
+    registry = tmp_path / "calibration_registry.toml"
+    registry.write_text(
+        f'schema = "{REGISTRY_SCHEMA}"\n\n[[epochs]]\nsnapshot_id = "20260812_cmos"\n',
+        encoding="utf-8",
+    )
+    return registry, snapshots
+
+
+def _aligned_evidence(tmp_path: Path, cube: str) -> Path:
+    path = tmp_path / f"aligned-{cube}.json"
+    path.write_text(
+        json.dumps(
+            {
+                "schema": DRIFT_SCHEMA,
+                "created_at": "2026-08-14T02:00:00+00:00",
+                "verdict": "aligned",
+                "snapshot_ids": ["20260812_cmos"],
+                "sampled_cubes": [{"cube": cube}],
+                "per_shot": [{"shot_number": "1", "cube": cube, "lines": 6}],
+                "lines": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    return path
+
+
+def _aligned_awaiting_bulk(tmp_path: Path) -> str:
+    """One drive whose sample was audited aligned: the product is next."""
+
+    source = _connected(
+        tmp_path,
+        "NIFS-A",
+        run={"id": "run-a", "state": "completed", "counts": {"exported": 1}, "gate": "sample",
+             "sample": True},
+        cubes=[
+            {
+                "path": "sample-a.nc",
+                "shot_number": "1",
+                "year": 2026,
+                "snapshot_id": "20260812_cmos",
+                "gate": "sample",
+            }
+        ],
+    )
+    return build_reading_room(
+        _one_drive_catalog(tmp_path, [source]),
+        tmp_path / "web",
+        drift_paths=[_aligned_evidence(tmp_path, "sample-a.nc")],
+    ).read_text(encoding="utf-8")
+
+
+def _nothing_done(tmp_path: Path) -> str:
+    catalog = _one_drive_catalog(tmp_path, [_connected(tmp_path, "NIFS-A")])
+    return build_reading_room(catalog, tmp_path / "web").read_text(encoding="utf-8")
+
+
+def _calibrated_only(tmp_path: Path) -> str:
+    catalog = _one_drive_catalog(tmp_path, [_connected(tmp_path, "NIFS-A")])
+    registry, snapshots = _registry(tmp_path, covering=True)
+    return build_reading_room(
+        catalog,
+        tmp_path / "web",
+        registry_path=registry,
+        calibrations_root=snapshots,
+    ).read_text(encoding="utf-8")
+
+
+def _mid_drives(tmp_path: Path) -> str:
+    cube = {
+        "shot_number": "1",
+        "year": 2026,
+        "snapshot_id": "20260812_cmos",
+        "wavelength_min_nm": 400.0,
+        "wavelength_max_nm": 700.0,
+        "gate": "sample",
+    }
+    sampled = _connected(
+        tmp_path,
+        "NIFS-A",
+        run={"id": "run-a", "state": "completed", "counts": {"exported": 1}, "gate": "sample",
+             "sample": True},
+        cubes=[{**cube, "path": "sample-a.nc"}],
+    )
+    finished = _connected(
+        tmp_path,
+        "NIFS-B",
+        run={"id": "run-b", "state": "completed", "counts": {"exported": 9}, "gate": "verdict"},
+        cubes=[{**cube, "path": "bulk-b.nc", "gate": "verdict"}],
+    )
+    catalog = _one_drive_catalog(tmp_path, [sampled, finished])
+    registry, snapshots = _registry(tmp_path, covering=True)
+    return build_reading_room(
+        catalog,
+        tmp_path / "web",
+        drift_paths=[_aligned_evidence(tmp_path, "bulk-b.nc")],
+        registry_path=registry,
+        calibrations_root=snapshots,
+    ).read_text(encoding="utf-8")
+
+
+# ---------------------------------------------------------------------------
+# Tabs, rails and anchors
+# ---------------------------------------------------------------------------
+
+
+def test_four_tabs_by_work_type_with_their_own_views(page: str) -> None:
+    for key, title in (
+        ("now", "Now"),
+        ("drives", "Drives"),
+        ("calibration", "Calibration"),
+        ("reading", "Reading room"),
+    ):
+        assert f'class="tab" data-tab="{key}"' in page
+        assert f">{title}</button>" in page
+        assert f'id="tab-{key}" data-tab="{key}"' in page
+    # Now leads; every other view opens closed.
+    assert 'id="tab-now" data-tab="now">' in page
+    for key in ("drives", "calibration", "reading"):
+        assert f'id="tab-{key}" data-tab="{key}" hidden>' in page
+
+
+def test_pressing_the_active_tab_navigates_home_from_a_sub_view(page: str) -> None:
+    # The cookbook's corrected guard: the no-render shortcut survives, with the
+    # sub-view named as its exception rather than the guard deleted.
+    assert "if (name === state.tab && !subviewOpen(name)) { return; }" in page
+    assert "if (name === state.tab) { closeFolds(byId('tab-' + name)); }" in page
+    # Every sub-view a tab can hold is what the exception actually tests for.
+    assert "view.querySelector('details[open]')" in page
+    assert "view.querySelector('.fold-toggle[aria-expanded=\"true\"]')" in page
+    # A tab press lands at the top of its destination.
+    assert "window.scrollTo(0, 0);" in page
+
+
+def test_each_rail_carries_only_its_own_tab_cargo(page: str) -> None:
+    now_left = _rail_group(page, "rail-left", "now")
+    drives_left = _rail_group(page, "rail-left", "drives")
+    for field in ("f-input", "f-output", "f-registry", "f-verdict", "f-epoch"):
+        assert f'id="{field}"' in now_left
+    assert 'id="compose"' in now_left
+    for control in ("filter-year", "filter-epoch", "filter-drive", "filter-status"):
+        assert f'id="{control}"' in drives_left and f'id="{control}"' not in now_left
+    # The composer lives once, in Now; Drives keeps a compact one-press entry.
+    assert 'id="send-drive"' in drives_left and 'id="f-input"' not in drives_left
+    # Calibration and the reading room own no controls; the rail stays empty
+    # rather than inventing navigation for itself.
+    for tab in ("calibration", "reading"):
+        assert "<article" not in _rail_group(page, "rail-left", tab)
+    now_right = _rail_group(page, "rail-right", "now")
+    drives_right = _rail_group(page, "rail-right", "drives")
+    assert 'id="sectnav-now"' in now_right and "Campaign position" in now_right
+    assert 'id="find"' in drives_right and 'id="reset"' in drives_right
+    assert 'id="find"' not in now_right
+    assert 'id="sectnav-calibration"' in _rail_group(page, "rail-right", "calibration")
+    assert 'id="sectnav-reading"' in _rail_group(page, "rail-right", "reading")
 
 
 def test_two_rails_are_sticky_at_their_own_resting_offset(page: str) -> None:
@@ -202,41 +477,194 @@ def test_two_rails_are_sticky_at_their_own_resting_offset(page: str) -> None:
     assert "@media (max-width: 900px)" in page
 
 
-def test_controls_live_left_and_context_lives_right(page: str) -> None:
-    left, right = _rail(page, "rail-left"), _rail(page, "rail-right")
-    for control in ("filter-year", "filter-epoch", "filter-drive", "filter-status"):
-        assert f'id="{control}"' in left
-    for field in ("f-input", "f-output", "f-registry", "f-verdict", "f-epoch"):
-        assert f'id="{field}"' in left
-    assert 'id="compose"' in left
-    assert 'id="find"' in right and 'id="sectnav"' in right
-    assert 'id="find"' not in left
-
-
 def test_every_jump_target_is_a_unique_sec_anchor(page: str) -> None:
     ids = re.findall(r'id="([^"]+)"', page)
     assert len(ids) == len(set(ids)), "duplicate element ids"
     anchors = [item for item in ids if item.startswith("sec-")]
-    assert {"sec-catalog", "sec-drift", "sec-plan", "sec-reading-room"} <= set(anchors)
+    assert {
+        "sec-now-calibrate",
+        "sec-now-drives",
+        "sec-plan",
+        "sec-drives-cards",
+        "sec-catalog",
+        "sec-cal-epochs",
+        "sec-drift",
+        "sec-reading-room",
+    } <= set(anchors)
     assert '[id^="sec-"] { scroll-margin-top: calc(var(--bar) + 16px); }' in page
     for anchor in anchors:
         assert f'href="#{anchor}"' in page, f"{anchor} has no rail link"
-    # The scroll-spy is scoped to the content column, never the whole page.
-    assert "document.querySelectorAll('#content [id^=\"sec-\"]')" in page
+    # The scroll-spy answers for one tab's own view, never the whole column.
+    assert "var view = byId('tab-' + state.tab);" in page
+    assert "var targets = view.querySelectorAll('[id^=\"sec-\"]');" in page
+    assert "document.querySelectorAll('#sectnav-' + state.tab + ' .sectnav-link')" in page
 
 
-def test_local_find_is_present_and_wired_to_the_catalog_filter(page: str) -> None:
+def test_local_find_stays_with_the_catalog_table(page: str) -> None:
     assert 'id="find"' in page and 'id="cube-table"' in page
+    assert 'id="cube-table"' in _view(page, "drives")
     assert "function filterCatalog()" in page
     assert "byId('find').addEventListener('input', filterCatalog);" in page
     assert "data-find=" in page
+
+
+# ---------------------------------------------------------------------------
+# The stepper
+# ---------------------------------------------------------------------------
+
+
+def test_nothing_done_asks_for_the_bench_then_the_first_sample(tmp_path: Path) -> None:
+    text = _nothing_done(tmp_path)
+    calibrate = _element(text, 'id="sec-now-calibrate"')
+    steps = _steps(calibrate)
+    assert [name for name, _, _ in steps] == [
+        "Sphere + lamps",
+        "Bench fit",
+        "Snapshot saved",
+        "Registry epoch",
+    ]
+    name, state, primary = _first_not_done(steps)
+    assert (name, state, primary) == ("Bench fit", "step-ready", True)
+    assert "echelle-calib" in calibrate
+    # Nothing this page cannot see is claimed as done.
+    assert ("Sphere + lamps", "step-unrecorded", False) in steps
+    row = _drive_rows(text)[0]
+    name, state, primary = _first_not_done(_steps(row))
+    assert (name, state, primary) == ("Sample N", "step-ready", True)
+    assert "--sample 20" in row
+
+
+def test_calibrated_only_closes_the_calibrate_stage(tmp_path: Path) -> None:
+    text = _calibrated_only(tmp_path)
+    calibrate = _element(text, 'id="sec-now-calibrate"')
+    steps = _steps(calibrate)
+    assert [state for _, state, _ in steps] == ["step-done"] * 4
+    assert "is-primary" not in calibrate
+    assert "The calibration is in place for this campaign." in calibrate
+    assert "20260812_cmos covers today" in calibrate
+    # The drive has not moved: its own first step is still the sample.
+    row = _drive_rows(text)[0]
+    assert _first_not_done(_steps(row))[:2] == ("Sample N", "step-ready")
+
+
+def test_parallel_drives_each_carry_their_own_position(tmp_path: Path) -> None:
+    text = _mid_drives(tmp_path)
+    rows = _drive_rows(text)
+    assert len(rows) == 2, "one independent stepper row per connected drive"
+    sampled, finished = rows
+    assert 'data-drive="NIFS-A"' in sampled and 'data-drive="NIFS-B"' in finished
+    name, state, primary = _first_not_done(_steps(sampled))
+    assert (name, state, primary) == ("Drift audit", "step-ready", True)
+    assert "echelle drift audit" in sampled
+    # The finished drive has nothing waiting: cubes exist and are catalogued.
+    assert not [item for item in _steps(finished) if item[1] in {"step-ready", "step-blocked"}]
+    assert "is-primary" not in finished
+    assert "This drive is done" in finished
+    assert ("Generate cubes", "step-done", False) in _steps(finished)
+    # The optional text export is never what makes a drive done.
+    assert ("LHD txt", "step-unrecorded", False) in _steps(finished)
+
+
+def test_a_done_step_links_the_evidence_it_rests_on(page: str) -> None:
+    row = next(item for item in _drive_rows(page) if 'data-drive="NIFS-A"' in item)
+    assert '<a class="xlink" href="#drift-1" data-tab="calibration"' in row
+    # The label is the evidence file's own name; the whole path stays in the title.
+    assert ">drift-evidence.json</a>" in row and 'title="' in row
+    assert 'id="drift-1"' in _view(page, "calibration")
+    assert ("Drift audit", "step-done", False) in _steps(row)
+
+
+def test_a_ready_step_carries_both_shell_shapes_and_a_full_payload(tmp_path: Path) -> None:
+    row = _drive_rows(_nothing_done(tmp_path))[0]
+    block = _element(row, 'id="now-d1-sample"', "article")
+    assert "PowerShell" in block and "POSIX shell" in block
+    payloads = [html.unescape(item) for item in re.findall(r'data-copy="([^"]*)"', block)]
+    bodies = [
+        html.unescape(item)
+        for item in re.findall(r'<pre class="cmd-body"[^>]*>(.*?)</pre>', block, flags=re.S)
+    ]
+    assert len(payloads) == len(bodies) == 2
+    assert payloads == bodies
+    assert all(payload.startswith("echelle process ") for payload in payloads)
+    assert "\\NIFS-A" in payloads[0] and "/NIFS-A" in payloads[1]
+
+
+def test_a_shifted_verdict_offers_its_own_repair_step(page: str) -> None:
+    row = next(item for item in _drive_rows(page) if 'data-drive="NIFS-A"' in item)
+    name, state, primary = _first_not_done(_steps(row))
+    assert (name, state, primary) == ("Verdict", "step-ready", True)
+    assert "shifted — refine, then repoint the registry" in row
+    assert "echelle drift refine" in row
+
+
+def test_a_remembered_drive_keeps_one_collapsed_line(page: str) -> None:
+    assert 'class="drive-absent"' in page
+    absent = _element(page, 'class="drive-absent"', "p")
+    assert "NIFS-B" in absent and "cube(s) remembered" in absent
+    assert "next: Connect + identify" in absent
+    # A drive that did not answer never renders a full stepper row.
+    assert not any('data-drive="NIFS-B"' in row for row in _drive_rows(page))
+
+
+def test_the_stepper_is_drawn_with_the_page_own_css(page: str) -> None:
+    assert '<ol class="flow">' in page
+    assert ".step + .step::before" in page
+    assert "mermaid" not in page.lower()
+
+
+# ---------------------------------------------------------------------------
+# The compression pass
+# ---------------------------------------------------------------------------
+
+
+def test_drive_cards_carry_facts_and_the_teaching_lives_once(page: str) -> None:
+    cards = _element(page, 'id="sec-drives-cards"')
+    for sentence in _SOURCE_NOTES.values():
+        assert _escaped(sentence) not in cards, "a drive card is teaching again"
+        assert page.count(_escaped(sentence)) == 1, "the teaching must be said exactly once"
+    legend = _rail_group(page, "rail-right", "drives")
+    assert _escaped(_SOURCE_NOTES["missing-drive"]) in legend
+    # What survives on the card is chips, counts, and one truncated path.
+    assert 'class="chips"' in cards and "cube(s)" in cards
+    assert 'class="chip path" title=' in cards
+    assert "<p class=\"note\">" not in cards
+
+
+def test_the_read_only_sentence_is_said_once_in_the_banner(page: str) -> None:
+    assert page.count("never executes commands") == 1
+    assert "This page has no code path that runs" not in page
+    # The composer preamble is one line, not a paragraph of instruction.
+    assert "Pre-filled from this catalog and registry; Compose rewrites text only." in page
+    assert "Nothing here runs; Compose only rewrites" not in page
+
+
+def test_data_reads_at_the_page_base_size(page: str) -> None:
+    assert "table { border-collapse: collapse; width: 100%; font-size: 1rem; }" in page
+    assert ".muted { color: var(--muted); font-size: .92rem; }" in page
+
+
+def test_the_product_is_named_as_the_product(tmp_path: Path, page: str) -> None:
+    assert "Generate cubes" in page
+    # LHD text is the side deliverable, and no file records it.
+    assert "the side deliverable: no receipt or catalog field records a txt export" in page
+    # An aligned verdict makes the product the very next thing to do.
+    row = _drive_rows(_aligned_awaiting_bulk(tmp_path))[0]
+    name, state, primary = _first_not_done(_steps(row))
+    assert (name, state, primary) == ("Generate cubes", "step-ready", True)
+    assert _escaped("Generate the cubes — the campaign's product") in row
+    assert "echelle process --plan" in row
+
+
+# ---------------------------------------------------------------------------
+# Surviving F7 contracts
+# ---------------------------------------------------------------------------
 
 
 def test_every_composed_command_carries_both_shell_shapes_and_a_full_payload(
     tmp_path: Path, page: str
 ) -> None:
     for identifier in ("cmd-process", "cmd-audit", "cmd-bench"):
-        block = page[page.index(f'id="{identifier}"') : page.index("</article>", page.index(f'id="{identifier}"'))]
+        block = _element(page, f'id="{identifier}"', "article")
         assert "PowerShell" in block and "POSIX shell" in block
         assert f'id="{identifier}-powershell"' in block and f'id="{identifier}-posix"' in block
         payloads = [html.unescape(item) for item in re.findall(r'data-copy="([^"]*)"', block)]
@@ -312,6 +740,8 @@ def test_drift_evidence_v2_is_rendered_in_full(page: str) -> None:
     assert 'class="drill"' in page and "Per-line evidence (1 row(s))" in page
     assert "drill-close" in page and "Escape closes it" in page
     assert "if (event.key === 'Escape') { closeFolds(); }" in page
+    # Evidence is read in sequence position, inside the Calibration tab.
+    assert 'class="drill"' in _view(page, "calibration")
 
 
 def test_unmeasured_drift_is_not_rendered_as_aligned(tmp_path: Path) -> None:
@@ -357,6 +787,9 @@ def test_packaged_documents_render_with_no_checkout_in_reach(
     # The canon is rendered, not escaped into a code block.
     assert "# Vocabulary" not in text
     assert "misaligned-beyond-repair" in text
+    # The reading room is its own tab at last.
+    assert 'id="tab-reading"' in text
+    assert "Vocabulary" in _view(text, "reading")
 
 
 def test_extra_documents_are_rendered_after_the_packaged_canon(tmp_path: Path) -> None:
@@ -379,6 +812,8 @@ def test_the_registry_pre_fills_the_composer_or_says_it_was_not_read(tmp_path: P
     ).read_text(encoding="utf-8")
     assert "registry unreadable" in text
     assert "calibration registry not found" in text
+    # An unreadable registry blocks the calibrate stage; it never reads as done.
+    assert "step step-blocked" in _element(text, 'id="sec-now-calibrate"')
 
 
 def test_the_page_executes_nothing_and_reaches_nothing(page: str) -> None:

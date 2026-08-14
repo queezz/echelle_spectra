@@ -121,29 +121,52 @@ verdict authorizes only the `-rN` refinement it created; insufficient or
 misaligned evidence is refused. See [Durable campaign runs](campaign-runs.md)
 for the gate and the authorization each receipt records.
 
-## Reading room
+## The campaign page
 
 ```console
 echelle web --catalog all-years.json --drift epoch-drift.json --registry calibration_registry.toml --output reading-room
 ```
 
 `echelle web` writes one self-contained `index.html` — no sidecar, no second
-file, nothing fetched at open time — laid out to the house web UI grammar: the
-main column is what a person reads, the left rail holds the controls (year,
-epoch, drive and run-state filters, plus the composer), and the right rail
-holds current scope, a local Find over the catalog table, the state legend and
-an "On this page" index. Both rails are sticky at an offset derived from the
-page's own header metrics, and stack above the content below 900px.
+file, nothing fetched at open time — organized by the work rather than by the
+data. Four tabs: **Now** (the flow), **Drives** (the catalog), **Calibration**
+(epochs and drift evidence in sequence position) and **Reading room** (the
+packaged canon). Pressing a tab always returns it to its own home state, even
+from inside an open fold, and lands at the top of the destination. Each rail
+carries only the active tab's cargo: controls left, scope, context, legend and
+the "On this page" index right. Both rails are sticky at an offset derived from
+the page's own header metrics, and stack above the content below 900px.
+
+**Now** renders the campaign as a stepper, computed at build time from the
+files this build already reads. One calibrate stage — sphere + lamps, bench
+fit, snapshot saved, registry epoch — sits above one independent row per
+connected drive, because processing is one worker per drive and several drives
+at once: connect + identify, sample N, drift audit, verdict, **generate cubes**
+(the product), LHD txt, catalog merge, done. Each step is `done` with its
+evidence linked, `ready` with the composed command for exactly that drive,
+`blocked` with what is missing and the step that supplies it, or `not recorded`
+when no file can say either way. The first step a reader can act on is the
+visually primary one — the page's answer to "what do I do first" — and drives
+that did not answer keep one collapsed remembered line each. Teaching lives
+once per tab, in that tab's legend; cards carry chips, counts and one truncated
+path whose whole value stays in its title.
 
 The composer is pre-filled from the page's own data — drives and epochs from
 the catalog, epoch ids from `--registry`, verdict paths from `--drift` — and
 writes a plan TOML plus three commands: the bulk `echelle process --plan` run
 that reads that plan, the `echelle drift audit` that must precede it, and an
-`echelle-calib` bench check. Every command row leads with plain words, keeps
-the literal command behind a show/hide toggle, offers PowerShell and POSIX
-shapes, and copies the whole command whether the toggle is open or closed. The
-raw-SIF input folder is the one field the page cannot fill, and it says so
-rather than guessing.
+`echelle-calib` bench check. It lives in the Now rail, where the ready steps'
+commands are read; the Drives rail keeps a one-press entry into it. Every
+command row leads with plain words, keeps the literal command behind a
+show/hide toggle, offers PowerShell and POSIX shapes, and copies the whole
+command whether the toggle is open or closed. The raw-SIF input folder is the
+one field the page cannot fill, and it says so rather than guessing.
+
+Three step states have no file behind them today and are rendered as `not
+recorded` rather than guessed: the bench session itself (only the snapshot it
+saves is evidence), the LHD text export (no receipt or catalog field records
+one), and a verdict whose receipt gate says `verdict` while the evidence file
+was not handed to this build.
 
 Drift cards render the v2 evidence in full: verdict, per-shot residual table,
 `interval_warning`, per-order corrections, thresholds, quorum reasons, skipped
