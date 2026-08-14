@@ -1,0 +1,67 @@
+schema = "echelle-deuterium-calendar/v1"
+facility = "LHD"
+description = "When LHD could have been running deuterium at all. A prior for the drift audit's isotope question, never an answer to it."
+
+# What this file is, and what it is not.
+#
+# The drift audit decides H or D spectroscopically, from where the Balmer
+# centroid actually lands.  That measurement is the authority and this calendar
+# never overrides it.  All the calendar does is say where the question exists:
+#
+#   inside a window   -> "deuterium possible".  LHD ran hydrogen shots inside
+#                        its deuterium cycles too, so a window NEVER predicts
+#                        deuterium; it only withdraws the expectation of
+#                        hydrogen.  Measuring H inside a window is ordinary and
+#                        is not flagged.
+#   outside every one -> "hydrogen expected".  Measuring D there is a real
+#                        disagreement and the audit flags the shot.  It does not
+#                        change the verdict, the residuals, or the isotope
+#                        assignment: it records that two independent things
+#                        disagree and leaves the operator to look.
+#
+# That flag matters because the H/D ambiguity is degenerate with a real
+# detector shift: D-alpha sits ~16.5 px blueward of H-alpha (and ~16.5 px in
+# every audited order - see balmer_deuterium.toml), so a genuine blueward shift
+# past ~8 px on a hydrogen shot reads as deuterium.  On a 2019 shot the
+# calendar is what tells you which of the two you are probably looking at.
+#
+# Owner-editable.  Add windows, correct dates, extend the campaign list; the
+# audit reads whatever is here and cites this file by name in its evidence.
+#
+# Sources
+# -------
+# Kobayashi, M., Saze, T., Miyake, H., Ogawa, K., Isobe, M., Tanaka, M., et al.
+#   "Radiation control in LHD and radiation shielding capability of the torus
+#   hall during first campaign of deuterium experiment."  Fusion Engineering and
+#   Design 143 (2019) 180-187.  https://doi.org/10.1016/j.fusengdes.2019.03.062
+#   -- the first deuterium campaign ran March to August 2017; its first regime
+#   begins at shot 133270.
+#
+# Osakabe, M., Takahashi, H., Yamada, H., Tanaka, K., Kobayashi, T., Ida, K.,
+#   et al.  "Recent results from deuterium experiments on the large helical
+#   device and their contribution to fusion reactor development."  Nuclear
+#   Fusion 62 (2022) 042019.  https://doi.org/10.1088/1741-4326/ac3cda
+#   -- the deuterium experiment programme on LHD, running since March 2017.
+#
+# Akata, N., Saze, T., Kuwata, H., Iwata, C., Nakada, M., Kurita, S., et al.
+#   "Comprehensive Assessment of Tritium to the Environment Discharged By
+#   Deuterium Plasma Experiment Using Large Helical Device, Japan."  Journal of
+#   Fusion Energy 44 (2025) 60.  https://doi.org/10.1007/s10894-025-00532-0
+#   -- the deuterium plasma experiment started March 2017, ran as a six-cycle
+#   operation, and was completed on 2 December 2022.
+
+[[windows]]
+name = "LHD deuterium phase"
+expectation = "deuterium possible"
+date_from = "2017-03-07"
+date_to = "2022-12-02"
+cycles = 6
+shot_from = 133270
+note = "First deuterium plasma on 7 March 2017; six deuterium cycles; the phase completed on 2 December 2022. shot_from is the first deuterium campaign's opening shot. There is no shot_to here on purpose: the closing shot number of the phase is not stated in the sources above, so the audit uses the dates as the boundary and treats a shot at or beyond 133270 with no date as simply unknown rather than inventing a ceiling."
+
+[[campaigns]]
+name = "First deuterium campaign"
+date_from = "2017-03-07"
+date_to = "2017-08-31"
+shot_from = 133270
+note = "March to August 2017. Documentation only - the audit reads [[windows]]. Kept here because it is the one campaign whose opening shot number is published, and because it is the natural place for the owner to add the remaining five cycles when their dates are to hand."

@@ -14,6 +14,29 @@ polynomial then turns those pixels into that order's own wavelength correction,
 which is what ``echelle recal-cube`` later applies.  Correcting every order by
 one scalar wavelength instead would leave the low-dispersion orders several
 pixels wrong while the next audit called them aligned.
+
+The judge is also isotope-aware, because LHD ran deuterium from 2017 to 2022
+and D-alpha sits 0.178 nm blueward of H-alpha -- well inside the +/-0.4 nm
+window this audit fits.  Judged against hydrogen alone, a perfectly calibrated
+deuterium shot reads as a confident ~16.5 px shift, and the refinement it
+invites would be wrong by exactly one isotope.  So each Balmer window is judged
+against BOTH references and the centroid is assigned to whichever is nearer in
+pixels; the shot is tagged with the isotopologue its lines chose; and on a shot
+that shows deuterium the H2 Fulcher anchors are dropped rather than fitted
+against the wrong molecule.
+
+This is a guard, not a precision instrument (owner's scope, 2026-08-15: the
+audit is a rough-alignment epoch gate, and fine wavelength work belongs to
+local lines in analysis, outside this pipeline).  One centroid per window, no
+two-component deconvolution.  The isotope offset is ~16.5 px in every audited
+order -- a rigid pixel offset, since dispersion grows with wavelength just as
+the offset does -- so it is exactly degenerate with a real 16.5 px detector
+shift, and nearest-assignment cannot separate the two past their ~8 px
+midpoint.  That is what the bundled deuterium calendar is for: it says where
+the isotope question exists at all, and when the calendar and the measurement
+disagree the shot is flagged.  The flag never moves a residual, a verdict, or
+an assignment.  Spectroscopy decides; the calendar tells the operator where to
+look twice.
 """
 
 from __future__ import annotations
@@ -22,10 +45,17 @@ import json
 import re
 import tempfile
 from datetime import date, datetime, timezone
+from functools import lru_cache
+from importlib.resources import files
 from pathlib import Path
 from typing import Any
 
 import numpy as np
+
+try:
+    import tomllib
+except ModuleNotFoundError:  # pragma: no cover - Python 3.10 fallback.
+    import tomli as tomllib  # type: ignore[no-redef]
 
 from .campaign_run import sha256_file
 from .snapshot import REQUIRED_ROLES, Snapshot, create_snapshot, load_snapshot
@@ -34,7 +64,7 @@ from .tools.calibration_alignment import (
     shift_lines_in_pixels,
     write_wavelength_table,
 )
-from .tools.line_catalog import load_line_table
+from .tools.line_catalog import SpectralLine, load_line_table
 
 DRIFT_SCHEMA = "echelle-drift-evidence/v2"
 DRIFT_SCHEMA_V1 = "echelle-drift-evidence/v1"
@@ -99,6 +129,26 @@ MINIMUM_SNR = 4.0
 # ``Spectrum`` uses to recognise its dark frames.  A median over all frames
 # instead would dilute every line with the dark frames beside it.
 PLASMA_FRAME_SIGMA = 5.0
+
+# --- Isotopologues ----------------------------------------------------------
+#
+# ISOTOPE_FAMILY is the one audited family whose windows hold two references.
+# BALMER_ISOTOPES is the order the evidence lists a window's candidates in.
+ISOTOPE_FAMILY = "balmer"
+BALMER_ISOTOPES = ("H", "D")
+
+# HYDROGEN_ONLY_FAMILIES describe hydrogen and nothing else, so a shot that
+# shows deuterium may not be judged by them.  The bundled Fulcher Q-branch
+# anchors are H2; there is no D2 table on this side, and a D2 band fitted
+# against H2 positions is the same systematic misread as D-alpha fitted against
+# H-alpha, wearing a molecular hat.  Dropping the anchors costs quorum, which
+# costs at worst an honest insufficient-data.  When a D2 catalog arrives it
+# enters through the line catalog's isotope facet and this exclusion lifts for
+# it without a change here.
+HYDROGEN_ONLY_FAMILIES = ("fulcher",)
+
+#: The bundled, owner-editable LHD deuterium calendar, cited by the evidence.
+DEUTERIUM_CALENDAR_RESOURCE = "echelle_spectra/resources/lhd_deuterium_campaign.toml"
 
 #: The cube attributes the audit reads for an acquisition date, in the order it
 #: tries them: SpectroCube's ISO acquisition start, then a calendar date inside
@@ -246,6 +296,126 @@ def _filter_by_date(
             f"{date_from or '-inf'} and {date_to or '+inf'}"
         )
     return selected
+
+
+# ---------------------------------------------------------------------------
+# The deuterium calendar, as a prior
+# ---------------------------------------------------------------------------
+
+
+@lru_cache(maxsize=1)
+def load_deuterium_calendar() -> dict[str, Any]:
+    """Return the bundled LHD deuterium calendar, citations and all."""
+
+    resource = files("echelle_spectra.resources").joinpath("lhd_deuterium_campaign.toml")
+    return tomllib.loads(resource.read_text(encoding="utf-8"))
+
+
+def deuterium_prior(when: date | None, shot_number: str = "") -> dict[str, Any]:
+    """Say whether deuterium was even possible for one shot, and on what basis.
+
+    This is a prior and only a prior.  Inside a deuterium window the isotope is
+    an open question, because LHD ran hydrogen shots inside its deuterium
+    cycles too; outside every window hydrogen is expected.  Nothing here ever
+    decides an isotope, moves a residual, or touches a verdict -- the audit
+    compares this expectation with what the spectrum actually shows and records
+    the disagreement when there is one.
+    """
+
+    calendar = load_deuterium_calendar()
+    windows = list(calendar.get("windows", ()))
+    common = {"calendar": DEUTERIUM_CALENDAR_RESOURCE}
+    if when is not None:
+        for window in windows:
+            low = date.fromisoformat(str(window["date_from"]))
+            high = date.fromisoformat(str(window["date_to"]))
+            if low <= when <= high:
+                return {
+                    **common,
+                    "expectation": str(window.get("expectation", "deuterium possible")),
+                    "window": str(window["name"]),
+                    "basis": (
+                        f"{when.isoformat()} falls inside {window['name']} "
+                        f"({low.isoformat()}..{high.isoformat()})"
+                    ),
+                }
+        return {
+            **common,
+            "expectation": "hydrogen expected",
+            "basis": (
+                f"{when.isoformat()} falls outside every deuterium window the "
+                "calendar lists"
+            ),
+        }
+    floors = [int(window["shot_from"]) for window in windows if "shot_from" in window]
+    token = str(shot_number).strip()
+    if floors and token.isdigit():
+        first = min(floors)
+        if int(token) < first:
+            return {
+                **common,
+                "expectation": "hydrogen expected",
+                "basis": f"shot {token} precedes the calendar's first deuterium shot {first}",
+            }
+        return {
+            **common,
+            "expectation": "unknown",
+            "basis": (
+                f"shot {token} is at or beyond the first deuterium shot {first}, but the "
+                "calendar states no closing shot number; only an acquisition date places it"
+            ),
+        }
+    return {
+        **common,
+        "expectation": "unknown",
+        "basis": "no acquisition date and no shot number that the calendar can place",
+    }
+
+
+def _isotope_prior_provenance() -> dict[str, Any]:
+    """Describe the calendar the evidence's priors came from, inside the evidence."""
+
+    calendar = load_deuterium_calendar()
+    return {
+        "calendar": DEUTERIUM_CALENDAR_RESOURCE,
+        "schema": str(calendar.get("schema", "")),
+        "facility": str(calendar.get("facility", "")),
+        "role": (
+            "prior only: it says where the isotope question exists, never what the "
+            "answer is, and never enters the verdict arithmetic"
+        ),
+        "windows": [
+            {
+                "name": str(window["name"]),
+                "expectation": str(window.get("expectation", "")),
+                "date_from": str(window["date_from"]),
+                "date_to": str(window["date_to"]),
+                **({"shot_from": int(window["shot_from"])} if "shot_from" in window else {}),
+            }
+            for window in calendar.get("windows", ())
+        ],
+    }
+
+
+def _isotope_flag(prior: dict[str, Any], *, shows_deuterium: bool) -> str:
+    """Report a calendar/measurement disagreement without resolving it.
+
+    Only one direction is a disagreement.  Hydrogen measured inside a deuterium
+    window is ordinary -- the window never predicted deuterium.  Deuterium
+    measured where the calendar expects hydrogen is worth a second look, and it
+    is worth it precisely because a real blueward shift past ~8 px reads as
+    deuterium; the flag names that ambiguity instead of picking a side.
+    """
+
+    if not shows_deuterium or prior.get("expectation") != "hydrogen expected":
+        return ""
+    return (
+        "measured deuterium where the bundled LHD deuterium calendar expects hydrogen ("
+        + str(prior.get("basis", ""))
+        + "); the spectroscopic fit stands and this changes no residual or verdict, but a "
+        "real blueward detector shift past ~8 px reads exactly like deuterium, so confirm "
+        "which of the two this is before accepting any correction"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -472,6 +642,190 @@ def _cube_accuracy_nm(attrs: dict[str, Any]) -> float | None:
     return value if np.isfinite(value) and value > 0 else None
 
 
+def _isotope_references() -> dict[str, dict[str, SpectralLine]]:
+    """Pair each audited Balmer transition with one reference per isotopologue."""
+
+    paired: dict[str, dict[str, SpectralLine]] = {}
+    for isotope in BALMER_ISOTOPES:
+        for line in load_line_table(ISOTOPE_FAMILY, isotope=isotope):
+            paired.setdefault(line.transition, {})[isotope] = line
+    return paired
+
+
+def _measure_line(
+    wavelength: np.ndarray,
+    intensity: np.ndarray,
+    geometry: CubeGeometry,
+    *,
+    anchor: SpectralLine,
+    candidates: dict[str, SpectralLine],
+    accuracy_nm: float | None,
+) -> dict[str, Any]:
+    """Measure one window and, when it holds two references, choose between them.
+
+    The window and the centroid are exactly what a single-isotope audit
+    measures: one baseline-subtracted centroid around the hydrogen anchor, in
+    the same +/-0.4 nm window.  The isotope question is asked afterwards, of
+    that one number, so a hydrogen shot is measured and judged identically to
+    how it was before deuterium was considered at all.
+    """
+
+    result = centroid_evidence(wavelength, intensity, expected_nm=anchor.wavelength_nm)
+    if result.get("status") != "measured":
+        return result
+    detector = _in_detector_space(geometry, result, accuracy_nm=accuracy_nm)
+    if detector.get("status") != "measured" or len(candidates) < 2:
+        return detector
+    dispersion = float(detector["dispersion_nm_per_px"])
+    centroid = float(detector["centroid_nm"])
+    evaluated = [
+        {
+            "isotope": isotope,
+            "line": line.label,
+            "expected_nm": float(line.wavelength_nm),
+            "residual_nm": centroid - float(line.wavelength_nm),
+            "pixel_residual_px": (centroid - float(line.wavelength_nm)) / dispersion,
+            "source_reference": line.source_reference,
+        }
+        for isotope, line in sorted(candidates.items())
+    ]
+    # Nearest in pixels, not in nanometres: the two references are ~16.5 px
+    # apart in every audited order, and pixels are the space this judge works
+    # in.  Both candidates are kept so the evidence shows what was rejected and
+    # by how much -- the reader can always recover the hydrogen-only reading.
+    nearest = min(evaluated, key=lambda item: abs(item["pixel_residual_px"]))
+    return {**detector, **nearest, "isotope_candidates": evaluated}
+
+
+def _shows_deuterium(lines: list[dict[str, Any]]) -> bool:
+    """True when any measured line in this shot was assigned to deuterium."""
+
+    return any(
+        item.get("status") == "measured" and item.get("isotope") == "D" for item in lines
+    )
+
+
+def _majority_isotope(lines: list[dict[str, Any]]) -> str:
+    """Return the isotopologue most of a shot's measured lines were assigned to.
+
+    A tie reports ``mixed``.  LHD ran hydrogen and deuterium within the same
+    cycles and a shot can genuinely show both, so an even split is stated
+    rather than broken by an arbitrary rule.
+    """
+
+    counts: dict[str, int] = {}
+    for item in lines:
+        if item.get("status") != "measured":
+            continue
+        name = str(item.get("isotope", ""))
+        if name:
+            counts[name] = counts.get(name, 0) + 1
+    if not counts:
+        return ""
+    highest = max(counts.values())
+    leaders = sorted(name for name, count in counts.items() if count == highest)
+    return leaders[0] if len(leaders) == 1 else "mixed"
+
+
+def _isotope_tally(sampled: list[dict[str, Any]]) -> dict[str, int]:
+    """Count the sampled shots by the isotopologue each of them read as."""
+
+    counts: dict[str, int] = {}
+    for item in sampled:
+        name = str(item.get("isotope") or "undetermined")
+        counts[name] = counts.get(name, 0) + 1
+    return dict(sorted(counts.items()))
+
+
+def _measure_cube_lines(
+    wavelength: np.ndarray,
+    intensity: np.ndarray,
+    geometry: CubeGeometry,
+    *,
+    families: tuple[str, ...],
+    common: dict[str, Any],
+    accuracy_nm: float | None,
+) -> tuple[list[dict[str, Any]], str]:
+    """Measure one cube's audited lines and return them with its isotope tag.
+
+    The isotope-bearing family is measured first, because whether this shot
+    shows deuterium decides whether the hydrogen-only families may be audited
+    at all.  Excluded lines are still written into the evidence, saying why
+    they were dropped; a silently shorter table would look like a coverage
+    problem rather than a decision.
+    """
+
+    minimum, maximum = float(np.min(wavelength)), float(np.max(wavelength))
+    ordered = [family for family in families if family == ISOTOPE_FAMILY]
+    ordered += [family for family in families if family != ISOTOPE_FAMILY]
+    references = _isotope_references()
+    records: list[dict[str, Any]] = []
+    isotope = ""
+    excluding = False
+    for family in ordered:
+        excluded = excluding and family in HYDROGEN_ONLY_FAMILIES
+        for line in load_line_table(family):
+            if not minimum <= line.wavelength_nm <= maximum:
+                continue
+            candidates = (
+                references.get(line.transition, {}) if family == ISOTOPE_FAMILY else {}
+            )
+            entry = {
+                **common,
+                "family": family,
+                "line": line.label,
+                "expected_nm": line.wavelength_nm,
+                "source_reference": line.source_reference,
+                "blended": bool(line.blended),
+                # Undetermined until a centroid picks between two references;
+                # a one-reference family already knows what it describes.
+                "isotope": "" if len(candidates) > 1 else line.isotope,
+            }
+            if excluded:
+                records.append(
+                    {
+                        **entry,
+                        "status": "skipped",
+                        "isotope_excluded": True,
+                        "reason": (
+                            "this shot reads deuterium and these anchors are H2; no D2 "
+                            "table exists here, so the line is dropped rather than judged "
+                            "against the wrong molecule"
+                        ),
+                    }
+                )
+                continue
+            if line.blended:
+                records.append(
+                    {
+                        **entry,
+                        "status": "skipped",
+                        "reason": (
+                            "sub-resolution blend: the measured centroid belongs to the "
+                            "blend, not to this transition"
+                        ),
+                    }
+                )
+                continue
+            records.append(
+                {
+                    **entry,
+                    **_measure_line(
+                        wavelength,
+                        intensity,
+                        geometry,
+                        anchor=line,
+                        candidates=candidates,
+                        accuracy_nm=accuracy_nm,
+                    ),
+                }
+            )
+        if family == ISOTOPE_FAMILY:
+            isotope = _majority_isotope(records)
+            excluding = _shows_deuterium(records)
+    return records, isotope
+
+
 # ---------------------------------------------------------------------------
 # Verdict
 # ---------------------------------------------------------------------------
@@ -586,6 +940,7 @@ def _per_shot_summary(lines: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "cube": cube,
                 "date": when,
                 "lines": len(items),
+                "isotope": _majority_isotope(items),
                 "median_shift_px": median,
                 "pixel_spread_px": float(np.max(np.abs(shifts - median))),
             }
@@ -803,6 +1158,7 @@ def audit_cubes(  # noqa: C901 - one readable pass over cubes, lines, and shots
         when, date_source = cube_date(attrs)
         wavelength, intensity, frames = _spectrum(ds)
         accuracy_nm = _cube_accuracy_nm(attrs)
+        prior = deuterium_prior(when, shot_number)
         record = {
             "cube": path.name,
             "sha256": sha256_file(path),
@@ -811,6 +1167,9 @@ def audit_cubes(  # noqa: C901 - one readable pass over cubes, lines, and shots
             "date_attribute": date_source,
             "frame_selection": frames,
             "wavelength_accuracy_nm": accuracy_nm,
+            "isotope": "",
+            "isotope_prior": prior["expectation"],
+            "isotope_prior_basis": prior["basis"],
         }
         sampled.append(record)
         common = {
@@ -830,36 +1189,20 @@ def audit_cubes(  # noqa: C901 - one readable pass over cubes, lines, and shots
             per_line.append({**common, "status": "insufficient-data", "reason": str(exc)})
             continue
         geometries[path.name] = geometry
-        minimum, maximum = float(np.min(wavelength)), float(np.max(wavelength))
-        coverage.extend((minimum, maximum))
-        for family in families:
-            for line in load_line_table(family):
-                if not minimum <= line.wavelength_nm <= maximum:
-                    continue
-                entry = {
-                    **common,
-                    "family": family,
-                    "line": line.label,
-                    "expected_nm": line.wavelength_nm,
-                    "source_reference": line.source_reference,
-                    "blended": bool(line.blended),
-                }
-                if line.blended:
-                    per_line.append(
-                        {
-                            **entry,
-                            "status": "skipped",
-                            "reason": (
-                                "sub-resolution blend: the measured centroid belongs to the "
-                                "blend, not to this transition"
-                            ),
-                        }
-                    )
-                    continue
-                result = centroid_evidence(wavelength, intensity, expected_nm=line.wavelength_nm)
-                if result.get("status") == "measured":
-                    result = _in_detector_space(geometry, result, accuracy_nm=accuracy_nm)
-                per_line.append({**entry, **result})
+        coverage.extend((float(np.min(wavelength)), float(np.max(wavelength))))
+        measured, isotope = _measure_cube_lines(
+            wavelength,
+            intensity,
+            geometry,
+            families=families,
+            common=common,
+            accuracy_nm=accuracy_nm,
+        )
+        per_line.extend(measured)
+        record["isotope"] = isotope
+        flag = _isotope_flag(prior, shows_deuterium=_shows_deuterium(measured))
+        if flag:
+            record["isotope_flag"] = flag
 
     coverage_nm = (min(coverage), max(coverage)) if coverage else None
     verdict, summary = verdict_from_evidence(per_line, coverage_nm=coverage_nm)
@@ -869,8 +1212,19 @@ def audit_cubes(  # noqa: C901 - one readable pass over cubes, lines, and shots
     summary["sampled_cubes"] = len(sampled)
     summary["skipped_cubes"] = len(skipped)
     summary["blended_lines_skipped"] = sum(
-        1 for item in per_line if item.get("status") == "skipped" and item.get("blended")
+        1
+        for item in per_line
+        if item.get("status") == "skipped"
+        and item.get("blended")
+        and not item.get("isotope_excluded")
     )
+    summary["isotope_excluded_lines"] = sum(
+        1 for item in per_line if item.get("isotope_excluded")
+    )
+    summary["isotope_tags"] = _isotope_tally(sampled)
+    summary["isotope_flagged_shots"] = [
+        str(item["shot_number"]) for item in sampled if item.get("isotope_flag")
+    ]
 
     order_corrections: list[dict[str, Any]] = []
     repair_steps: list[dict[str, str]] = []
@@ -920,6 +1274,7 @@ def audit_cubes(  # noqa: C901 - one readable pass over cubes, lines, and shots
             "minimum_snr": MINIMUM_SNR,
             "plasma_frame_sigma": PLASMA_FRAME_SIGMA,
         },
+        "isotope_prior": _isotope_prior_provenance(),
         "verdict": verdict,
         "summary": summary,
         "per_shot": per_shot,

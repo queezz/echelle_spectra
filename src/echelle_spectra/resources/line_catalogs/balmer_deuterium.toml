@@ -1,0 +1,59 @@
+schema_version = 1
+wavelength_medium = "air"
+description = "D I Balmer anchors: the deuterium counterparts of the H I lines this catalog already carries."
+source_name = "NIST Atomic Spectra Database (ASD), spectrum D I"
+source_reference = "https://physics.nist.gov/asd"
+source_resource = "echelle_spectra/resources/line_catalogs/balmer_deuterium.toml"
+citation = "Kramida, A., Ralchenko, Yu., Reader, J., and NIST ASD Team, NIST Atomic Spectra Database, National Institute of Standards and Technology, Gaithersburg MD, https://physics.nist.gov/asd"
+adaptation_note = "Air wavelengths of the fine-structure-unresolved (2 - n) D I lines, read from the NIST ASD 'Lines' output for spectrum D I with air wavelengths selected, and rounded to the four decimals the H I rows beside them use. This is the same authority and the same convention as the H I composite rows (656.279, 486.135, 434.047, 410.1734), so the pair of tables is one measurement scale, not two."
+
+# Why these four numbers are one number.
+#
+# A Balmer wavelength scales with the reduced mass of its own nucleus, so the
+# whole series moves by one ratio: lambda_D / lambda_H = R_H / R_D =
+# 109677.5834 / 109707.4166 cm^-1 = 1 - 2.719e-4 (CODATA Rydberg constants for
+# hydrogen and deuterium).  The offsets below - 0.1778, 0.1349, 0.1187 and
+# 0.1115 nm - are each 2.72e-4 of their own line's wavelength, so they are that
+# one ratio seen four times, not four independent measurements.
+#
+# The same scaling is why the isotope offset is nearly CONSTANT IN DETECTOR
+# PIXELS across the audited orders: a grating order's dispersion also grows with
+# wavelength, so 0.1778 nm at H-alpha's ~0.0108 nm/px and 0.1115 nm at
+# H-delta's ~0.0067 nm/px are both about 16.5 px.  The drift audit therefore
+# treats the H/D ambiguity as what it physically is - one rigid ~16.5 px offset,
+# degenerate with a real ~16.5 px detector shift - and never claims to resolve
+# that degeneracy from the Balmer window alone.
+#
+# wavelength_kind records what ASD published for each row.  D-alpha's
+# fine-structure-unresolved row carries no observed value, only a Ritz value;
+# the other three carry observed values.  The difference is far below the
+# ~0.03 nm instrumental width and matters to nobody here, but a table that hid
+# it would be claiming a measurement it does not have.
+
+[[lines]]
+transition = "3-2"
+label = "D-alpha"
+wavelength_nm = 656.1012
+wavelength_kind = "ritz"
+nist_value_nm = 656.1012
+
+[[lines]]
+transition = "4-2"
+label = "D-beta"
+wavelength_nm = 486.0001
+wavelength_kind = "observed"
+nist_value_nm = 486.00013
+
+[[lines]]
+transition = "5-2"
+label = "D-gamma"
+wavelength_nm = 433.9283
+wavelength_kind = "observed"
+nist_value_nm = 433.92833
+
+[[lines]]
+transition = "6-2"
+label = "D-delta"
+wavelength_nm = 410.0619
+wavelength_kind = "observed"
+nist_value_nm = 410.06186

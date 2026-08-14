@@ -62,6 +62,13 @@ verdict authorizes **only** the `-rN` refinement it created: while the registry
 still selects the condemned base snapshot, the gate refuses and tells you to
 repoint the registry's validity at the refinement.
 
+Every audited shot also carries an `isotope` tag: each Balmer window is judged
+against both the hydrogen and the deuterium reference and assigned to whichever
+is nearer in detector pixels, so a deuterium shot reads as aligned rather than
+shifted by the 0.178 nm isotope offset, drops the H2 Fulcher anchors it has no
+D2 table for, and is flagged where the bundled LHD deuterium calendar expects
+hydrogen instead.
+
 Receipts written before the gate existed remain readable. They report
 `unrecorded (pre-gate receipt)` rather than borrowing an authorization they
 never had.
