@@ -2,7 +2,7 @@ schema = 1
 
 [application]
 name = "echelle_spectra"
-version = "1.4.0"
+version = "1.5.0"
 wheel_prefix = "echelle_spectra-"
 runtime_extra = "spectrocube"
 

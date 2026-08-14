@@ -439,6 +439,20 @@ def copy_wheelhouse(source: Path, destination: Path) -> None:
         shutil.copy2(wheel, destination / wheel.name)
 
 
+def copy_posix_script(source: Path, destination: Path) -> None:
+    """Copy one POSIX launcher with a valid LF-only ``/bin/sh`` shebang."""
+
+    if not source.is_file():
+        raise KitError(f"POSIX launcher is missing: {source}")
+    shutil.copy2(source, destination)
+    payload = destination.read_bytes().replace(b"\r\n", b"\n")
+    if b"\r" in payload:
+        raise KitError(f"POSIX launcher contains a bare carriage return: {source}")
+    if not payload.startswith(b"#!/bin/sh\n"):
+        raise KitError(f"POSIX launcher must start with an LF /bin/sh shebang: {source}")
+    destination.write_bytes(payload)
+
+
 def validate_wheelhouse(
     *,
     uv: str,
@@ -652,9 +666,19 @@ def assemble_kit(  # noqa: C901
         )
 
         shutil.copy2(repository / "README-KIT.md", stage / "README-KIT.md")
+        operator_guide = repository / "docs" / "operator-cheat-sheet.md"
+        if not operator_guide.is_file():
+            raise KitError(f"operator cheat sheet is missing: {operator_guide}")
+        shutil.copy2(operator_guide, stage / "OPERATOR-CHEAT-SHEET.md")
         shutil.copy2(manifest.path, stage / "kit-manifest.toml")
-        shutil.copy2(manifest.path.parent / platform.installer, stage / platform.installer)
-        shutil.copy2(manifest.path.parent / platform.launcher, stage / platform.launcher)
+        installer_source = manifest.path.parent / platform.installer
+        launcher_source = manifest.path.parent / platform.launcher
+        if platform.os_name == "macos":
+            copy_posix_script(installer_source, stage / platform.installer)
+            copy_posix_script(launcher_source, stage / platform.launcher)
+        else:
+            shutil.copy2(installer_source, stage / platform.installer)
+            shutil.copy2(launcher_source, stage / platform.launcher)
         (stage / "platform.txt").write_text(platform.key + "\n", encoding="utf-8", newline="\n")
         write_checksums(stage)
         verify_checksums(stage)

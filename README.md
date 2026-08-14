@@ -27,6 +27,7 @@
 <p align="center">
   <a href="https://queezz.github.io/echelle_spectra">Documentation</a> •
   <a href="CHANGELOG.md">Changelog</a> •
+  <a href="docs/operator-cheat-sheet.md">Operator Cheat Sheet</a> •
   <a href="#quick-start">Quick Start</a> •
   <a href="#cmos-workflow">CMOS Workflow</a> •
   <a href="#venv">Venv</a>
@@ -39,16 +40,25 @@
 ```bash
 git clone https://github.com/queezz/echelle_spectra.git
 cd echelle_spectra
-pip install -e .
+python -m pip install -e .
 echelle_spectra          # launch GUI
 ```
 
-See the [documentation](https://queezz.github.io/echelle_spectra) for full details.
+On the development machines managed by Lab, use `lab activate
+echelle-spectra` instead of juggling activation paths manually. Refresh the
+editable install with `uv pip install --no-deps -e .` after pulling a
+release that adds a new command. Lab is optional developer tooling, not an
+Echelle dependency; the source package and portable kit run without it.
+
+See the [operator cheat sheet](docs/operator-cheat-sheet.md) for every installed
+surface, portable-kit command paths, the recommended NIFS trip loop, and fixes
+for common command failures. The full [documentation](https://queezz.github.io/echelle_spectra)
+contains the calibration and processing details.
 
 For the pinned, no-admin travel payload, see the
 [portable NIFS kit instructions](README-KIT.md). The kit remains a Packet 6
-development surface until its clean Windows, clean macOS, and offline gates are
-all exercised.
+release candidate until fresh isolated Windows, native macOS, and offline gates
+are all exercised.
 
 ---
 

@@ -6,11 +6,11 @@ project wheel, dependency wheelhouse, and `checksums.sha256`. It does not need
 Dropbox, Git, an existing Python installation, administrator rights, Fleet, or
 lab-cli.
 
-> **Development status (2026-08-13):** the pinned manifest, assembly path,
+> **Release-candidate status (2026-08-13):** the pinned manifest, assembly path,
 > installers, offline wheelhouse contract, and reproducible-distribution tooling
-> are implemented for the existing 1.4.0 package. Packet 6 and release 1.5.0 are
-> not shipped until clean Windows, clean macOS, and network-disabled offline
-> rehearsals all pass. A kit built from the current source is a rehearsal kit.
+> target 1.5.0. Packet 6 is not shipped until fresh isolated Windows and native
+> macOS installs plus network-disabled offline rehearsals all pass. A kit built
+> from an uncommitted candidate is a validation kit, not a published release.
 
 ## Windows x86-64: three commands
 
@@ -39,6 +39,14 @@ chmod +x install.sh echelle bin/uv
 
 Use `./install.sh online` for the network-backed route. Apple Silicon and Intel
 Macs have separate payloads; the installer refuses the wrong architecture.
+
+## After installation
+
+Open `OPERATOR-CHEAT-SHEET.md` in this kit folder for the complete list of GUI
+and command surfaces, exact Windows and macOS invocations, the recommended NIFS
+trip loop, safe preview commands, and common failure recovery. It is part of
+the checksum-verified payload and is available offline. Lab and Fleet are not
+needed to follow it.
 
 ## What the installer proves
 

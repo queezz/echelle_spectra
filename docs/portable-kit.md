@@ -21,6 +21,6 @@ fixtures and cross-platform wheel downloads cannot substitute for execution on
 a clean Windows machine and a clean Mac, and an ordinary cached install cannot
 substitute for a network-disabled offline rehearsal.
 
-The current repository therefore remains version 1.4.0 while this internal seam
-is exercised. Version 1.5.0 is earned only when all platform and offline gates
-have durable evidence.
+The current source targets a 1.5.0 release candidate while the internal seam is
+exercised. Version 1.5.0 is shipped only when all native-platform and offline
+gates have durable evidence.

@@ -2,6 +2,10 @@
 
 **Echelle Spectra** is a tool for extracting and analyzing calibrated spectra from 2D echelle spectrometer images.
 
+For copy-paste commands, start with the [operator cheat
+sheet](operator-cheat-sheet.md). It distinguishes portable-kit commands from a
+development checkout and lists every installed GUI and CLI surface.
+
 It provides a graphical interface for interactive use, but the underlying workflow can also be driven from Jupyter notebooks or scripts — useful for batch processing or automated pipelines.
 
 ---

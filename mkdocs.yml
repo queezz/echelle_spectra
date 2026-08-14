@@ -78,6 +78,7 @@ nav:
       - Overview: index.md
       - Band data: band-data.md
   - Usage:
+      - Operator cheat sheet: operator-cheat-sheet.md
       - Basic usage: usage.md
       - Calibration snapshots: calibration-snapshots.md
       - Durable campaign runs: campaign-runs.md

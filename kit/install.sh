@@ -10,6 +10,11 @@ esac
 kit_root=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 UV_CACHE_DIR="$kit_root/.cache/uv"
 export UV_CACHE_DIR
+machine_os=$(uname -s)
+if [ "$machine_os" != "Darwin" ]; then
+  printf '%s\n' "This kit supports macOS only; this machine reports $machine_os." >&2
+  exit 2
+fi
 platform=$(tr -d '\r\n' < "$kit_root/platform.txt")
 machine_arch=$(uname -m)
 case "$platform:$machine_arch" in
@@ -50,7 +55,7 @@ if [ ! -f "$python" ]; then
     exit 2
   fi
 fi
-python_version=$($python -c 'import platform; print(platform.python_version())')
+python_version=$("$python" -c 'import platform; print(platform.python_version())')
 if [ "$python_version" != "3.12.13" ]; then
   printf '%s\n' "Cached runtime version mismatch: expected 3.12.13, got $python_version." >&2
   exit 2

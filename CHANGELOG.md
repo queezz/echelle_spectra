@@ -5,6 +5,40 @@ follows the Fleet convention from 0.3.0 onward: a substantial capability earns
 a minor release, a compatible correction earns a patch, and documentation,
 tests, or internal refactoring alone do not move the number.
 
+## 1.5.0 — 2026-08-13
+
+**The calibration campaign can travel as a pinned, self-contained kit.** One
+manifest fixes CPython, uv, immutable companion sources, and exact platform
+assets for Windows x86-64, Apple Silicon macOS, and Intel macOS. Each generated
+payload includes a cached interpreter, target-specific hash-locked dependency
+wheelhouse, verified project and companion wheels, narrow launchers, and a
+complete checksum inventory without committing generated payloads.
+
+**Online and offline installation share one reproducible contract.** The
+installers verify the payload and native platform before extraction, keep the
+runtime, environment, and uv cache inside a fresh kit copy, and refuse corrupt,
+incomplete, or wrong-platform inputs. The offline route forbids package-index
+access; the three-command guide reaches `echelle status` without an existing
+Python installation, administrator rights, Fleet, or lab-cli.
+
+**Release archives are reproducible outside the working checkout.** Independent
+clean source exports build normalized wheel and source archives with fixed
+ordering, timestamps, ownership, permissions, and gzip/ZIP metadata. Release
+validation requires byte-identical artifacts, Twine checks, native Windows and
+macOS execution, installed resources and entry points, both GUIs, campaign
+memory, and snapshot creation and validation.
+
+**One operator sheet now names every surface and its real invocation.** It
+separates portable Windows, portable macOS, and editable-checkout command
+prefixes; gives the recommended calibration-to-processing trip loop; marks
+inspection versus writing actions; and explains missing entry points, shell
+continuations, empty status, SIF filename matching, and installer refusal.
+The sheet travels inside every checksummed kit. POSIX launchers are declared
+LF-only in Git and normalized again during assembly, preventing a Windows
+checkout's line-ending policy from producing an unexecutable macOS shebang.
+Installer executable paths are quoted throughout, so fresh kit copies remain
+usable from ordinary scratch directories whose names contain spaces.
+
 ## 1.4.0 — 2026-08-13
 
 **The live bench now carries the calibration campaign procedure.** Stable SIFs

@@ -15,6 +15,7 @@ from scripts.nifs_kit import (
     Asset,
     KitError,
     assert_external_path,
+    copy_posix_script,
     copy_wheelhouse,
     extract_uv,
     fetch_asset,
@@ -59,7 +60,7 @@ def _requirement_blocks(text: str) -> list[str]:
 def test_manifest_pins_supported_matrix_and_project_identity() -> None:
     manifest = load_manifest(MANIFEST)
     pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
-    assert manifest.application_version == pyproject["project"]["version"] == "1.4.0"
+    assert manifest.application_version == pyproject["project"]["version"] == "1.5.0"
     assert manifest.toolchain["python"] == (ROOT / ".python-version").read_text().strip()
     assert set(manifest.platforms) == {
         "windows-x86_64",
@@ -211,8 +212,8 @@ def test_extract_uv_selects_only_the_named_binary(tmp_path: Path) -> None:
 
 
 def test_project_wheel_identity_and_malformed_wheel_refusal(tmp_path: Path) -> None:
-    wheel = _wheel(tmp_path / "echelle_spectra-1.4.0-py3-none-any.whl", "echelle_spectra", "1.4.0")
-    assert inspect_project_wheel(wheel) == ("echelle_spectra", "1.4.0")
+    wheel = _wheel(tmp_path / "echelle_spectra-1.5.0-py3-none-any.whl", "echelle_spectra", "1.5.0")
+    assert inspect_project_wheel(wheel) == ("echelle_spectra", "1.5.0")
     malformed = tmp_path / "malformed.whl"
     malformed.write_bytes(b"not a zip")
     with pytest.raises(KitError, match="cannot inspect"):
@@ -229,6 +230,20 @@ def test_external_path_guard_and_wheelhouse_refusal(tmp_path: Path) -> None:
     (source / "readme.txt").write_text("not a wheel", encoding="utf-8")
     with pytest.raises(KitError, match="non-wheel"):
         copy_wheelhouse(source, destination)
+
+
+def test_posix_launchers_are_copied_with_lf_shebangs(tmp_path: Path) -> None:
+    source = tmp_path / "source.sh"
+    destination = tmp_path / "installed.sh"
+    source.write_bytes(b"#!/bin/sh\r\nset -eu\r\nprintf 'ok\\n'\r\n")
+
+    copy_posix_script(source, destination)
+
+    assert destination.read_bytes() == b"#!/bin/sh\nset -eu\nprintf 'ok\\n'\n"
+
+    source.write_bytes(b"#!/bin/sh\nset -eu\rprintf bad\n")
+    with pytest.raises(KitError, match="bare carriage return"):
+        copy_posix_script(source, destination)
 
 
 def test_wheelhouse_validation_scratch_is_removed(
@@ -279,10 +294,17 @@ def test_checksum_inventory_detects_missing_mismatch_extra_and_traversal(tmp_pat
 
 def test_three_command_readme_and_installers_expose_offline_refusals() -> None:
     readme = (ROOT / "README-KIT.md").read_text(encoding="utf-8")
+    operator_guide = (ROOT / "docs" / "operator-cheat-sheet.md").read_text(
+        encoding="utf-8"
+    )
     windows = re.search(r"## Windows x86-64: three commands.*?```powershell\n(.*?)```", readme, re.S)
     macos = re.search(r"## macOS: three commands.*?```bash\n(.*?)```", readme, re.S)
     assert windows is not None and len(windows.group(1).strip().splitlines()) == 3
     assert macos is not None and len(macos.group(1).strip().splitlines()) == 3
+    assert "OPERATOR-CHEAT-SHEET.md" in readme
+    assert "Lab is optional development convenience" in operator_guide
+    assert "Portable kit on Windows" in operator_guide
+    assert "Portable kit on macOS" in operator_guide
     powershell = (ROOT / "kit" / "install.ps1").read_text(encoding="utf-8")
     shell = (ROOT / "kit" / "install.sh").read_text(encoding="utf-8")
     for text in (powershell, shell):
@@ -293,6 +315,20 @@ def test_three_command_readme_and_installers_expose_offline_refusals() -> None:
         assert "checksum" in text.lower()
         assert "3.12.13" in text
         assert "UV_CACHE_DIR" in text
+    assert 'machine_os=$(uname -s)' in shell
+    assert '"$machine_os" != "Darwin"' in shell
+    assert (
+        'python_version=$("$python" -c '
+        "'import platform; print(platform.python_version())')"
+    ) in shell
+    assert re.search(r"\$\(\$[A-Za-z_]", shell) is None
+    for relative in ("kit/install.sh", "kit/echelle"):
+        payload = (ROOT / relative).read_bytes()
+        assert payload.startswith(b"#!/bin/sh\n")
+        assert b"\r" not in payload
+    attributes = (ROOT / ".gitattributes").read_text(encoding="utf-8")
+    assert "kit/install.sh text eol=lf" in attributes
+    assert "kit/echelle text eol=lf" in attributes
 
 
 def test_all_existing_console_entry_points_remain_declared() -> None:
