@@ -159,6 +159,9 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
 
     def _build_ui(self) -> None:
         self.setWindowTitle("Echelle calibration bench")
+        self.setWindowIcon(
+            QtGui.QIcon(str(_PACKAGE_DIR / "resources" / "graphics" / "echelle.png"))
+        )
         self.resize(1540, 940)
         self.setMinimumSize(1080, 700)
 

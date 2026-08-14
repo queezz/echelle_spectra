@@ -13,7 +13,11 @@ import pytest
 from PyQt5 import QtCore, QtGui, QtWidgets
 
 from echelle_spectra.calibration_bench import BenchFrame, CalibrationBenchSession
-from echelle_spectra.calibration_bench_gui import CalibrationBenchWindow, _build_parser
+from echelle_spectra.calibration_bench_gui import (
+    _PACKAGE_DIR,
+    CalibrationBenchWindow,
+    _build_parser,
+)
 from echelle_spectra.calibration_campaign import (
     AbsoluteCalibrationResult,
     CalibrationCampaignSession,
@@ -91,6 +95,18 @@ def _manual_window(tmp_path: Path, **frame_options) -> CalibrationBenchWindow:
     )
     window.refresh()
     return window
+
+
+def test_window_icon_resolves_and_is_set(qt_app, tmp_path: Path):
+    """The bench window carries its own icon so the owner can tell it from
+    the main GUI, even instantiated off-screen without a QApplication-level
+    icon already set."""
+
+    icon_path = _PACKAGE_DIR / "resources" / "graphics" / "echelle.png"
+    assert icon_path.is_file(), f"icon file missing at {icon_path}"
+
+    window = _window(tmp_path)
+    assert not window.windowIcon().isNull()
 
 
 def _drop(window: CalibrationBenchWindow, paths) -> None:

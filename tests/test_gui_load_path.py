@@ -251,6 +251,27 @@ def window(qt_app, detector, tmp_path: Path):
     qt_app.processEvents()
 
 
+def test_window_icon_resolves_and_is_set(qt_app):
+    """The taskbar/app icon must survive off the installed package, not just app.setWindowIcon.
+
+    Regression check: the window used to rely solely on the QApplication-level
+    icon set in ``start()``, so any window built without going through
+    ``start()`` (or before it ran) showed no icon at all.
+    """
+
+    from echelle_spectra import _config as installed_config
+
+    icon_path = installed_config["base_path"] / "resources/graphics/echelle.png"
+    assert icon_path.is_file(), f"icon file missing at {icon_path}"
+
+    win = gui.EchelleSpectraGUI(installed_config)
+    try:
+        assert not win.windowIcon().isNull()
+    finally:
+        win.close()
+        qt_app.processEvents()
+
+
 def _pump(app, ready, timeout: float = 120.0) -> bool:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
