@@ -99,7 +99,11 @@ medians, per-order corrections, and the skipped cubes are serialized with every
 verdict. Residuals that fall into two separated per-shot groups add an
 `interval_warning` naming the boundary to split at, rather than reading an
 epoch step as beyond repair. `--from`/`--to` select by acquisition date and
-`--shot` matches a whole shot token. A beyond-repair verdict names the drives
+`--shot` matches a whole shot token. The acquisition date is read from the
+cube's `t_start` first, then from a date inside `source_file`, then from the
+export timestamp; SIF-derived cubes now carry a real `t_start` taken from the
+Andor header, so that first entry is the one that normally answers and the
+selection is exact rather than inferred from a filename. A beyond-repair verdict names the drives
 holding the affected shots when `--catalog` supplies the merged index.
 
 `insufficient-data` is never treated as aligned. A shifted verdict composes the

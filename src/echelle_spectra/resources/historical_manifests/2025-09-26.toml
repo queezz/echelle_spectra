@@ -2,7 +2,8 @@ schema = "echelle-historical-calibration/v1"
 snapshot_id = "20250926_cmos"
 detector = "cmos"
 acquired_date = "2025-09-26"
-notes = "2025 pattern/alignment with the explicitly inherited 2024 sphere pair; historical filenames remain unchanged."
+lamps = ["Ne"]
+notes = "2025 pattern and Neon rigid alignment with the sphere pair measured in the same campaign folder; historical filenames remain unchanged. The sphere and Neon SIF files are far too large to package, so this binder names them without an identity: supply the campaign folder with --artifact-root and the import captures their digests into the immutable snapshot."
 
 [[artifacts]]
 role = "pattern"
@@ -20,17 +21,25 @@ sha256 = "9dcbe62159219df643484b9b0d0276b427eab70071bddaa96272dbc0f2627ee3"
 
 [[artifacts]]
 role = "sphere"
-path = "sphere_cmos_20240305.sif"
-source_name = "sphere_cmos_20240305.sif"
-size_bytes = 66359707
-sha256 = "d4aad88baab1cf6c8988a9a1cfd4b881d813e171ec2976b20f928d4eabadc01e"
+path = "sphere-0.1s-x3.sif"
+source_name = "sphere-0.1s-x3.sif"
 
 [[artifacts]]
 role = "sphere_background"
-path = "sphere_cmos_20240305_bkg.sif"
-source_name = "sphere_cmos_20240305_bkg.sif"
-size_bytes = 66359718
-sha256 = "84458e65f34ec90dd3a010f4946a4e711444af606a1ac2ce9e9af16e5850d036"
+path = "sphere-0.1s-x3-bg.sif"
+source_name = "sphere-0.1s-x3-bg.sif"
+
+[[artifacts]]
+role = "lamp"
+label = "Ne"
+path = "Ne-0.02s-x3-bright-lines.sif"
+source_name = "Ne-0.02s-x3-bright-lines.sif"
+
+[[artifacts]]
+role = "lamp"
+label = "Ne"
+path = "Ne-0.02s-x3-bright-lines_bg.sif"
+source_name = "Ne-0.02s-x3-bright-lines_bg.sif"
 
 [[artifacts]]
 role = "integral"

@@ -44,19 +44,67 @@ Use one identity strategy consistently, or give every epoch both reviewed
 dimensions; the registry never invents shot-over-date or date-over-shot
 precedence.
 
+## Registering a historical epoch
+
+The 2019, 2024-03-05, and 2025-09-26 calibrations ship as thin binders under
+schema `echelle-historical-calibration/v1`, which the registry does not read.
+Convert one into a real registrable snapshot with:
+
+```powershell
+echelle snapshot import-historical 20240305_cmos `
+  --calibrations D:\NIFS\calibrations `
+  --valid-from 2024-03-05 `
+  --valid-to 2025-09-25
+```
+
+The binder may be named by its snapshot ID, by its file stem (`2024-03-05`), or
+by a path to a binder TOML. `--valid-from` defaults to the binder's
+`acquired_date`; `--valid-to`, `--shot-from`, and `--shot-to` are optional and
+land in the created snapshot's `[validity]` table, so the result registers with
+no hand-editing. The snapshot also records an `[imported]` table naming the
+binder and its digest, so a retroactively imported epoch is never mistaken for
+one the bench measured live.
+
+A binder states what a past calibration actually used, including artifacts too
+large to package. The 2025 binder names its own campaign sphere pair and Neon
+lamp rather than an inherited one; supply the folder that holds them:
+
+```powershell
+echelle snapshot import-historical 20250926_cmos `
+  --calibrations D:\NIFS\calibrations `
+  --artifact-root local\20250926_calib
+```
+
+Roots are searched in order after the packaged calibration files. An artifact no
+root holds is refused by name — never quietly replaced by a similar file from
+another epoch — and the refusal says to supply the folder with
+`--artifact-root`. Repeat the flag for several folders. Where a binder records a
+digest, it is verified wherever the artifact is found; where it does not, the
+identity is captured into the immutable snapshot at import, and the snapshot is
+the authority from then on.
+
 ## Source identity and selection
 
 Before calibration loading, the command recognizes:
 
-- an LHD-style leading 5–7 digit shot, such as `193778_Echelle.SIF`;
+- an LHD-style leading 5–8 digit shot, such as `193778_Echelle.SIF`;
 - an explicit `shot_193778` token;
 - a path date written as `YYYYMMDD`, `YYYY-MM-DD`, or `YYYY_MM_DD`.
 
-An eight-digit calendar date is not misread as a shot. More than one distinct
-date in a path is an error. Selection evaluates every epoch, requires every
-identity kind that the candidate declares, and must find exactly one match.
-Missing identity, no match, and ambiguity are different errors; none falls back
-to a nearby or current calibration.
+An eight-digit calendar date is not misread as a shot; a leading run of fewer
+than five digits is not read as an LHD shot at all, though an explicit
+`shot_42` token still is. More than one distinct date in a path is an error.
+
+The date scan is bounded by the source root you named: that root's own name and
+the components below it. A dated volume label, archive folder, or home directory
+*above* the root supplies no acquisition date, and one file selects the same
+epoch whether you name it absolutely or relative to the current directory. When
+you name a single file, its own folder bounds the scan.
+
+Selection evaluates every epoch, requires every identity kind that the candidate
+declares, and must find exactly one match. Missing identity, no match, and
+ambiguity are different errors; none falls back to a nearby or current
+calibration.
 
 Use the registry from a source checkout or portable kit. A registry run is
 gated: sample the epoch, audit the sample, then process under that verdict.

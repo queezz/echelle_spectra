@@ -181,6 +181,7 @@ def render_manifest(  # noqa: C901 - explicit TOML value kinds stay legible here
     validity: Mapping[str, object] | None = None,
     alignment: Mapping[str, object] | None = None,
     qc: Mapping[str, object] | None = None,
+    imported: Mapping[str, object] | None = None,
     created_utc: str | None = None,
 ) -> str:
     """Render a deterministic, hand-editable ``snapshot.toml``."""
@@ -204,6 +205,9 @@ def render_manifest(  # noqa: C901 - explicit TOML value kinds stay legible here
         ("validity", validity),
         ("alignment", alignment),
         ("qc", qc),
+        # Where a retroactively converted epoch came from. Live bench snapshots
+        # simply have no [imported] table.
+        ("imported", imported),
     ):
         if not values:
             continue
@@ -413,6 +417,7 @@ def create_snapshot(  # noqa: C901 - atomic assembly keeps all cleanup in one sc
     validity: Mapping[str, object] | None = None,
     alignment: Mapping[str, object] | None = None,
     qc: Mapping[str, object] | None = None,
+    imported: Mapping[str, object] | None = None,
 ) -> Snapshot:
     """Assemble an immutable snapshot folder and validate it before publish.
 
@@ -517,6 +522,7 @@ def create_snapshot(  # noqa: C901 - atomic assembly keeps all cleanup in one sc
             validity=validity,
             alignment=alignment,
             qc=qc,
+            imported=imported,
         )
         (staging / "snapshot.toml").write_text(manifest_text, encoding="utf-8")
         load_snapshot(staging)

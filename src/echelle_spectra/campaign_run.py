@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import re
+import uuid
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -29,6 +30,16 @@ GATE_VERDICT = "verdict"
 GATE_SAMPLE = "sample"
 GATE_UNGATED = "ungated (no registry)"
 GATE_UNRECORDED = "unrecorded (pre-gate receipt)"
+
+# A drive announces its own identity in a small file at its root, so a USB disk
+# that returns as E: on Windows and as /Volumes/... on macOS is still one drive
+# in every catalog. The label stays beside it for human display only.
+DRIVE_ID_NAME = "echelle-drive-id.toml"
+DRIVE_ID_SCHEMA = "echelle-drive-id/v1"
+READ_ONLY_DRIVE_WARNING = (
+    "drive root is not writable, so no stable drive id was stored; catalogs key "
+    f"this drive on its volume label alone until {DRIVE_ID_NAME} can be written"
+)
 
 
 def utc_now() -> str:
@@ -62,9 +73,136 @@ def _relative_or_absolute(path: Path, root: Path) -> str:
 
 
 def default_volume_label(source_root: Path) -> str:
-    """Return a portable best-effort drive identity when no label was supplied."""
-    anchor = source_root.resolve().anchor.rstrip("\\/")
-    return anchor or source_root.resolve().name or "unknown"
+    """Return a portable best-effort display label when none was supplied.
+
+    This is a heuristic and never an identity; :func:`ensure_drive_identity`
+    owns identity.  What it returns per platform:
+
+    * Windows — the drive letter with its separator removed, such as ``E:``.
+      Reconnection under a different letter changes the label, which is exactly
+      why the stable drive id exists.
+    * POSIX — the mount-like folder the operator named, such as ``NIFS-A`` for
+      ``/Volumes/NIFS-A/shots``, because the anchor there is only ``/`` and
+      names nothing.  The named folder is used when it has a name, then its
+      nearest named parent.
+
+    It never returns an empty label: a root that yields no name at all (``/``
+    itself) reports ``unknown`` rather than a silent blank.
+    """
+    resolved = Path(os.path.abspath(source_root))
+    anchor = resolved.anchor.rstrip("\\/")
+    if anchor:
+        return anchor
+    for candidate in (resolved, *resolved.parents):
+        if candidate.name:
+            return candidate.name
+    return "unknown"
+
+
+@dataclass(frozen=True)
+class DriveIdentity:
+    """One drive's stable id, its display label, and how both were obtained."""
+
+    drive_id: str
+    label: str
+    root: Path
+    created_at: str = ""
+    stored: bool = False
+    warning: str = ""
+
+
+def _drive_id_path(root: Path) -> Path:
+    return Path(os.path.abspath(root)) / DRIVE_ID_NAME
+
+
+def read_drive_identity(root: Path) -> DriveIdentity | None:
+    """Return the identity a drive already announces, or None when it has none."""
+    path = _drive_id_path(root)
+    try:
+        with path.open("rb") as stream:
+            data = tomllib.load(stream)
+    except (FileNotFoundError, NotADirectoryError):
+        return None
+    except (OSError, tomllib.TOMLDecodeError):
+        return None
+    drive = data.get("drive")
+    if data.get("schema") != DRIVE_ID_SCHEMA or not isinstance(drive, dict):
+        return None
+    drive_id = str(drive.get("id", "")).strip()
+    if not drive_id:
+        return None
+    return DriveIdentity(
+        drive_id=drive_id,
+        label=str(drive.get("label", "")).strip() or default_volume_label(root),
+        root=path.parent,
+        created_at=str(drive.get("created_at", "")),
+        stored=True,
+    )
+
+
+def ensure_drive_identity(root: Path, *, label: str | None = None) -> DriveIdentity:
+    """Return this drive's stable identity, writing it once on first processing.
+
+    An existing ``echelle-drive-id.toml`` is authoritative for the id and is
+    never rewritten: relabelling a drive is a deliberate edit of that file, not
+    a side effect of a run.  A supplied *label* is still honoured as this run's
+    display name.  When the root cannot be written — a read-only archive mount,
+    say — the run continues under the label heuristic and says so in its warning
+    so the receipt can record why the drive has no stable id.
+    """
+    existing = read_drive_identity(root)
+    if existing is not None:
+        return (
+            existing
+            if not label or label == existing.label
+            else DriveIdentity(
+                drive_id=existing.drive_id,
+                label=label,
+                root=existing.root,
+                created_at=existing.created_at,
+                stored=True,
+            )
+        )
+    identity = DriveIdentity(
+        drive_id=uuid.uuid4().hex,
+        label=label or default_volume_label(root),
+        root=Path(os.path.abspath(root)),
+        created_at=utc_now(),
+    )
+    path = _drive_id_path(root)
+    lines = [
+        "# Stable identity for this drive, written once by echelle_spectra.",
+        "# Catalogs key on the id, so reconnection under another drive letter or",
+        "# mount point keeps one drive's history together. Edit the label freely;",
+        "# never edit or copy the id onto a second drive.",
+        f"schema = {_toml_string(DRIVE_ID_SCHEMA)}",
+        "",
+        "[drive]",
+        f"id = {_toml_string(identity.drive_id)}",
+        f"label = {_toml_string(identity.label)}",
+        f"created_at = {_toml_string(identity.created_at)}",
+        "",
+    ]
+    try:
+        temporary = path.with_name(f".{path.name}.tmp")
+        temporary.write_text("\n".join(lines), encoding="utf-8", newline="\n")
+        os.replace(temporary, path)
+    except OSError:
+        return DriveIdentity(
+            drive_id="",
+            label=identity.label,
+            root=identity.root,
+            created_at=identity.created_at,
+            stored=False,
+            warning=READ_ONLY_DRIVE_WARNING,
+        )
+    return DriveIdentity(
+        drive_id=identity.drive_id,
+        label=identity.label,
+        root=identity.root,
+        created_at=identity.created_at,
+        stored=True,
+    )
 
 
 def new_run_directory(runs_root: Path, source_root: Path) -> Path:
@@ -109,6 +247,8 @@ class RunReceipt:
     created_at: str = field(default_factory=utc_now)
     expected_files: int = 0
     state: str = "running"
+    drive_id: str = ""
+    drive_warning: str = ""
     gate: str = GATE_UNGATED
     sample: bool = False
     sample_files: int = 0
@@ -136,6 +276,8 @@ class RunReceipt:
         volume_label: str,
         snapshot_id: str,
         expected_files: int,
+        drive_id: str = "",
+        drive_warning: str = "",
     ) -> RunReceipt:
         if directory.exists():
             raise FileExistsError(f"Run directory already exists: {directory}")
@@ -148,6 +290,8 @@ class RunReceipt:
             volume_label=volume_label,
             snapshot_id=snapshot_id or "unassigned",
             expected_files=expected_files,
+            drive_id=drive_id,
+            drive_warning=drive_warning,
         )
         receipt.write_manifest()
         return receipt
@@ -170,6 +314,8 @@ class RunReceipt:
             created_at=run["created_at"],
             expected_files=int(run.get("expected_files", 0)),
             state=run.get("state", "unknown"),
+            drive_id=run.get("drive_id", ""),
+            drive_warning=run.get("drive_warning", ""),
             gate=run.get("gate") or GATE_UNRECORDED,
             sample=bool(run.get("sample", False)),
             sample_files=int(run.get("sample_files", 0)),
@@ -267,6 +413,14 @@ class RunReceipt:
         self.write_manifest()
         return record
 
+    def exported_outputs(self) -> set[str]:
+        """Return every output key this run published, relative to its output root."""
+        return {
+            str(record["output"])
+            for record in self._records
+            if record.get("status") == "exported"
+        }
+
     def counts(self) -> dict[str, int]:
         latest: dict[str, str] = {}
         for record in self._records:
@@ -328,6 +482,12 @@ class RunReceipt:
             f"output_root = {_toml_string(str(self.output_root))}",
             f"pattern = {_toml_string(self.pattern)}",
             f"volume_label = {_toml_string(self.volume_label)}",
+            f"drive_id = {_toml_string(self.drive_id)}",
+            *(
+                [f"drive_warning = {_toml_string(self.drive_warning)}"]
+                if self.drive_warning
+                else []
+            ),
             f"snapshot_id = {_toml_string(self.snapshot_id)}",
             f"expected_files = {self.expected_files}",
             *self._authorization_lines(),
@@ -408,6 +568,8 @@ def list_run_summaries(runs_root: Path) -> list[dict[str, Any]]:
                 "output_root": str(receipt.output_root),
                 "pattern": receipt.pattern,
                 "volume_label": receipt.volume_label,
+                "drive_id": receipt.drive_id,
+                "drive_warning": receipt.drive_warning,
                 "updated_at": manifest.stat().st_mtime,
             }
         )

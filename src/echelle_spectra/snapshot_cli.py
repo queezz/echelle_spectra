@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import sys
 from pathlib import Path
 
 from .snapshot import (
@@ -66,6 +67,40 @@ def _build_parser(prog: str = "echelle-snapshot") -> argparse.ArgumentParser:
     create.add_argument("--alignment-rms-px", type=float)
     create.add_argument("--qc-lines-used", type=int)
     create.add_argument("--qc-worst-residual-px", type=float)
+
+    historical = commands.add_parser(
+        "import-historical",
+        help="Convert a bundled historical binder into a registrable snapshot folder.",
+    )
+    historical.add_argument(
+        "binder",
+        metavar="ID",
+        help="Bundled binder identity (20190529_cmos, 2024-03-05, ...) or a binder TOML path.",
+    )
+    historical.add_argument(
+        "--calibrations",
+        default="calibrations",
+        metavar="DIR",
+        help="Snapshot root the imported epoch is written into (default: calibrations).",
+    )
+    historical.add_argument(
+        "--artifact-root",
+        action="append",
+        default=[],
+        metavar="DIR",
+        help=(
+            "Extra folder searched for the artifacts a binder names, such as the "
+            "campaign folder holding a sphere pair too large to package. Repeat as needed."
+        ),
+    )
+    historical.add_argument(
+        "--valid-from",
+        metavar="YYYY-MM-DD",
+        help="Epoch start (default: the binder's acquired_date).",
+    )
+    historical.add_argument("--valid-to", metavar="YYYY-MM-DD")
+    historical.add_argument("--shot-from", type=int)
+    historical.add_argument("--shot-to", type=int)
 
     validate = commands.add_parser(
         "validate", help="Verify schema, required roles, paths, sizes, and SHA-256 digests."
@@ -150,6 +185,33 @@ def main(argv: list[str] | None = None, *, prog: str = "echelle-snapshot") -> in
             print(f"Created calibration snapshot {snapshot.snapshot_id}")
             print(f"  {snapshot.root}")
             print(f"  {len(snapshot.artifacts)} artifact(s), all digests verified")
+            return 0
+
+        if args.snapshot_command == "import-historical":
+            from .historical import HistoricalError, import_historical_snapshot
+
+            try:
+                snapshot = import_historical_snapshot(
+                    args.binder,
+                    args.calibrations,
+                    valid_from=args.valid_from,
+                    valid_to=args.valid_to,
+                    shot_from=args.shot_from,
+                    shot_to=args.shot_to,
+                    artifact_roots=tuple(args.artifact_root),
+                )
+            except HistoricalError as exc:
+                print(f"Historical binder was not imported: {exc}", file=sys.stderr)
+                return 1
+            validity = snapshot.manifest.get("validity") or {}
+            print(f"Imported historical calibration {snapshot.snapshot_id}")
+            print(f"  {snapshot.root}")
+            print(f"  {len(snapshot.artifacts)} artifact(s), all digests verified")
+            print(
+                "  validity: "
+                + ", ".join(f"{key}={value}" for key, value in validity.items())
+            )
+            print(f"  register it by adding [[epochs]] snapshot_id = {snapshot.snapshot_id!r}")
             return 0
 
         snapshot = load_snapshot(

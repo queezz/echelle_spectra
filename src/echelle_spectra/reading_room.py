@@ -8,7 +8,7 @@ import os
 from pathlib import Path
 from typing import Any
 
-from .catalog import load_catalog
+from .catalog import load_catalog, source_catalog_path
 
 
 def _refresh_availability(catalog: dict[str, Any]) -> dict[str, Any]:
@@ -22,8 +22,11 @@ def _refresh_availability(catalog: dict[str, Any]) -> dict[str, Any]:
         }
         return {"schema": "echelle-merged-catalog/v1", "sources": [source]}
     for source in catalog.get("sources", []):
-        path = str(source.get("catalog_path", ""))
-        source["available"] = bool(path and Path(path).is_file())
+        # Merged rows store the catalog path relative to the drive root, so
+        # availability resolves against the root this machine last saw.
+        source["available"] = bool(
+            source.get("catalog_path") and source_catalog_path(source).is_file()
+        )
     return catalog
 
 

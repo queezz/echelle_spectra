@@ -2,6 +2,7 @@ schema = "echelle-historical-calibration/v1"
 snapshot_id = "20240305_cmos"
 detector = "cmos"
 acquired_date = "2024-03-05"
+lamps = ["ThAr"]
 notes = "Thin retrospective binder. Historical source files retain their original names and locations."
 
 [[artifacts]]
@@ -41,6 +42,7 @@ sha256 = "cd2efc11ba9af3582b5bcdabec3a3cdbd971a55b1fc7fab4062ebebe3013198d"
 
 [[artifacts]]
 role = "lamp"
+label = "ThAr"
 path = "ThAr-0.3s-x3_20240305.sif"
 source_name = "ThAr-0.3s-x3_20240305.sif"
 size_bytes = 66359719

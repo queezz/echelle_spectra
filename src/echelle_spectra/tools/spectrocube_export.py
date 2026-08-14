@@ -159,6 +159,35 @@ def _wavelength_accuracy_nm(
     return float(rms_px * float(np.median(dispersions)))
 
 
+def _acquisition_start(info: object) -> str | None:
+    """Return the SIF acquisition start as an ISO UTC string, when it has one.
+
+    Andor SIF headers carry ``ExperimentTime``, the Unix timestamp at which the
+    acquisition began.  Recording it as ``t_start`` makes the drift audit's
+    ``--from``/``--to`` selection exact instead of leaving it to fall back on a
+    date parsed out of the source filename, or worse, on the export timestamp.
+    The value is written in UTC because a cube travels between machines and a
+    naive local time would silently mean different instants on each of them.
+    TIFF-loaded spectra carry no such field and simply have no ``t_start``.
+    """
+    if not isinstance(info, dict):
+        return None
+    raw = info.get("ExperimentTime")
+    if raw in (None, ""):
+        return None
+    try:
+        seconds = int(raw)
+    except (TypeError, ValueError):
+        return None
+    if seconds <= 0:
+        return None
+    try:
+        moment = datetime.datetime.fromtimestamp(seconds, datetime.timezone.utc)
+    except (OSError, OverflowError, ValueError):
+        return None
+    return moment.isoformat(timespec="seconds")
+
+
 def _shot_number_from_spectrum(spectrum: object) -> str | None:
     shotnumber = getattr(spectrum, "shotnumber", None)
     if shotnumber not in (None, ""):
@@ -655,6 +684,10 @@ def to_spectrocube(
         attrs["exposure_s"] = float(info["ExposureTime"])
     if "CycleTime" in info:
         attrs["frame_interval_s"] = float(info["CycleTime"])
+
+    acquired_at = _acquisition_start(info)
+    if acquired_at is not None:
+        attrs["t_start"] = acquired_at
 
     fpth = getattr(spectrum, "fpth", None)
     if fpth is not None:

@@ -69,6 +69,7 @@ The following fields from `Spectrum` are automatically written to SpectroCube at
 |---------------|--------|
 | `source_package` | always `"echelle_spectra"` |
 | `created_at` | UTC timestamp at export time |
+| `t_start` | acquisition start in UTC, from the SIF header's `ExperimentTime`; absent for TIFF-loaded spectra, which carry no such field |
 | `exposure_s` | `spectrum.info["ExposureTime"]` |
 | `frame_interval_s` | `spectrum.info["CycleTime"]` |
 | `trigger_delay_s` | export-config `[metadata]`, when the experiment timing reference is known; required before the cube can be written as LHD text |

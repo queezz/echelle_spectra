@@ -81,5 +81,21 @@ configuration evidence; they do not replace `snapshot.toml` as the binder.
 ## Historical calibrations
 
 Existing 2019, 2024, and 2025 calibration files are historical evidence and are
-not renamed. They will receive thin manifests that point to their existing role
-files. New campaign snapshots use the role-named folder convention from birth.
+not renamed. Thin bundled binders point at them under their original names; list
+them with `echelle historical`. New campaign snapshots use the role-named folder
+convention from birth.
+
+A binder is evidence, not a snapshot: the registry reads only
+`echelle-snapshot/v1` with a `[validity]` table. Convert one with
+
+```powershell
+echelle snapshot import-historical 20250926_cmos `
+  --calibrations calibrations `
+  --artifact-root local\20250926_calib `
+  --valid-from 2025-09-26
+```
+
+which copies the named artifacts into an immutable, digested snapshot carrying
+the epoch you declare and an `[imported]` table naming the binder it came from.
+See [the epoch registry guide](calibration-epoch-registry.md) for the artifact
+roots and the refusal that names a missing one.

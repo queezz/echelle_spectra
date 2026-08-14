@@ -7,10 +7,11 @@ authority for epoch boundaries rather than two hand-edited copies.
 
 from __future__ import annotations
 
+import os
 import re
 from dataclasses import dataclass
 from datetime import date
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 try:  # Python 3.11+
@@ -27,7 +28,12 @@ _DATE_PATTERN = re.compile(
     r"[-_]?(?P<day>0[1-9]|[12]\d|3[01])(?!\d)"
 )
 _NAMED_SHOT_PATTERN = re.compile(r"(?i)(?:^|[^a-z0-9])shot[-_ ]?(\d+)(?!\d)")
-_LHD_SHOT_PATTERN = re.compile(r"^(\d{5,7})(?:\D|$)")
+# LHD shot numbers run from five to eight digits.  Eight is deliberately inside
+# the pattern rather than outside it: a leading ``20240305`` must reach the
+# calendar-date guard below and be rejected as a shot, which an upper bound of
+# seven digits would silently prevent it from ever doing.  A leading run of
+# fewer than five digits is not an LHD shot and is not read as one.
+_LHD_SHOT_PATTERN = re.compile(r"^(\d{5,8})(?:\D|$)")
 
 
 class CalibrationRegistryError(ValueError):
@@ -131,10 +137,17 @@ class CalibrationEpochRegistry:
             f"date={identity.acquisition_date.isoformat() if identity.acquisition_date else None!r})"
         )
 
-    def resolve_source(self, source: str | Path) -> CalibrationEpoch:
-        """Parse the supported filename/path identity and resolve one epoch."""
+    def resolve_source(
+        self, source: str | Path, *, root: str | Path | None = None
+    ) -> CalibrationEpoch:
+        """Parse the supported filename/path identity and resolve one epoch.
 
-        return self.resolve(source_identity_from_path(source))
+        *root* is the source root the operator named.  Supplying it bounds the
+        calendar-date scan to that target, so neither a dated mount above it nor
+        the current working directory can change which epoch a file selects.
+        """
+
+        return self.resolve(source_identity_from_path(source, root=root))
 
 
 def _contains(start: Any | None, end: Any | None, value: Any) -> bool:
@@ -305,11 +318,43 @@ def load_calibration_registry(
     )
 
 
-def source_identity_from_path(path: str | Path) -> CalibrationSourceIdentity:
-    """Parse supported LHD shot and calendar-date tokens from a source path."""
+def _date_scan_text(source: Path, root: Path | None) -> str:
+    """Return the path text a source's acquisition date may be read from.
+
+    Without a declared root the path is read exactly as it was written, which is
+    all a bare parser call can honestly mean.  With one, the scan is bounded to
+    the target the operator named: that root's own name plus the components
+    below it.  A dated volume label, home directory, or archive folder above the
+    root therefore cannot supply an acquisition date, and one file resolves
+    identically whether it was named absolutely or relative to the working
+    directory.  A source outside the declared root falls back to its own name.
+    """
+
+    if root is None:
+        return source.as_posix()
+    absolute_source = Path(os.path.normcase(os.path.abspath(source)))
+    absolute_root = Path(os.path.normcase(os.path.abspath(root)))
+    try:
+        relative = absolute_source.relative_to(absolute_root)
+    except ValueError:
+        return absolute_source.name
+    return PurePosixPath(absolute_root.name, *relative.parts).as_posix()
+
+
+def source_identity_from_path(
+    path: str | Path, *, root: str | Path | None = None
+) -> CalibrationSourceIdentity:
+    """Parse supported LHD shot and calendar-date tokens from a source path.
+
+    The shot number is always read from the file's own stem: a leading five- to
+    eight-digit LHD number, or an explicit ``shot_<number>`` token.  An
+    eight-digit leading number that is a valid calendar date is a date, not a
+    shot.  The acquisition date is read from *root*-bounded path components; see
+    :func:`_date_scan_text`.
+    """
 
     source = Path(path)
-    text = source.as_posix()
+    text = _date_scan_text(source, Path(root) if root is not None else None)
     dates: set[date] = set()
     for match in _DATE_PATTERN.finditer(text):
         try:

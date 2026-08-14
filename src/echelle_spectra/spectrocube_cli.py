@@ -46,6 +46,7 @@ from .campaign_run import (
     GATE_VERDICT,
     RunReceipt,
     default_volume_label,
+    ensure_drive_identity,
     find_resumable_run,
     new_run_directory,
     sha256_file,
@@ -289,6 +290,15 @@ def _build_parser(*, prog: str = "echelle-spectrocube") -> argparse.ArgumentPars
         ),
     )
     p.add_argument(
+        "--central-index",
+        default=None,
+        metavar="JSON",
+        help=(
+            "Durable all-years index each completed target's per-drive catalog is "
+            "merged into automatically. Without it the merge stays manual."
+        ),
+    )
+    p.add_argument(
         "--registry",
         default=None,
         metavar="TOML",
@@ -451,6 +461,8 @@ def _settings_from_args(args: argparse.Namespace) -> tuple[argparse.Namespace, d
         args.pattern = plan["pattern"]
     if args.drift_verdict is None and plan.get("drift_verdict"):
         args.drift_verdict = plan["drift_verdict"]
+    if args.central_index is None and plan.get("central_index"):
+        args.central_index = plan["central_index"]
     args.overwrite = bool(args.overwrite or plan.get("overwrite", False))
     args.dry_run = bool(args.dry_run or plan.get("dry_run", False))
     args.verbose = bool(args.verbose or plan.get("verbose", False))
@@ -520,6 +532,18 @@ class GateAuthorization:
     evidence_sha256: str = ""
     verdict: str = ""
     sample: bool = False
+
+
+def _date_scan_root(input_path: Path) -> Path:
+    """Return the declared source root that bounds a source's date scan.
+
+    A named folder is its own root.  A named file is bounded by the folder
+    holding it, so ``2024-03-05/lamp.SIF`` still dates itself while a dated
+    mount above it cannot.  The gate and the export must agree on this, or a
+    run could be authorized for one epoch and exported under another.
+    """
+
+    return input_path if input_path.is_dir() else input_path.parent
 
 
 def _shell_quote(value: object) -> str:
@@ -599,7 +623,10 @@ def _authorize_run(
         return None
 
     try:
-        selected_ids = {registry.resolve_source(path).snapshot_id for path in sif_files}
+        selected_ids = {
+            registry.resolve_source(path, root=_date_scan_root(input_path)).snapshot_id
+            for path in sif_files
+        }
         payload = require_sampled_verdict(args.drift_verdict, selected_ids)
     except (CalibrationRegistryError, DriftError, OSError, ValueError) as exc:
         _emit_target(
@@ -722,18 +749,43 @@ def _resume_message(receipt: RunReceipt, target_label: str | None) -> str:
 
 
 def _write_drive_catalog(
-    out_dir: Path, receipt: RunReceipt | None, target_label: str | None
+    args: argparse.Namespace,
+    out_dir: Path,
+    receipt: RunReceipt | None,
+    target_label: str | None,
 ) -> None:
+    """Write the per-drive catalog and, when configured, fold it into the index.
+
+    Only a completed target is auto-merged: an interrupted or partial run's
+    catalog is written for the operator but is not published into the durable
+    all-years index as though the drive were finished.
+    """
+
     if receipt is None:
         return
-    from .catalog import build_drive_catalog
+    from .catalog import build_drive_catalog, merge_into_central_index
 
     catalog = build_drive_catalog(
         out_dir,
         volume_label=receipt.volume_label,
+        # An empty id means this run never saw one; let the catalog look for a
+        # drive that announced itself around the cubes instead of asserting none.
+        drive_id=receipt.drive_id or None,
         receipt_dir=receipt.directory,
     )
     _emit_target(f"Catalog:     {catalog}", target_label=target_label)
+    if not args.central_index or receipt.state != "completed":
+        return
+    try:
+        merged = merge_into_central_index(catalog, args.central_index)
+    except (OSError, ValueError) as exc:
+        _emit_target(
+            f"WARNING: Central index was not updated: {exc}",
+            target_label=target_label,
+            stream=sys.stderr,
+        )
+        return
+    _emit_target(f"Index:       {merged}", target_label=target_label)
 
 
 def _run_batch_target(
@@ -795,6 +847,17 @@ def _run_batch_target(
         else:
             receipt_dir = new_run_directory(receipt_root, input_path)
 
+        # First processing of this target announces the drive's stable id at its
+        # root, so a later reconnection under another letter or mount point stays
+        # one drive in every catalog. A resumed receipt written before the id
+        # existed picks it up here rather than staying anonymous forever.
+        identity = ensure_drive_identity(input_path, label=volume_label)
+        if identity.warning:
+            _emit_target(
+                f"WARNING: {identity.warning}",
+                target_label=target_label,
+                stream=sys.stderr,
+            )
         resuming = (receipt_dir / "run.toml").is_file()
         if resuming:
             receipt = RunReceipt.load(receipt_dir)
@@ -820,29 +883,22 @@ def _run_batch_target(
                 )
                 return 1
         else:
+            receipt_fields = {
+                "source_root": input_path,
+                "output_root": out_dir,
+                "pattern": args.pattern,
+                "volume_label": volume_label or identity.label,
+                "snapshot_id": args.snapshot_id
+                or ("per-source-registry" if registry is not None else "unassigned"),
+                "expected_files": len(sif_files),
+                "drive_id": identity.drive_id,
+                "drive_warning": identity.warning,
+            }
             try:
-                receipt = RunReceipt.create(
-                    receipt_dir,
-                    source_root=input_path,
-                    output_root=out_dir,
-                    pattern=args.pattern,
-                    volume_label=volume_label or default_volume_label(input_path),
-                    snapshot_id=args.snapshot_id
-                    or ("per-source-registry" if registry is not None else "unassigned"),
-                    expected_files=len(sif_files),
-                )
+                receipt = RunReceipt.create(receipt_dir, **receipt_fields)
             except FileExistsError:
                 receipt_dir = new_run_directory(receipt_root, input_path)
-                receipt = RunReceipt.create(
-                    receipt_dir,
-                    source_root=input_path,
-                    output_root=out_dir,
-                    pattern=args.pattern,
-                    volume_label=volume_label or default_volume_label(input_path),
-                    snapshot_id=args.snapshot_id
-                    or ("per-source-registry" if registry is not None else "unassigned"),
-                    expected_files=len(sif_files),
-                )
+                receipt = RunReceipt.create(receipt_dir, **receipt_fields)
             _emit_target(
                 f"Receipt:     {receipt.directory}", target_label=target_label
             )
@@ -866,6 +922,8 @@ def _run_batch_target(
         if resuming:
             receipt.state = "running"
             receipt.expected_files = max(receipt.expected_files, len(sif_files))
+            receipt.drive_id = receipt.drive_id or identity.drive_id
+            receipt.drive_warning = identity.warning
             receipt.write_manifest()
             _emit_target(f"Resuming:    {receipt.directory}", target_label=target_label)
         # A resumed receipt records how the run in front of it was authorized,
@@ -882,7 +940,7 @@ def _run_batch_target(
     if stop_event is not None and stop_event.is_set():
         if receipt is not None:
             receipt.finish("interrupted")
-            _write_drive_catalog(out_dir, receipt, target_label)
+            _write_drive_catalog(args, out_dir, receipt, target_label)
         return 130
 
     cal_dir = Path(settings["calibration_dir"]) if settings.get("calibration_dir") else None
@@ -908,7 +966,7 @@ def _run_batch_target(
                 stop_event.set()
             if receipt is not None:
                 receipt.finish("interrupted")
-                _write_drive_catalog(out_dir, receipt, target_label)
+                _write_drive_catalog(args, out_dir, receipt, target_label)
                 _emit_target(
                     _resume_message(receipt, target_label),
                     target_label=target_label,
@@ -933,7 +991,7 @@ def _run_batch_target(
                         reason=f"calibration could not load: {exc}",
                     )
                 receipt.finish("partial")
-                _write_drive_catalog(out_dir, receipt, target_label)
+                _write_drive_catalog(args, out_dir, receipt, target_label)
             return 1
 
     calibration_cache: dict[str, object] = {}
@@ -948,7 +1006,7 @@ def _run_batch_target(
         if stop_event is not None and stop_event.is_set():
             if receipt is not None:
                 receipt.finish("interrupted")
-                _write_drive_catalog(out_dir, receipt, target_label)
+                _write_drive_catalog(args, out_dir, receipt, target_label)
                 _emit_target(
                     _resume_message(receipt, target_label),
                     target_label=target_label,
@@ -968,7 +1026,7 @@ def _run_batch_target(
                 stop_event.set()
             if receipt is not None:
                 receipt.finish("interrupted")
-                _write_drive_catalog(out_dir, receipt, target_label)
+                _write_drive_catalog(args, out_dir, receipt, target_label)
                 _emit_target(
                     _resume_message(receipt, target_label),
                     target_label=target_label,
@@ -983,7 +1041,7 @@ def _run_batch_target(
             selected_extra_attrs[DRIFT_SAMPLE_ATTR] = DRIFT_SAMPLE_TRUE
         if registry is not None:
             try:
-                epoch = registry.resolve_source(sif)
+                epoch = registry.resolve_source(sif, root=_date_scan_root(input_path))
                 selected_snapshot = epoch.snapshot
                 selected_snapshot_id = epoch.snapshot_id
                 selected_extra_attrs.update(
@@ -1066,7 +1124,7 @@ def _run_batch_target(
                         reason="keyboard interrupt",
                     )
                     receipt.finish("interrupted")
-                    _write_drive_catalog(out_dir, receipt, target_label)
+                    _write_drive_catalog(args, out_dir, receipt, target_label)
                     _emit_target(
                         _resume_message(receipt, target_label),
                         target_label=target_label,
@@ -1103,7 +1161,7 @@ def _run_batch_target(
     if failed:
         if receipt is not None:
             receipt.finish("partial")
-            _write_drive_catalog(out_dir, receipt, target_label)
+            _write_drive_catalog(args, out_dir, receipt, target_label)
         failure_lines = [f"{len(failed)} failure(s):", *(f"  {path}" for path in failed)]
         failure_lines.append(f"{n_ok}/{len(sif_files)} exported successfully.")
         _emit_target(
@@ -1119,7 +1177,7 @@ def _run_batch_target(
     else:
         if receipt is not None:
             receipt.finish("completed")
-            _write_drive_catalog(out_dir, receipt, target_label)
+            _write_drive_catalog(args, out_dir, receipt, target_label)
         skipped = f", {n_skipped} skipped" if n_skipped else ""
         _emit_target(
             _color(f"Done. {n_exported}/{total} exported successfully{skipped}.", "32"),
@@ -1248,7 +1306,7 @@ def _run_single_file(
         if authorization.sample:
             extra_attrs[DRIFT_SAMPLE_ATTR] = DRIFT_SAMPLE_TRUE
         try:
-            epoch = registry.resolve_source(input_path)
+            epoch = registry.resolve_source(input_path, root=_date_scan_root(input_path))
             snapshot = epoch.snapshot
             extra_attrs.update(_registry_provenance(registry, position=epoch.position))
             if not args.dry_run:

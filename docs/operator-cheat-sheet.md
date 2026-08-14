@@ -114,8 +114,9 @@ developer tools cannot be assumed.
 | `echelle snapshot create` | Copies role-named calibration inputs into one immutable, digested snapshot | Yes, usually through the bench |
 | `echelle snapshot validate DIR` | Rechecks snapshot schema, paths, sizes, and SHA-256 digests | Yes |
 | `echelle snapshot show DIR` | Prints a compact snapshot summary | Yes |
+| `echelle snapshot import-historical ID --calibrations DIR` | Converts a bundled 2019/2024/2025 binder into a registrable snapshot; `--artifact-root` supplies campaign folders too large to package | Once per historical epoch |
 | `echelle process INPUT -o OUTPUT` | Converts one SIF, a folder, or several drives to SpectroCube NetCDF and records resumable receipts | Yes; a registry run needs `--sample N` or `--drift-verdict` |
-| `echelle catalog build/merge` | Writes per-drive catalogs and a durable all-years index with volume labels | Candidate; audit/catalog work |
+| `echelle catalog build/merge` | Writes per-drive catalogs keyed on stable drive ids and merges them by recency into an all-years index | Candidate; audit/catalog work |
 | `echelle txt CUBE OUTPUT` / `echelle-cube2txt` | Writes LHD text at the frozen legacy header; refuses a cube missing `trigger_delay_s`, `frame_interval_s` or `exposure_s` | Candidate; no raw SIF needed |
 | `echelle recal-cube CUBE --new-snapshot DIR` | Applies safe wavelength/factor snapshot deltas and refuses geometry changes | Candidate; reviewed repair only |
 | `echelle drift audit/refine` | Samples Balmer/Fulcher centroids, solves one rigid detector shift in pixels, emits a four-state verdict, and accepts immutable `-rN` refinements | Candidate; required before any registry run |

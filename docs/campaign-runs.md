@@ -149,10 +149,37 @@ Repeat `--registry` and its `--drift-verdict` when resuming a registry-backed
 run. The gate is evaluated on every invocation, including a resume, and the
 receipt records the authorization of the run in front of it.
 
+## Drive identity
+
+On the first processing of a source, the run writes a small
+`echelle-drive-id.toml` at the source root you named:
+
+```toml
+schema = "echelle-drive-id/v1"
+
+[drive]
+id = "0b6c1e2f9a5b4c7d8e9f0a1b2c3d4e5f"
+label = "NIFS-A"
+created_at = "2026-08-14T09:12:04.118Z"
+```
+
+Later runs read it instead of writing a new one, and catalogs key on the `id`.
+A USB disk that returns as `F:` on Windows and under `/Volumes/NIFS-A` on macOS
+therefore stays one drive with one history. The `label` is display only: edit it
+freely, and never copy an `id` onto a second drive. `--volume-label` sets the
+label a run reports; it never changes an announced id.
+
+A source root that cannot be written — a read-only archive mount — is not an
+error. The run continues, keys that drive on its volume label alone, prints a
+warning, and records it as `drive_warning` in the receipt and in the catalog's
+`run` block, so a reader can see why the drive has no stable id.
+
 ## Catalog beside the cubes
 
-Every non-dry batch target writes `echelle-catalog.json` beside its cubes. Write
-or refresh one by hand with the same command the run uses:
+Every non-dry batch target writes `echelle-catalog.json` beside its cubes. Each
+cube row records its digest, size, snapshot ID, `t_start`, and the `gate` that
+authorized the run that produced it, so a sampled drive never reads as a
+verified one. Write or refresh one by hand with the same command the run uses:
 
 ```powershell
 echelle catalog build D:\nifs\spectrocubes `
@@ -160,9 +187,41 @@ echelle catalog build D:\nifs\spectrocubes `
   --receipt-dir local\runs\2026-08-13_12-00-00-shots
 ```
 
-`--receipt-dir` is optional and adds the run's state, counts, and calibration
-authority to the catalog. Merge per-drive catalogs into a durable all-years
-index with `echelle catalog merge CATALOG [CATALOG ...] -o all-years.json`.
+`--receipt-dir` is optional and adds the run's state, counts, calibration
+authority, and gate to the catalog. `--drive-id` is optional too: by default the
+catalog uses the id announced by the nearest `echelle-drive-id.toml` at or above
+the cube folder.
+
+Merge per-drive catalogs into a durable all-years index with
+`echelle catalog merge CATALOG [CATALOG ...] -o all-years.json`. Two rules make
+that merge safe to repeat:
+
+- **Recency, never argument order.** For each drive the row with the newest
+  `generated_at` wins, so merging a stale all-years index after a fresh
+  per-drive catalog can no longer revert that drive to older rows.
+- **Portable locations.** A merged row stores the catalog path *relative* to its
+  drive root plus the `drive_root` this machine last saw it at — the catalog
+  file's own folder. A drive that comes back at another letter or mount point is
+  relocated by merging its catalog again; nothing is marked permanently
+  unavailable by an absolute path written on a different operating system.
+
+Merge automatically after every completed target by naming the index on the run:
+
+```powershell
+echelle process D:\nifs\shots -o D:\nifs\spectrocubes `
+  --volume-label NIFS-A `
+  --central-index C:\nifs\all-years.json
+```
+
+Only a completed target is folded in; an interrupted or partial run still writes
+its per-drive catalog but is not published into the index as though the drive
+were finished. Without `--central-index`, the merge stays manual.
+
+`echelle recal-cube` refreshes the per-drive catalog beside its output when one
+exists: the revised cube's row gets the new digest and snapshot ID, and the
+catalog's `generated_at` is bumped. That bump is what makes the drive outrank
+whatever the all-years index still remembers, so the next auto or manual merge
+propagates the correction without rebuilding the index.
 
 ## Status
 

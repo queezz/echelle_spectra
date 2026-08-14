@@ -15,8 +15,8 @@ acceptance.
 | 6 portable kit | `kit/`, `scripts/build_nifs_kit.py`, reproducible builder | kit/reproducibility tests | `portable-kit.md`; no new rehearsal in this pass |
 | 7 neutral optional fields | external SpectroCube 0.2.0 (unchanged) | external 0.2.0 contract suite | external `SPEC.md`; dependency remains pinned at `0b02ac9` |
 | 8 registry + complete cube provenance | `calibration_registry.py`, `tools/spectrocube_export.py` | registry/complete-provenance tests | `calibration-epoch-registry.md`; Packet 8 contracts preserved |
-| 9 per-drive catalog | `catalog.build_drive_catalog`, automatic batch hook | `test_catalog_cube_text_and_missing_drive_reading_room` | `harbor-candidate.md` |
-| 9 merged missing-drive index | `catalog.merge_catalogs`, reading-room availability refresh | disconnected catalog fixture | `harbor-candidate.md` |
+| 9 per-drive catalog | `catalog.build_drive_catalog`, automatic batch hook, `campaign_run.ensure_drive_identity` | `test_catalog_identity.py` drive-id, reconnection, read-only fallback, and gate-row cases | `campaign-runs.md` |
+| 9 merged missing-drive index | `catalog.merge_catalogs` (recency, drive-relative paths), `merge_into_central_index`, `refresh_catalog_row`, reading-room availability refresh | disconnected catalog fixture; stale-after-fresh, relocation, auto-merge, and recal-refresh cases | `campaign-runs.md` |
 | 9 cube-derived text | `lhd_text.py`, `campaign_tools_cli.txt_main` | frozen-header/cube fixture and missing-timing refusal | `harbor-candidate.md` |
 | 9 one writer, two frozen dialects | legacy `Spectrum.save` and GUI call `lhd_text`; both legacy templates restored to `resources/` | `test_lhd_text_header.py` golden diffs against `tests/golden/` | `harbor-candidate.md` |
 | 10 wavelength/factor deltas | `recalibration.recalibrate_dataset/cube` | A→B wavelength and factor fixture | `harbor-candidate.md` |
@@ -29,7 +29,7 @@ acceptance.
 | 12 browsing/verdict cards | `reading_room.py` static HTML/data build | missing drive and evidence fixture | `harbor-candidate.md` |
 | 12 composer/no worker control | browser-local text composer only | page assertion; visual/perimeter gate deferred | `harbor-candidate.md` |
 | 12 procedure/vocabulary/provenance | default Markdown embedding and built-in verdict vocabulary | static build fixture | `harbor-candidate.md` plus existing operator/snapshot/registry docs |
-| 13 historical absorption | `historical.py`, three bundled TOMLs | exact names/sizes/SHA-256 validation | `harbor-candidate.md` |
+| 13 historical absorption | `historical.py`, three bundled TOMLs, `snapshot import-historical` | all three epochs import, register, and resolve a dated source; missing artifact refused by name | `calibration-epoch-registry.md` |
 | 13 connected fixture path | snapshot + receipt + catalog + text + drift/refinement + optional recalibration domain + web | `test_refinement_historical_and_connected_fixture_path` and adjacent focused tests | this reconciliation |
 
 ## Deferred validation ledger

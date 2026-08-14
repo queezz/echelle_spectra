@@ -403,6 +403,8 @@ def recalibrate_cube(
     import xarray as xr
     from spectrocube import SpectroCube
 
+    from .catalog import refresh_catalog_row
+
     source = Path(input_path)
     destination = Path(output_path)
     manifest_path = destination.with_suffix(destination.suffix + ".recalibration.json")
@@ -440,4 +442,9 @@ def recalibrate_cube(
         newline="\n",
     )
     os.replace(temp_manifest, manifest_path)
+    # A revised cube makes every catalog row describing it stale. Refresh the
+    # per-drive catalog beside the output and bump its generated_at, so the next
+    # auto or manual merge carries the new digest and snapshot id into the
+    # all-years index instead of leaving the old ones presented as current.
+    refresh_catalog_row(destination)
     return destination, manifest_path

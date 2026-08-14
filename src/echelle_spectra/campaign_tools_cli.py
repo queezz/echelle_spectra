@@ -31,6 +31,14 @@ def catalog_main(argv: list[str] | None = None, *, prog: str = "echelle catalog"
     build = commands.add_parser("build", help="Write one catalog beside a drive's cubes.")
     build.add_argument("cubes")
     build.add_argument("--volume-label", required=True)
+    build.add_argument(
+        "--drive-id",
+        metavar="ID",
+        help=(
+            "Stable drive identity for this catalog. Default: the id announced by "
+            "echelle-drive-id.toml at or above the cube folder."
+        ),
+    )
     build.add_argument("--receipt-dir")
     build.add_argument("--output")
     merge = commands.add_parser("merge", help="Write an all-years index.")
@@ -44,6 +52,7 @@ def catalog_main(argv: list[str] | None = None, *, prog: str = "echelle catalog"
         path = build_drive_catalog(
             args.cubes,
             volume_label=args.volume_label,
+            drive_id=args.drive_id,
             receipt_dir=args.receipt_dir,
             output=args.output,
         )
