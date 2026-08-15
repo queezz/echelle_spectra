@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import os
+import subprocess
+import sys
 from datetime import date
 from pathlib import Path
 
@@ -16,18 +18,22 @@ from PyQt5 import QtCore, QtGui, QtWidgets
 from echelle_spectra import calibration_bench_gui as bench_gui
 from echelle_spectra.calibration_bench import BenchFrame, CalibrationBenchSession
 from echelle_spectra.calibration_bench_gui import (
-    _MINIMUM_WINDOW_SIZE,
     _PACKAGE_DIR,
+    _ROOT_SHARES,
     _SUGGESTED_BADGE,
     BENCH_APP_USER_MODEL_ID,
     BENCH_BODY_POINT_SIZE,
+    BENCH_FLOOR_LINES,
     BENCH_HEADLINE_POINT_SIZE,
+    BENCH_PREFERRED_LINES,
     BENCH_TOOLTIP_LIMIT,
     CalibrationBenchWindow,
     _build_parser,
     _ElidingLabel,
     apply_windows_taskbar_identity,
     bench_default_geometry,
+    bench_layout_unit,
+    bench_minimum_size,
     bench_point_sizes,
     bench_window_icon,
     forget_session_layout,
@@ -791,25 +797,36 @@ def test_the_role_control_can_never_elide_its_state(qt_app, tmp_path):
 def test_the_default_geometry_lays_out_legibly(qt_app, tmp_path):
     """F16 item 2: every visible word readable at the size it opens at.
 
-    F18 item 3 supersedes F16's floor.  The old minimum (1020x660, and a
-    1280x800 screen clamped to 1200x680) drew without clipping but was not
-    *usable*: the file table, the bench readings and the expected-line list
-    could not be on screen together.  "If it is unusable at that size, why
-    open it that small" — so the floor is now the smallest layout that holds
-    all four, and a small screen gets a window that overhangs rather than a
-    window that lies about fitting.
+    F20 supersedes F18's *pixel* floor.  ``_MINIMUM_WINDOW_SIZE == (1300, 880)``
+    was a constant measured on a 100%-scale display, and that is exactly what
+    broke on the owner's: a 1920x1080 screen at 150% offers 1280x720 logical
+    pixels, so the floor asked for a window wider and taller than the whole
+    desktop and every panel inside it was crushed.  The floor is now quoted in
+    lines of the platform's own text and yields to the screen.
     """
 
-    # The default fits the screen it opens on wherever the usable floor allows.
-    assert bench_default_geometry(QtCore.QSize(1280, 800)) == _MINIMUM_WINDOW_SIZE
-    assert bench_default_geometry(QtCore.QSize(6000, 6000)) == (1500, 920)
-    assert bench_default_geometry(QtCore.QSize(1920, 1080)) == (1500, 920)
-    # The floor is the usable one, and it is a floor: a smaller screen gets a
-    # window that overhangs rather than one that lies about fitting.
-    assert _MINIMUM_WINDOW_SIZE == (1300, 880)
+    unit = bench_layout_unit()
+    preferred = (BENCH_PREFERRED_LINES[0] * unit, BENCH_PREFERRED_LINES[1] * unit)
+    floor = (BENCH_FLOOR_LINES[0] * unit, BENCH_FLOOR_LINES[1] * unit)
 
+    # A generous screen gets the preferred size, whatever the DPI.
+    assert bench_default_geometry(QtCore.QSize(6000, 6000)) == preferred
+    assert bench_default_geometry(QtCore.QSize(1920, 1080)) == preferred
+    # The floor is a floor only while the screen can hold it.
+    assert bench_minimum_size(QtCore.QSize(6000, 6000)) == floor
+    # The owner's display at 150%: 1280x720 logical.  Nothing the bench asks
+    # for may exceed it — asking is what produced the cramped first paint.
+    scaled = QtCore.QSize(1280, 720)
+    for size in (bench_default_geometry(scaled), bench_minimum_size(scaled)):
+        assert size[0] <= scaled.width(), size
+        assert size[1] <= scaled.height(), size
+
+    # Measured at the size a 1080p-class display gives it.  The offscreen
+    # platform reports an 800x600 pseudo-screen, and the geometry function now
+    # correctly clamps to it — a window that small is the degraded case, not
+    # the one the layout is designed against.
     window, _paths = _real_folder_window(qt_app, tmp_path)
-    window.resize(*bench_default_geometry())
+    window.resize(*bench_default_geometry(QtCore.QSize(1920, 1080)))
     window.show()
     qt_app.processEvents()
     window._relayout_wrapped_text()
@@ -988,9 +1005,9 @@ def test_the_expected_line_panel_lives_with_the_spectrum_and_fills_itself(
     assert window.line_family_combo.currentText() == "Ne"
     assert window.line_help_table.rowCount() > 0
     assert "expected Ne line(s)" in window.line_panel_header.text()
-    # F17 item 1 moved it out from under the spectrum into the tall left
-    # column; the spectrum keeps its own view.
-    assert window.controls_splitter.isAncestorOf(window.line_help_table)
+    # F17 item 1 moved it out from under the spectrum; F20 moved it on into
+    # the tables rail.  The spectrum keeps its own view either way.
+    assert window.tables_splitter.isAncestorOf(window.line_help_table)
     assert window.lamp_fit_splitter.isAncestorOf(window.order_plot.getViewWidget())
 
     # Picking the work on the left brings its own view with it.
@@ -1224,30 +1241,40 @@ def test_the_sticks_and_the_table_are_one_line_list(qt_app, tmp_path):
     window.close()
 
 
-def test_the_expected_line_list_stands_in_the_tall_left_column(qt_app, tmp_path):
-    """F17 item 1: the list gets the empty left column, not a cramped strip."""
+def test_the_expected_line_list_stands_in_the_tall_right_rail(qt_app, tmp_path):
+    """F20 supersedes F17 item 1: the list gets a rail, not the left column.
+
+    F17 moved the table out from under the spectrum into the tall left space;
+    the owner's answer after living with it was that a table under four tabs of
+    controls is still a table sharing one column's height with controls.  The
+    two working tables get their own rail.
+    """
 
     window = _campaign_window(tmp_path)
-    window.resize(*bench_default_geometry())
+    window.resize(*bench_default_geometry(QtCore.QSize(1920, 1080)))
     window.show()
     qt_app.processEvents()
 
-    assert window.controls_splitter.orientation() == QtCore.Qt.Vertical
-    assert window.controls_splitter.isAncestorOf(window.line_help_table)
-    assert not window.controls_splitter.childrenCollapsible()
+    assert window.tables_splitter.orientation() == QtCore.Qt.Vertical
+    assert window.tables_splitter.isAncestorOf(window.line_help_table)
+    assert window.tables_splitter.isAncestorOf(window.anchor_table)
+    assert not window.tables_splitter.childrenCollapsible()
+    # Neither table is under the controls any more.
+    assert not window.control_tabs.isAncestorOf(window.line_help_table)
+    assert not window.control_tabs.isAncestorOf(window.anchor_table)
     panel = window.expected_lines_panel
     assert panel.isVisible()
-    # It sits under the controls and takes a real share of the column's
-    # height, rather than the four-row strip it had under the spectrum.
-    assert window.controls_splitter.indexOf(panel) == 1
-    column = window.controls_splitter.height()
-    assert panel.height() >= 0.25 * column, (panel.height(), column)
+    assert window.tables_splitter.indexOf(window.anchors_panel) == 0
+    assert window.tables_splitter.indexOf(panel) == 1
+    rail = window.tables_splitter.height()
+    assert panel.height() >= 0.33 * rail, (panel.height(), rail)
     assert panel.height() > window.line_help_table.horizontalHeader().height() * 4
     # It is in view from every control tab, not only the lamp-fit one.
     for index in range(window.control_tabs.count()):
         window.control_tabs.setCurrentIndex(index)
         qt_app.processEvents()
         assert panel.isVisible()
+        assert window.anchors_panel.isVisible()
 
     # Row-click still marks the stick on the spectrum (F16 item 7 preserved).
     assert not window.line_highlight.isVisible()
@@ -1534,12 +1561,17 @@ def test_the_default_size_is_the_smallest_usable_one(qt_app, tmp_path):
         f"{CalibrationBenchWindow.EXPECTED_LINE_ROWS} is the floor"
     )
 
-    # The controls column reaches everything it holds without a scrollbar.
-    files_tab = window.control_tabs.widget(0)
-    assert isinstance(files_tab, QtWidgets.QScrollArea)
-    assert files_tab.verticalScrollBar().maximum() == 0, (
-        "the file controls need scrolling at the size the bench opens at"
-    )
+    # No control tab needs a scrollbar to reach what it holds.  F18 only ever
+    # checked the Files tab; the Lamp fit tab was scrolling by 234 px at every
+    # size the bench has opened at, because the anchor table was stacked in it
+    # (F20 moved it to the rail).
+    for index in range(window.control_tabs.count()):
+        tab = window.control_tabs.widget(index)
+        assert isinstance(tab, QtWidgets.QScrollArea)
+        assert tab.verticalScrollBar().maximum() == 0, (
+            f"the {window.control_tabs.tabText(index)!r} controls scroll at the "
+            "size the bench opens at"
+        )
 
     # The readings are tab-independent: they never hide behind another tab.
     for index in range(window.control_tabs.count()):
@@ -1551,22 +1583,31 @@ def test_the_default_size_is_the_smallest_usable_one(qt_app, tmp_path):
 
 
 def test_the_minimum_geometry_is_the_usable_floor(qt_app, tmp_path):
-    """F18 item 3: the bench never opens at a size it cannot be used at."""
+    """F18 item 3 as F20 rewrites it: the floor yields to the screen.
 
+    The window still never opens smaller than the layout needs — but "needs"
+    is measured in lines of the platform's own text and capped by the desktop,
+    because a floor that exceeds the desktop is how the owner's bench opened
+    crushed on a 150%-scaled display.
+    """
+
+    floor = bench_minimum_size(QtCore.QSize(1920, 1080))
     window, _paths = _real_folder_window(qt_app, tmp_path)
-    window.resize(*_MINIMUM_WINDOW_SIZE)
+    window.resize(*floor)
     window.show()
     qt_app.processEvents()
     window._relayout_wrapped_text()
     qt_app.processEvents()
 
-    assert window.minimumSize().width() == _MINIMUM_WINDOW_SIZE[0]
-    assert window.minimumSize().height() == _MINIMUM_WINDOW_SIZE[1]
+    assert (window.minimumSize().width(), window.minimumSize().height()) == (
+        bench_minimum_size()
+    )
 
     row_height = window.line_help_table.verticalHeader().defaultSectionSize()
     visible_rows = window.line_help_table.viewport().height() // max(1, row_height)
     assert visible_rows >= CalibrationBenchWindow.EXPECTED_LINE_ROWS
-    assert window.control_tabs.widget(0).verticalScrollBar().maximum() == 0
+    for index in range(window.control_tabs.count()):
+        assert window.control_tabs.widget(index).verticalScrollBar().maximum() == 0
 
     clipped = [
         widget.objectName() or widget.text()
@@ -1579,7 +1620,7 @@ def test_the_minimum_geometry_is_the_usable_floor(qt_app, tmp_path):
 
 
 def test_the_columns_are_draggable_and_the_cut_survives_the_session(qt_app, tmp_path):
-    """F18 item 2: three splitters, honest defaults, and the drag is kept."""
+    """F18 item 2 as F20 rewrites it: three splitters, and the cut is a share."""
 
     forget_session_layout()
     window = _campaign_window(tmp_path)
@@ -1589,32 +1630,42 @@ def test_the_columns_are_draggable_and_the_cut_survives_the_session(qt_app, tmp_
     window._relayout_wrapped_text()
     qt_app.processEvents()
 
-    for splitter in (window.root_splitter, window.controls_splitter, window.view_splitter):
+    for splitter in (
+        window.root_splitter,
+        window.tables_splitter,
+        window.readings_splitter,
+    ):
         assert not splitter.childrenCollapsible()
         assert splitter.handle(1) is not None
         assert splitter.handle(1).isEnabled(), "the operator cannot drag this handle"
-    assert window.view_splitter.orientation() == QtCore.Qt.Vertical
-    assert window.view_splitter.indexOf(window.status_band) == 0
-    assert window.view_splitter.indexOf(window.view_tabs) == 1
+    # F20 moves the readings strip across the top of the whole window: with two
+    # rails flanking it, the middle column is the narrowest thing on screen and
+    # a strip put there folds onto three rows and eats the plots.
+    assert window.readings_splitter.orientation() == QtCore.Qt.Vertical
+    assert window.readings_splitter.indexOf(window.status_band) == 0
+    assert window.readings_splitter.indexOf(window.root_splitter) == 1
 
-    # The plots keep the bulk of the view column; the readings are a strip.
-    band_height, plots_height = window.view_splitter.sizes()
+    # The rails and plots keep the bulk of the window; the readings are a strip.
+    band_height, plots_height = window.readings_splitter.sizes()
     assert plots_height > 2 * band_height, (band_height, plots_height)
 
     # A drag is remembered, and the next window of this session opens with it.
-    window.controls_splitter.setSizes([300, 500])
-    window.controls_splitter.splitterMoved.emit(300, 1)
+    window.tables_splitter.setSizes([300, 500])
+    window.tables_splitter.splitterMoved.emit(300, 1)
     qt_app.processEvents()
-    remembered = window.controls_splitter.sizes()
+    remembered = window.tables_splitter.sizes()
     assert remembered[0] < remembered[1], "the drag did not take"
     window.close()
 
     second = _campaign_window(tmp_path)
+    second.resize(*bench_default_geometry(QtCore.QSize(1920, 1080)))
     second.show()
     qt_app.processEvents()
+    second._relayout_wrapped_text()
+    qt_app.processEvents()
     # The cut comes back as a proportion, which is what survives a window of
-    # a different height.
-    restored = second.controls_splitter.sizes()
+    # a different size — a pixel list would not.
+    restored = second.tables_splitter.sizes()
     assert restored[0] / sum(restored) == pytest.approx(
         remembered[0] / sum(remembered), abs=0.02
     ), (restored, remembered)
@@ -1823,3 +1874,189 @@ def test_both_factor_curves_survive_every_view_range(qt_app, tmp_path):
                 "the legend names a curve nobody can see"
             )
     window.close()
+
+
+# ----------------------------------------------------------------------
+# Packet F20 — the bench's two-rail geometry
+# ----------------------------------------------------------------------
+
+#: Every combination the owner actually meets: the size the bench opens at on
+#: his display class, and the same window maximized.  Both are checked at 100%
+#: and again, in a child process, at 150% desktop scaling.
+_TWO_RAIL_SIZES = (
+    ("default", None),
+    ("maximized-like", (2000, 1200)),
+)
+
+
+def _visible_rows(table) -> int:
+    """How many rows of *table* the operator can actually read."""
+
+    return table.viewport().height() // max(
+        1, table.verticalHeader().defaultSectionSize()
+    )
+
+
+@pytest.mark.parametrize("label,size", _TWO_RAIL_SIZES, ids=[n for n, _ in _TWO_RAIL_SIZES])
+def test_two_rail_layout_is_usable_at(qt_app, tmp_path, label, size):
+    """F20: two rails and a middle, usable at every size and every scaling.
+
+    Owner, after F18: the bench still opened cramped, and maximized the left
+    column collapsed to some 240 px — "expand me right, manually, now, before
+    use".  Both are the same defect from two ends: pixel splitter cuts tuned at
+    one geometry, laid down before the first layout pass.  This test is run
+    twice over, once per desktop scaling, by the child-process test below.
+    """
+
+    forget_session_layout()
+    window, _paths = _real_folder_window(qt_app, tmp_path)
+    window.resize(*(size or bench_default_geometry(QtCore.QSize(1920, 1080))))
+    window.show()
+    qt_app.processEvents()
+    window._relayout_wrapped_text()
+    qt_app.processEvents()
+
+    where = f"{label} ({window.width()}x{window.height()}, scale "
+    where += f"{os.environ.get('QT_SCALE_FACTOR', '1')})"
+
+    # TWO RAILS: controls left, tables right, plots between them.
+    root = window.root_splitter
+    assert root.orientation() == QtCore.Qt.Horizontal
+    assert root.count() == 3, where
+    assert root.indexOf(window.controls_rail) == 0
+    assert root.indexOf(window.view_tabs) == 1
+    assert root.indexOf(window.tables_rail) == 2
+
+    left, centre, right = root.sizes()
+    total = left + centre + right
+    # Not collapsed, and not the majority of the window either.
+    assert left >= window.controls_rail.minimumWidth(), (where, left)
+    assert 0.15 <= left / total <= 0.45, (where, left / total)
+    assert right >= window.tables_rail.minimumWidth(), (where, right)
+    assert 0.15 <= right / total <= 0.45, (where, right / total)
+    # The plots are the flexible element: smaller than the two rails together.
+    assert centre < left + right, (where, centre, left, right)
+    assert centre > 0.2 * total, (where, centre / total)
+
+    # No control column scrolls, and no button is clipped by one.  Each tab is
+    # opened first: a QTabWidget lays a page out when it is shown, so a page
+    # nobody has opened still carries the geometry of some earlier window size.
+    for index in range(window.control_tabs.count()):
+        window.control_tabs.setCurrentIndex(index)
+        qt_app.processEvents()
+        window._relayout_wrapped_text()
+        qt_app.processEvents()
+        tab = window.control_tabs.widget(index)
+        assert tab.verticalScrollBar().maximum() == 0, (
+            f"{window.control_tabs.tabText(index)!r} scrolls at {where}"
+        )
+        for button in window.findChildren(QtWidgets.QPushButton):
+            if not button.isVisible():
+                continue
+            assert button.width() >= button.sizeHint().width(), (button.text(), where)
+            painted = button.visibleRegion().boundingRect()
+            assert painted.height() >= button.height(), (
+                f"{button.text()!r} is clipped by its container at {where}"
+            )
+
+    # Both working tables are vertically long, not corner boxes.
+    assert _visible_rows(window.line_help_table) >= (
+        CalibrationBenchWindow.EXPECTED_LINE_ROWS
+    ), (where, _visible_rows(window.line_help_table))
+    assert _visible_rows(window.anchor_table) >= (
+        CalibrationBenchWindow.EXPECTED_LINE_ROWS
+    ), (where, _visible_rows(window.anchor_table))
+
+    # The readings strip stays in view whatever is being done (F18).
+    assert window.bench_state_group.isVisible()
+    assert window.sphere_factors_group.isVisible()
+
+    assert not _overlapping_siblings(window), where
+    window.close()
+    forget_session_layout()
+
+
+def test_two_rail_cuts_are_shares_rather_than_pixels(qt_app, tmp_path):
+    """F20: the cut is a proportion, so maximizing widens every column.
+
+    The old defaults were pixel lists (``[560, 440]``, ``[controls, 1500 -
+    controls]``) and the root splitter gave the left column stretch factor 0,
+    so every pixel a larger window gained went to the plots and the rails
+    stayed where a small window had left them.
+    """
+
+    forget_session_layout()
+    window, _paths = _real_folder_window(qt_app, tmp_path)
+    window.resize(*bench_default_geometry(QtCore.QSize(1920, 1080)))
+    window.show()
+    qt_app.processEvents()
+    window._relayout_wrapped_text()
+    qt_app.processEvents()
+    small = window.root_splitter.sizes()
+
+    window.resize(2400, 1400)
+    qt_app.processEvents()
+    window._relayout_wrapped_text()
+    qt_app.processEvents()
+    large = window.root_splitter.sizes()
+
+    assert sum(large) > sum(small)
+    # Every column grew — not only the plots.  This is the whole of "maximized,
+    # the LEFT column collapses to ~240 px": with stretch factor 0 the rails
+    # kept the width a small window had given them.
+    for index, (before, after) in enumerate(zip(small, large)):
+        assert after > before, (index, small, large)
+    # Once no content floor is binding, the cut is exactly the declared shares.
+    for index, share in enumerate(_ROOT_SHARES):
+        assert large[index] / sum(large) == pytest.approx(share, abs=0.05), (
+            index,
+            large,
+        )
+
+    # Stretch factors, not one-off sizes, are what carries this: a splitter
+    # writes setStretchFactor onto the child's own size policy.
+    for index in range(3):
+        stretch = window.root_splitter.widget(index).sizePolicy().horizontalStretch()
+        assert stretch > 0, (index, stretch)
+    window.close()
+    forget_session_layout()
+
+
+def test_scaled_dpi_repeats_the_two_rail_checks(qt_app):
+    """F20: run the whole two-rail matrix again at 150% desktop scaling.
+
+    ``QT_SCALE_FACTOR`` is read once, when QApplication is constructed, so a
+    second scaling can only be exercised in a second process.  This is the
+    reproduction the owner's report needed and F18's single-scale test never
+    had: at 150% his 1920x1080 display offers 1280x720 logical pixels, and a
+    geometry quoted in pixels measured at 100% simply does not fit on it.
+    """
+
+    if os.environ.get("ECHELLE_BENCH_SCALED_CHILD"):
+        pytest.skip("already the scaled child process")
+    environment = dict(os.environ)
+    environment["QT_SCALE_FACTOR"] = "1.5"
+    environment["QT_QPA_PLATFORM"] = "offscreen"
+    environment["ECHELLE_BENCH_SCALED_CHILD"] = "1"
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "pytest",
+            str(Path(__file__).resolve()),
+            "-k",
+            "two_rail",
+            "-q",
+            "-p",
+            "no:cacheprovider",
+        ],
+        cwd=str(Path(__file__).resolve().parents[1]),
+        env=environment,
+        capture_output=True,
+        text=True,
+        timeout=900,
+    )
+    assert completed.returncode == 0, (
+        "the two-rail layout breaks at 150% desktop scaling:\n"
+        f"{completed.stdout}\n{completed.stderr}"
+    )

@@ -132,35 +132,115 @@ def bench_point_sizes(base_point_size: float | None = None) -> tuple[float, floa
     return body, max(BENCH_HEADLINE_POINT_SIZE, body * 1.55)
 
 
+#: The bench's geometry, in lines of the platform's own text rather than in
+#: pixels measured on one designer's display.  A text line is the one unit that
+#: moves with the font, the display's DPI and the desktop's scaling factor at
+#: once, which is what "DPI-independent" has to mean here: 1500 px is a
+#: comfortable window at 100% scaling and two thirds of a *screen* at 150%.
+BENCH_PREFERRED_LINES = (79, 48)
+
+#: The floor the two-rail layout is built to satisfy: both rails working, the
+#: readings strip in view, and the plots reduced but present.  Narrower than
+#: the preference but not shorter than it, because the two behave differently:
+#: taking width away shrinks the plots and the tables lose columns they can
+#: scroll to, while taking height away puts a scrollbar on the controls — and a
+#: scrolled controls column is the defect this packet exists to end.
+BENCH_FLOOR_LINES = (72, 48)
+
+#: What a window costs its screen beyond its own client area — frame, title
+#: bar, taskbar — expressed in the same unit rather than in a pixel guess.
+_SCREEN_MARGIN_LINES = (2, 3)
+
+#: The bench's two rails and its middle, as shares of whatever width the window
+#: has (F20, owner: "TWO RAILS").  Controls on the left, the two working tables
+#: on the right, plots between them — deliberately the smallest of the three,
+#: because the plots are the element that can be zoomed and the tables are the
+#: ones being read.  These are shares and stretch factors rather than pixel
+#: cuts precisely so that maximizing widens all three instead of spending the
+#: whole gain on the plots and leaving the rails where they were.
+_ROOT_SHARES = (0.28, 0.38, 0.34)
+_ROOT_STRETCH = (28, 38, 34)
+
+#: The right rail's own cut.  Near enough even; the expected-line table gets
+#: the larger half because it carries a wrapping header the anchor table has
+#: no equivalent of, so an even split leaves it the fewer readable rows.
+_TABLES_SHARES = (0.48, 0.52)
+_TABLES_STRETCH = (1, 1)
+
+
+def bench_layout_unit(font: QtGui.QFont | None = None) -> int:
+    """One line of the bench's own body text: the unit every size is quoted in.
+
+    Everything the bench measures itself against — window sizes, screen
+    margins, table floors — is a multiple of this.  A larger platform font, a
+    higher DPI or a 150% desktop scale all move it together, so the geometry
+    stays the same *layout* rather than the same number of pixels.
+    """
+
+    if font is None:
+        application = QtWidgets.QApplication.instance()
+        font = QtGui.QFont(application.font()) if application is not None else QtGui.QFont()
+        font.setPointSizeF(bench_point_sizes()[0])
+    return max(8, QtGui.QFontMetrics(font).height())
+
+
+def bench_minimum_size(
+    available: QtCore.QSize | None = None, unit: int | None = None
+) -> tuple[int, int]:
+    """The smallest usable bench — but never larger than the screen it is on.
+
+    F18's law ("if the window is unusable at a size, never open at that size")
+    was written as a pixel floor, and a pixel floor is exactly what a scaled
+    display breaks: a 1920x1080 screen at 150% offers 1280x720 *logical*
+    pixels, so a 1300x880 floor asks for a window taller and wider than the
+    whole desktop.  Windows then hands back a window smaller than the floor and
+    every panel inside it is crushed — the owner's cramped first paint.  The
+    floor therefore yields to the screen: on a display that cannot hold it, the
+    honest answer is the display, and the two-rail layout degrades by showing
+    fewer table rows rather than by hiding controls behind a scrollbar.
+    """
+
+    unit = unit or bench_layout_unit()
+    floor = (BENCH_FLOOR_LINES[0] * unit, BENCH_FLOOR_LINES[1] * unit)
+    available = _available_screen_size(available)
+    if available is None:
+        return floor
+    return (
+        int(min(floor[0], max(unit, available.width() - _SCREEN_MARGIN_LINES[0] * unit))),
+        int(min(floor[1], max(unit, available.height() - _SCREEN_MARGIN_LINES[1] * unit))),
+    )
+
+
 def bench_default_geometry(
-    available: QtCore.QSize | None = None,
+    available: QtCore.QSize | None = None, unit: int | None = None
 ) -> tuple[int, int]:
     """Return a default window size that fits the screen it will open on.
 
-    The preferred size is what the bench wants; the screen is what it gets.
-    A smaller display — the owner's Mac — receives a window that fits it
-    rather than one whose right-hand half is off the edge.
+    The preferred size is what the bench wants; the screen is what it gets, and
+    the floor is what it settles for — in that order, so the result can never
+    exceed the desktop the window has to be painted on.
     """
+
+    unit = unit or bench_layout_unit()
+    preferred = (BENCH_PREFERRED_LINES[0] * unit, BENCH_PREFERRED_LINES[1] * unit)
+    floor = bench_minimum_size(available, unit)
+    available = _available_screen_size(available)
+    if available is None:
+        return (int(max(preferred[0], floor[0])), int(max(preferred[1], floor[1])))
+    width = min(preferred[0], max(1, available.width() - _SCREEN_MARGIN_LINES[0] * unit))
+    height = min(preferred[1], max(1, available.height() - _SCREEN_MARGIN_LINES[1] * unit))
+    return int(max(width, floor[0])), int(max(height, floor[1]))
+
+
+def _available_screen_size(available: QtCore.QSize | None) -> QtCore.QSize | None:
+    """The desktop's usable *logical* size, or ``None`` when there is no screen."""
 
     if available is None:
         screen = QtWidgets.QApplication.primaryScreen()
         available = screen.availableGeometry().size() if screen is not None else None
     if available is None or available.width() <= 0 or available.height() <= 0:
-        return _PREFERRED_WINDOW_SIZE
-    width = min(_PREFERRED_WINDOW_SIZE[0], max(1, available.width() - 80))
-    height = min(_PREFERRED_WINDOW_SIZE[1], max(1, available.height() - 120))
-    return int(max(width, _MINIMUM_WINDOW_SIZE[0])), int(
-        max(height, _MINIMUM_WINDOW_SIZE[1])
-    )
-
-
-#: What the bench asks for, and the floor it stays legible at.  The floor is
-#: what the layout is actually built to satisfy; the preference is a comfort.
-#: The floor is the *smallest usable* geometry, not the smallest drawable one
-#: (F18 item 3): at it, the file table, the bench-state readings, the factors
-#: line and six rows of expected lines are all in view at once.
-_PREFERRED_WINDOW_SIZE = (1500, 920)
-_MINIMUM_WINDOW_SIZE = (1300, 880)
+        return None
+    return available
 
 #: The narrowest a reading panel is ever asked to be before the band folds it
 #: onto its own row instead.  Prose wraps happily at this width.
@@ -319,16 +399,20 @@ def bench_window_icon(
     return icon
 
 
-#: Splitter cuts the operator made, kept for as long as this process lives.
+#: Splitter cuts the operator made, kept for as long as this process lives, and
+#: kept as *shares of the splitter* rather than as pixel counts.  A cut stored
+#: in pixels is a cut tuned at one window size: restore it into a maximized
+#: window and the left rail is still the 240 px it was in the small one, which
+#: is precisely the collapse the owner had to drag back open before every use.
 #: Session state rather than a settings file on purpose: a dragged handle is a
 #: working preference for this sitting, not a decision to write to disk.
-_SESSION_SPLITTER_SIZES: dict[str, list[int]] = {}
+_SESSION_SPLITTER_SHARES: dict[str, tuple[float, ...]] = {}
 
 
 def forget_session_layout() -> None:
     """Drop every remembered splitter cut (used by tests and by a fresh run)."""
 
-    _SESSION_SPLITTER_SIZES.clear()
+    _SESSION_SPLITTER_SHARES.clear()
 
 
 class _ElidingLabel(QtWidgets.QLabel):
@@ -466,6 +550,15 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         self._landed_on: tuple[Path, str] | None = None
         self._auto_following = False
         self._family_override = False
+        #: Splitters already listening for the operator's drag.
+        self._splitter_keys: set[str] = set()
+        #: Whether a real layout pass has happened yet.  Splitter cuts laid
+        #: down before one are cuts of a size the window does not have.
+        self._first_layout_done = False
+        #: Re-entrancy guard.  Setting a splitter's sizes resizes its children,
+        #: which resizes this window's own layout, which would ask for the cut
+        #: again — a recursion Qt answers by overflowing the paint stack.
+        self._distributing = False
         self.last_folder = Path(watcher.folder) if watcher is not None else Path.cwd()
         self._build_ui()
         self._connect_ui()
@@ -482,18 +575,31 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
     def _build_ui(self) -> None:
         self.setWindowTitle("Echelle calibration bench")
         self.setWindowIcon(bench_window_icon())
-        self.setMinimumSize(*_MINIMUM_WINDOW_SIZE)
-        self.resize(*bench_default_geometry())
+        self.layout_unit = bench_layout_unit()
+        self.setMinimumSize(*bench_minimum_size(unit=self.layout_unit))
+        self.resize(*bench_default_geometry(unit=self.layout_unit))
         self.body_pt, self.headline_pt = bench_point_sizes()
+
+        # The readings strip runs across the top of the whole window rather
+        # than down the middle column.  The owner offered "top of center or top
+        # of a rail"; with two rails flanking it the centre is the narrowest
+        # column on screen, and a strip of readings put there folds onto two
+        # and three rows and eats exactly the plot height the rails were meant
+        # to leave it.  Full width, it is one row at any window size, and it is
+        # in view whichever rail, tab or plot is being worked in.
+        outer = QtWidgets.QSplitter(QtCore.Qt.Vertical)
+        outer.setChildrenCollapsible(False)
+        outer.setHandleWidth(8)
+        self.readings_splitter = outer
+        self.setCentralWidget(outer)
 
         root = QtWidgets.QSplitter(QtCore.Qt.Horizontal)
         root.setChildrenCollapsible(False)
         root.setHandleWidth(8)
         self.root_splitter = root
-        self.setCentralWidget(root)
 
         controls = QtWidgets.QWidget()
-        # No maximum: the left pane is the operator's to widen, and its text is
+        # No maximum: the left rail is the operator's to widen, and its text is
         # the reading, not a caption.
         controls_layout = QtWidgets.QVBoxLayout(controls)
         controls_layout.setContentsMargins(14, 12, 12, 12)
@@ -509,42 +615,45 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         controls_layout.addWidget(title)
         controls_layout.addWidget(subtitle)
 
-        # The left column is split so the expected-line list can be as long as
-        # the window under the controls, which is the tall space F17 item 1 is
-        # about.  It costs the plots no width: the list is narrower than the
-        # control tabs already are.
-        self.controls_splitter = QtWidgets.QSplitter(QtCore.Qt.Vertical)
-        self.controls_splitter.setChildrenCollapsible(False)
-        self.controls_splitter.setHandleWidth(8)
+        # LEFT RAIL — nothing but controls.  The tables used to be stacked
+        # under them, which is why every control tab had to scroll: two working
+        # surfaces were competing for one column's height (F20).
         self.control_tabs = QtWidgets.QTabWidget()
         self._build_files_tab()
         self._build_procedure_tab()
         self._build_lamp_tab()
         self._build_save_tab()
-        self.controls_splitter.addWidget(self.control_tabs)
-        self._build_expected_lines_panel()
-        self.controls_splitter.setStretchFactor(0, 3)
-        self.controls_splitter.setStretchFactor(1, 2)
-        controls_layout.addWidget(self.controls_splitter, 1)
+        controls_layout.addWidget(self.control_tabs, 1)
+        self.controls_rail = controls
         root.addWidget(controls)
 
-        view_column = QtWidgets.QSplitter(QtCore.Qt.Vertical)
-        view_column.setChildrenCollapsible(False)
-        view_column.setHandleWidth(8)
-        self.view_splitter = view_column
-        self._build_status_band()
-        view_column.addWidget(self.status_band)
+        # CENTER — the plots, and nothing else.  They are the flexible element:
+        # they give width to the rails rather than the other way round, because
+        # a plot can be zoomed and a table cannot (owner: "smaller plot view is
+        # fine, I can zoom, but mostly I don't need anyway").
         self.view_tabs = QtWidgets.QTabWidget()
         self._build_triage_view()
         self._build_lamp_fit_view()
         self._build_sphere_view()
-        view_column.addWidget(self.view_tabs)
-        view_column.setStretchFactor(0, 0)
-        view_column.setStretchFactor(1, 1)
-        root.addWidget(view_column)
-        root.setStretchFactor(0, 0)
-        root.setStretchFactor(1, 1)
+        root.addWidget(self.view_tabs)
+
+        # RIGHT RAIL — the two working tables, one above the other, each as
+        # long as the window allows.
+        self._build_tables_rail()
+        root.addWidget(self.tables_rail)
+
+        # Stretch factors, not pixel cuts: every one of these is a share of
+        # whatever width the window turns out to have, so maximizing widens all
+        # three rather than handing the whole gain to the plots.
+        for index, stretch in enumerate(_ROOT_STRETCH):
+            root.setStretchFactor(index, stretch)
         root.splitterMoved.connect(lambda *_args: self._relayout_wrapped_text())
+
+        self._build_status_band()
+        outer.addWidget(self.status_band)
+        outer.addWidget(root)
+        outer.setStretchFactor(0, 0)
+        outer.setStretchFactor(1, 1)
 
         self._build_details_dock()
 
@@ -617,31 +726,47 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         _emphasise(self.triage_headline, headline)
         _emphasise(self.exposure_value, body, bold=False)
         controls.setMinimumWidth(self._controls_minimum_width())
-        self.expected_lines_panel.setMinimumHeight(self._expected_lines_minimum_height())
+        self.tables_rail.setMinimumWidth(self._tables_minimum_width())
+        self.expected_lines_panel.setMinimumHeight(
+            self._table_panel_minimum_height(
+                self.expected_lines_panel, self.line_help_table, self.line_panel_header
+            )
+        )
+        self.anchors_panel.setMinimumHeight(
+            self._table_panel_minimum_height(
+                self.anchors_panel, self.anchor_table, self.anchor_buttons
+            )
+        )
         self._measure_status_band()
         self._distribute_space()
 
-    #: What "workable" means for the expected-lines table, in rows rather than
-    #: in a pixel guess that a larger platform font would quietly invalidate.
-    #: Below this the panel is the corner box the owner was handed, not the
-    #: working surface of line identification.
+    #: What "workable" means for either working table, in rows rather than in a
+    #: pixel guess that a larger platform font would quietly invalidate.
+    #: Below this either table is the corner box the owner was handed, not a
+    #: working surface — so it is what the acceptance tests read the rail
+    #: against at every window size the bench opens at.
     EXPECTED_LINE_ROWS = 6
 
-    def _expected_lines_minimum_height(self) -> int:
-        """The height at which the expected-line table shows real work.
+    #: And what the rail refuses to shrink either table below, whatever else
+    #: has to give.  Lower than the workable count on purpose: a display too
+    #: small for the whole layout should lose rows from both tables evenly
+    #: rather than crush one of them out of existence to spare the other.
+    TABLE_FLOOR_ROWS = 3
+
+    def _table_panel_minimum_height(self, panel, table, header_widget) -> int:
+        """The height below which a rail panel stops being a working surface.
 
         Derived from the table's own metrics, so the floor moves with the
-        platform font instead of pinning six rows to one designer's display.
+        platform font instead of pinning a row count to one designer's display.
         """
 
-        table = self.line_help_table
-        layout = self.expected_lines_panel.layout()
+        layout = panel.layout()
         margins = layout.contentsMargins()
         return int(
-            self.EXPECTED_LINE_ROWS * table.verticalHeader().defaultSectionSize()
+            self.TABLE_FLOOR_ROWS * table.verticalHeader().defaultSectionSize()
             + table.horizontalHeader().sizeHint().height()
             + 2 * table.frameWidth()
-            + self.line_panel_header.sizeHint().height()
+            + header_widget.sizeHint().height()
             + margins.top()
             + margins.bottom()
             + layout.spacing()
@@ -651,38 +776,73 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         )
 
     def _distribute_space(self) -> None:
-        """Hand each column a share it can work in, and let the user re-cut it.
+        """Cut every splitter as a share of the size the window actually has.
 
-        Three splitters, three honest defaults: the controls get the width
-        their own content needs and the plots get the rest; the left column is
-        split so the expected-line table has a real share rather than the
-        leftovers; the view column spends a fixed strip on the always-visible
-        readings and gives everything else to the plots.  Whatever the operator
-        drags is what they get back for the rest of the session.
+        The old cuts were pixel numbers tuned at one geometry, laid down before
+        the first layout pass — which is how a maximized bench still opened
+        with a 240 px left rail the owner had to drag wide before he could use
+        it.  Shares survive any window size; the operator's own drag is
+        remembered as a share too, so it survives a resize as a *proportion*
+        rather than as the pixel count it happened to be when the handle
+        stopped moving.  The readings strip is the one exception: it is a strip
+        and takes exactly what its content costs.
         """
 
-        controls_width = self.root_splitter.widget(0).minimumWidth() + 60
-        self._apply_splitter_sizes(
-            self.root_splitter, "root", [controls_width, max(760, 1500 - controls_width)]
+        if self._distributing:
+            return
+        self._distributing = True
+        try:
+            self._apply_splitter_shares(self.root_splitter, "root", _ROOT_SHARES)
+            self._apply_splitter_shares(self.tables_splitter, "tables", _TABLES_SHARES)
+            self._watch_splitter(self.readings_splitter, "readings")
+            self._pin_status_band_height()
+        finally:
+            self._distributing = False
+
+    def _apply_splitter_shares(self, splitter, key: str, default) -> None:
+        """Lay this splitter's cut down as shares of its current extent."""
+
+        shares = _SESSION_SPLITTER_SHARES.get(key, tuple(default))
+        extent = (
+            splitter.width()
+            if splitter.orientation() == QtCore.Qt.Horizontal
+            else splitter.height()
         )
-        # Not 40/60 by decree: the table's floor is content-derived and the
-        # proportion only decides what the extra room does.
-        self._apply_splitter_sizes(self.controls_splitter, "controls", [560, 440])
-        band = max(self.status_band.sizeHint().height(), 1)
-        self._apply_splitter_sizes(self.view_splitter, "view", [band, max(420, 900 - band)])
-
-    def _apply_splitter_sizes(self, splitter, key: str, default: list[int]) -> None:
-        """Restore this splitter's remembered cut, or lay down the default."""
-
-        splitter.setSizes(_SESSION_SPLITTER_SIZES.get(key, default))
-        splitter.splitterMoved.connect(
-            lambda *_args, _s=splitter, _k=key: _SESSION_SPLITTER_SIZES.__setitem__(
-                _k, _s.sizes()
+        if extent <= 0:
+            # Before the first layout pass a splitter has no extent to divide.
+            # Hand it the shares against the window instead, and the show/resize
+            # passes will re-cut it against the real one.
+            extent = (
+                self.width()
+                if splitter.orientation() == QtCore.Qt.Horizontal
+                else self.height()
             )
+        total = sum(shares) or 1.0
+        splitter.setSizes([max(1, int(extent * share / total)) for share in shares])
+        self._watch_splitter(splitter, key)
+
+    def _watch_splitter(self, splitter, key: str) -> None:
+        """Remember this splitter's cut from the moment the operator drags it."""
+
+        if key in self._splitter_keys:
+            return
+        self._splitter_keys.add(key)
+        splitter.splitterMoved.connect(
+            lambda *_args, _s=splitter, _k=key: self._remember_cut(_s, _k)
         )
+
+    @staticmethod
+    def _remember_cut(splitter, key: str) -> None:
+        """Record a dragged handle as shares, which any window size can restore."""
+
+        sizes = splitter.sizes()
+        total = sum(sizes)
+        if total <= 0:
+            return
+        _SESSION_SPLITTER_SHARES[key] = tuple(size / total for size in sizes)
 
     def _controls_minimum_width(self) -> int:
-        """Widen the left pane until its own controls stop clipping.
+        """Widen the left rail until its own controls stop clipping.
 
         The minimum is read off the content rather than guessed, which is what
         makes the default geometry legible instead of merely large.
@@ -694,6 +854,92 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         ):
             widest = max(widest, widget.sizeHint().width())
         return int(min(560, max(400, widest + 60)))
+
+    def _tables_minimum_width(self) -> int:
+        """The width at which the rail still shows every fixed column it has.
+
+        Read off the anchor table's own columns rather than guessed, so the
+        rail's floor moves with the platform font instead of being a number
+        measured once on one display at 100% scaling.
+        """
+
+        columns = sum(
+            self.anchor_table.columnWidth(index)
+            for index in range(self.anchor_table.columnCount())
+        )
+        # Only the anchor table is a demand: its columns are fixed, so a
+        # narrower rail would simply hide one.  The expected-line table's own
+        # columns resize to their contents around a stretching first column and
+        # shrink honestly with the rail.
+        return int(columns + 3 * self.layout_unit)
+
+    def _build_tables_rail(self) -> None:
+        """The right rail: the anchor table and the expected-line table.
+
+        The owner's law, verbatim: TWO RAILS.  Controls on the left, tables on
+        the right, plots in between and deliberately smaller — "smaller plot
+        view is fine, I can zoom, but mostly I don't need anyway".  What the
+        rail is really for is that these two tables stop competing with the
+        controls for one column's height: stacked under the tabs they turned
+        every control tab into a scrolling one and left both tables four rows
+        tall.  Down their own rail each of them is as long as the window.
+        """
+
+        rail = QtWidgets.QSplitter(QtCore.Qt.Vertical)
+        rail.setChildrenCollapsible(False)
+        rail.setHandleWidth(8)
+        self.tables_splitter = rail
+        self.tables_rail = rail
+        self._build_anchors_panel()
+        self._build_expected_lines_panel()
+        for index, stretch in enumerate(_TABLES_STRETCH):
+            rail.setStretchFactor(index, stretch)
+
+    def _build_anchors_panel(self) -> None:
+        """The anchor table, down the right rail beside the lines it anchors.
+
+        Only the table and its two buttons: the numbers the fit produces are
+        readings and live on the readings strip, where they are in view from
+        every tab rather than behind whichever one happens to be open.
+        """
+
+        panel = QtWidgets.QGroupBox("Anchors")
+        layout = QtWidgets.QVBoxLayout(panel)
+        layout.setContentsMargins(6, 6, 6, 4)
+        layout.setSpacing(5)
+
+        self.anchor_table = QtWidgets.QTableWidget(0, 5)
+        self.anchor_table.setHorizontalHeaderLabels(
+            ["Ord", "λ nm", "Δx px", "Resid", "QC"]
+        )
+        self.anchor_table.horizontalHeader().setSectionResizeMode(QtWidgets.QHeaderView.Fixed)
+        self.anchor_table.horizontalHeader().setFixedHeight(28)
+        for column, width in enumerate((44, 78, 68, 68, 48)):
+            self.anchor_table.setColumnWidth(column, width)
+        self.anchor_table.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
+        self.anchor_table.verticalHeader().setVisible(False)
+        self.anchor_table.verticalHeader().setDefaultSectionSize(24)
+        self.anchor_table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
+        self.anchor_table.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
+        layout.addWidget(self.anchor_table, 1)
+
+        # Stacked, not side by side: a rail is narrow by design, and two
+        # buttons sharing its width is how a label gets clipped at the first
+        # platform whose font is wider than the designer's.  Down the rail each
+        # of them keeps its whole text at any width the rail can have.
+        buttons = QtWidgets.QWidget()
+        button_column = QtWidgets.QVBoxLayout(buttons)
+        button_column.setContentsMargins(0, 0, 0, 0)
+        button_column.setSpacing(4)
+        self.remove_button = QtWidgets.QPushButton("Remove selected")
+        self.clear_button = QtWidgets.QPushButton("Clear anchors")
+        button_column.addWidget(self.remove_button)
+        button_column.addWidget(self.clear_button)
+        layout.addWidget(buttons)
+
+        self.anchor_buttons = buttons
+        self.anchors_panel = panel
+        self.tables_splitter.addWidget(panel)
 
     def loud_widgets(self) -> list[object]:
         """Every widget currently drawn at the headline size.
@@ -725,8 +971,10 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         self.details_view.setOpenExternalLinks(False)
         # A dock that explains things on request had claimed 213 px of a 920 px
         # window whether or not anything had been asked.  It reads calmly in
-        # four lines and drags taller the moment it needs to.
-        self.details_view.setMinimumHeight(64)
+        # a few lines and drags taller the moment it needs to — and its height
+        # is quoted in lines of the platform's own text, like every other size
+        # in this window.
+        self.details_view.setMinimumHeight(3 * self.layout_unit)
         self.details_view.setPlaceholderText(
             "Click any verdict, checklist row, file, or anchor and the whole "
             "explanation is written here. It changes only when asked."
@@ -734,7 +982,7 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         dock.setWidget(self.details_view)
         self.details_dock = dock
         self.addDockWidget(QtCore.Qt.BottomDockWidgetArea, dock)
-        self.resizeDocks([dock], [110], QtCore.Qt.Vertical)
+        self.resizeDocks([dock], [4 * self.layout_unit], QtCore.Qt.Vertical)
         self.explain(
             "Exposure triage is the front door",
             "Drop any SIF and the bench judges the exposure before any role "
@@ -796,8 +1044,28 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
                 self.explain(title, source.property("explainText") or "")
         return super().eventFilter(source, event)
 
+    def showEvent(self, event) -> None:  # noqa: N802 - Qt naming
+        """Cut the rails against the size the window really got.
+
+        A splitter sized inside ``_build_ui`` is sized against a window Qt has
+        not laid out yet, so the numbers belong to no geometry at all — that is
+        half of "opens cramped, drag it before use".  The first show re-cuts
+        them, and the queued pass re-cuts them once more after the layout the
+        show itself triggers has settled.
+        """
+
+        super().showEvent(event)
+        self._distribute_space()
+        if not self._first_layout_done:
+            self._first_layout_done = True
+            QtCore.QTimer.singleShot(0, self._distribute_space)
+
     def resizeEvent(self, event) -> None:  # noqa: N802 - Qt naming
         super().resizeEvent(event)
+        # Shares, re-applied: a maximized window widens all three columns
+        # instead of spending the whole gain on the plots and leaving the rails
+        # at the width they had in a small window.
+        self._distribute_space()
         self._relayout_wrapped_text()
 
     def _relayout_wrapped_text(self) -> None:
@@ -816,7 +1084,7 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
             # the strip inside it does, so reading the strip on the first pass
             # folds the band against a width it is about to grow out of.
             self._reflow_status_band(
-                self._status_band_columns(self.view_splitter.width())
+                self._status_band_columns(self.readings_splitter.width())
             )
         width = self._checklist_row_width()
         for row in range(self.checklist_tree.count()):
@@ -877,6 +1145,7 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         # background beside the text (F18 item 4).
         self.checklist_tree.setSelectionMode(QtWidgets.QAbstractItemView.SingleSelection)
         self.checklist_tree.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
+        self._fills_its_share(self.checklist_tree)
         layout.addWidget(self.checklist_tree, 1)
         self.control_tabs.addTab(self._scrollable(tab), "Procedure")
 
@@ -929,6 +1198,25 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
             f"{html.escape(symbol)}</td>"
             f'<td valign="top">{body}</td></tr></table>'
         )
+
+    def _fills_its_share(self, widget) -> None:
+        """Let this widget take the room it is given and shrink when it isn't.
+
+        A control page lives inside a QScrollArea, and a resizable scroll area
+        sizes its page by the layout's ``heightForWidth`` — which counts every
+        child's *preferred* height, not its minimum.  One list or preview with
+        a 192 px preferred height therefore put a scrollbar on a page that fit
+        its viewport with room to spare, which is the "Files tab scrolls with
+        the Confirm button clipped" the owner reported: nothing was too big,
+        the page was merely being asked what it would like rather than what it
+        needs.  ``Ignored`` is the honest answer for a list that grows into
+        whatever it is handed: give it a real minimum, and no preference.
+        """
+
+        policy = widget.sizePolicy()
+        policy.setVerticalPolicy(QtWidgets.QSizePolicy.Ignored)
+        widget.setSizePolicy(policy)
+        widget.setMinimumHeight(4 * self.layout_unit)
 
     @staticmethod
     def _scrollable(widget) -> QtWidgets.QScrollArea:
@@ -1013,6 +1301,7 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         self.file_table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
         self.file_table.setSelectionMode(QtWidgets.QAbstractItemView.SingleSelection)
         self.file_table.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
+        self._fills_its_share(self.file_table)
         layout.addWidget(self.file_table, 1)
 
         self.show_frame_button = QtWidgets.QPushButton("Open selected file for lamp fitting")
@@ -1077,6 +1366,49 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         comparison_layout.addWidget(self.compare_button)
         self.sphere_factors_group = comparison_group
 
+        # The alignment numbers are readings too, and they were the last ones
+        # still buried in a control tab: RMS decides whether the fit is done,
+        # and reading it meant opening the Lamp fit tab first (F20).
+        alignment_group = QtWidgets.QGroupBox("Alignment")
+        alignment_form = self._form_layout(alignment_group)
+        self.alignment_state_value = QtWidgets.QLabel("WAITING FOR FRAME")
+        self.alignment_state_value.setObjectName("stateBadge")
+        self.anchor_count_value = QtWidgets.QLabel("0")
+        self.rms_value = QtWidgets.QLabel("—")
+        self.transform_value = QtWidgets.QLabel("—")
+        self.transform_value.setWordWrap(True)
+        alignment_form.addRow("State", self.alignment_state_value)
+        alignment_form.addRow("Anchors / RMS", self._anchor_rms_row())
+        alignment_form.addRow("dx / dy / θ", self.transform_value)
+        self._explainable(
+            self.rms_value,
+            "Fit RMS in detector pixels",
+            "The root-mean-square distance between where the solved rigid "
+            "transform predicts each anchored line and where its centroid "
+            "actually is. Sub-pixel is what this instrument gives when the "
+            "anchors reference the right lamp's catalog; several pixels means "
+            "the anchors are being measured against the wrong element's lines, "
+            "or that one bad anchor is dragging the solution.",
+        )
+        self._explainable(
+            self.anchor_count_value,
+            "Anchors",
+            "Each anchor is one known line whose centroid was fitted on this "
+            "frame. Two in different orders solve the rigid transform; more "
+            "tighten it. Anchors on saturated lines are refused one by one, "
+            "so a dim-series frame contributes its unsaturated lines and "
+            "nothing else.",
+        )
+        self._explainable(
+            self.transform_value,
+            "Rigid detector transform",
+            "How far the detector has moved since the base wavelength table "
+            "was measured: a shift along the dispersion (dx), across the "
+            "orders (dy), and a rotation. The saved snapshot's wavelength.txt "
+            "is the base table moved by exactly this.",
+        )
+        self.alignment_group = alignment_group
+
         band.setSizePolicy(
             QtWidgets.QSizePolicy.Preferred, QtWidgets.QSizePolicy.Maximum
         )
@@ -1093,14 +1425,32 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
             label.setSizePolicy(policy)
         self.status_band = band
         self.status_band_layout = band_layout
-        #: Two readings, not three.  Each keeps the width its own longest
-        #: control needs and the band never shaves them.  Exposure guidance is
-        #: prose that runs to several lines and belongs with the triage it
-        #: explains; a strip that has to hold it is a strip that pushes the
-        #: plots off the window.
-        self._status_panels = (status_group, comparison_group)
+        #: Three readings.  Each keeps the width its own longest control needs
+        #: and the band never shaves them.  Exposure guidance is still not one
+        #: of them: it is prose that runs to several lines and belongs with the
+        #: triage it explains; a strip that has to hold it is a strip that
+        #: pushes the plots off the window.
+        self._status_panels = (status_group, alignment_group, comparison_group)
         self._status_columns = 0
         self._reflow_status_band(len(self._status_panels))
+
+    def _anchor_rms_row(self) -> QtWidgets.QWidget:
+        """Anchor count and RMS on one line: two short numbers, one strip row.
+
+        A readings strip is a strip. Two facts that are each three characters
+        long do not each earn a row of the window's height.
+        """
+
+        row = QtWidgets.QWidget()
+        layout = QtWidgets.QHBoxLayout(row)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(8)
+        layout.addWidget(self.anchor_count_value)
+        separator = QtWidgets.QLabel("·")
+        separator.setObjectName("mutedText")
+        layout.addWidget(separator)
+        layout.addWidget(self.rms_value, 1)
+        return row
 
     def _measure_status_band(self) -> None:
         """Record what each reading panel needs, once the real font is on it.
@@ -1176,11 +1526,11 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         if layout.hasHeightForWidth() and band.width() > 0:
             needed = max(needed, layout.heightForWidth(band.width()))
         band.setMinimumHeight(needed)
-        if "view" in _SESSION_SPLITTER_SIZES:
+        if "readings" in _SESSION_SPLITTER_SHARES:
             return  # the operator has cut this column themselves
-        sizes = self.view_splitter.sizes()
+        sizes = self.readings_splitter.sizes()
         if len(sizes) == 2 and sizes[0] != needed and sum(sizes) > needed:
-            self.view_splitter.setSizes([needed, sum(sizes) - needed])
+            self.readings_splitter.setSizes([needed, sum(sizes) - needed])
 
     def _status_band_columns(self, width: int) -> int:
         """How many columns of readings *width* can hold without squeezing."""
@@ -1203,26 +1553,6 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         tab = QtWidgets.QWidget()
         layout = QtWidgets.QVBoxLayout(tab)
         layout.setContentsMargins(10, 12, 10, 10)
-
-        # The fit view names the file it is fitting. Reading a lineless hump
-        # and not knowing it was the background frame is what this ends.
-        self.fit_file_value = QtWidgets.QLabel("no file open for fitting")
-        self.fit_file_value.setWordWrap(True)
-        self.fit_file_value.setObjectName("messagePanel")
-        self._explainable(
-            self.fit_file_value,
-            "Which file this fit is measuring",
-            "The fit tab opens the assigned lamp signal by default, and states "
-            "here which file it is showing and whether the assigned lamp "
-            "background is being subtracted from it. Opening any other file "
-            "from the Files tab overrides this and the line above says so.",
-        )
-        layout.addWidget(self.fit_file_value)
-        self.fit_warning_value = QtWidgets.QLabel("")
-        self.fit_warning_value.setWordWrap(True)
-        self.fit_warning_value.setObjectName("warningPanel")
-        self.fit_warning_value.setVisible(False)
-        layout.addWidget(self.fit_warning_value)
 
         order_group = QtWidgets.QGroupBox("Order and frame")
         order_layout = QtWidgets.QVBoxLayout(order_group)
@@ -1288,80 +1618,15 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         )
         layout.addWidget(order_group)
 
-        self.reference_value = QtWidgets.QLabel(
-            "No lamp catalog is scoping the fit yet."
-        )
-        self.reference_value.setWordWrap(True)
-        self.reference_value.setObjectName("messagePanel")
-        layout.addWidget(self.reference_value)
-
-        fit_group = QtWidgets.QGroupBox("Rigid alignment")
-        fit_form = self._form_layout(fit_group)
-        self.alignment_state_value = QtWidgets.QLabel("WAITING FOR FRAME")
-        self.alignment_state_value.setObjectName("stateBadge")
-        self.anchor_count_value = QtWidgets.QLabel("0")
-        self.rms_value = QtWidgets.QLabel("—")
-        self.transform_value = QtWidgets.QLabel("—")
-        self.transform_value.setWordWrap(True)
-        fit_form.addRow("State", self.alignment_state_value)
-        fit_form.addRow("Anchors", self.anchor_count_value)
-        fit_form.addRow("RMS", self.rms_value)
-        fit_form.addRow("dx / dy / θ", self.transform_value)
-        self._explainable(
-            self.rms_value,
-            "Fit RMS in detector pixels",
-            "The root-mean-square distance between where the solved rigid "
-            "transform predicts each anchored line and where its centroid "
-            "actually is. Sub-pixel is what this instrument gives when the "
-            "anchors reference the right lamp's catalog; several pixels means "
-            "the anchors are being measured against the wrong element's lines, "
-            "or that one bad anchor is dragging the solution.",
-        )
-        self._explainable(
-            self.anchor_count_value,
-            "Anchors",
-            "Each anchor is one known line whose centroid was fitted on this "
-            "frame. Two in different orders solve the rigid transform; more "
-            "tighten it. Anchors on saturated lines are refused one by one, "
-            "so a dim-series frame contributes its unsaturated lines and "
-            "nothing else.",
-        )
-        self._explainable(
-            self.transform_value,
-            "Rigid detector transform",
-            "How far the detector has moved since the base wavelength table "
-            "was measured: a shift along the dispersion (dx), across the "
-            "orders (dy), and a rotation. The saved snapshot's wavelength.txt "
-            "is the base table moved by exactly this.",
-        )
-        layout.addWidget(fit_group)
-
-        self.anchor_table = QtWidgets.QTableWidget(0, 5)
-        self.anchor_table.setHorizontalHeaderLabels(
-            ["Ord", "λ nm", "Δx px", "Resid", "QC"]
-        )
-        self.anchor_table.horizontalHeader().setSectionResizeMode(QtWidgets.QHeaderView.Fixed)
-        self.anchor_table.horizontalHeader().setFixedHeight(28)
-        for column, width in enumerate((44, 78, 68, 68, 48)):
-            self.anchor_table.setColumnWidth(column, width)
-        self.anchor_table.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
-        self.anchor_table.verticalHeader().setVisible(False)
-        self.anchor_table.verticalHeader().setDefaultSectionSize(24)
-        self.anchor_table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
-        self.anchor_table.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
-        layout.addWidget(self.anchor_table, 1)
-
-        button_row = QtWidgets.QHBoxLayout()
-        self.remove_button = QtWidgets.QPushButton("Remove selected")
-        self.clear_button = QtWidgets.QPushButton("Clear anchors")
-        button_row.addWidget(self.remove_button)
-        button_row.addWidget(self.clear_button)
-        layout.addLayout(button_row)
-
+        # The anchor table and the alignment readings it produces live in the
+        # right rail (F20).  Stacked here they were the single heaviest thing
+        # in the controls column, which is what made this tab scroll at every
+        # window size the bench has ever opened at.
         self.message_value = QtWidgets.QLabel("Waiting for data.")
         self.message_value.setWordWrap(True)
         self.message_value.setObjectName("messagePanel")
         layout.addWidget(self.message_value)
+        layout.addStretch(1)
         self.control_tabs.addTab(self._scrollable(tab), "Lamp fit")
 
     def _build_save_tab(self) -> None:
@@ -1399,6 +1664,7 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         self.toml_preview.setPlaceholderText(
             "Generated campaign.toml appears here; all files remain ordinary and editable."
         )
+        self._fills_its_share(self.toml_preview)
         layout.addWidget(self.toml_preview, 1)
         self.control_tabs.addTab(self._scrollable(tab), "Save")
 
@@ -1483,10 +1749,44 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         widget = QtWidgets.QWidget()
         outer = QtWidgets.QVBoxLayout(widget)
         outer.setContentsMargins(0, 0, 0, 0)
+
+        # "The active filename is stated in the fit view itself" (F16 item 5) —
+        # which is here, beside the spectrum it describes, rather than in the
+        # control tab where it was four wrapped lines of a narrow rail's height
+        # and nowhere near the plot it is talking about.
+        self.fit_file_value = QtWidgets.QLabel("no file open for fitting")
+        self.fit_file_value.setWordWrap(True)
+        self.fit_file_value.setObjectName("messagePanel")
+        self._explainable(
+            self.fit_file_value,
+            "Which file this fit is measuring",
+            "The fit view opens the assigned lamp signal by default, and states "
+            "here which file it is showing and whether the assigned lamp "
+            "background is being subtracted from it. Opening any other file "
+            "from the Files tab overrides this and the line above says so.",
+        )
+        outer.addWidget(self.fit_file_value)
+        self.fit_warning_value = QtWidgets.QLabel("")
+        self.fit_warning_value.setWordWrap(True)
+        self.fit_warning_value.setObjectName("warningPanel")
+        self.fit_warning_value.setVisible(False)
+        outer.addWidget(self.fit_warning_value)
+
+        # Which lamp catalog is scoping the sticks reads beside the sticks, for
+        # the same reason: it is a statement about this spectrum, and in the
+        # control rail it was three wrapped lines of a column that has no
+        # spare ones.
+        self.reference_value = QtWidgets.QLabel(
+            "No lamp catalog is scoping the fit yet."
+        )
+        self.reference_value.setWordWrap(True)
+        self.reference_value.setObjectName("messagePanel")
+        outer.addWidget(self.reference_value)
+
         split = QtWidgets.QSplitter(QtCore.Qt.Vertical)
         split.setChildrenCollapsible(False)
         self.lamp_fit_splitter = split
-        outer.addWidget(split)
+        outer.addWidget(split, 1)
 
         graphics = pg.GraphicsLayoutWidget()
         graphics.setBackground("#10151b")
@@ -1537,13 +1837,13 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         self.view_tabs.addTab(widget, "Lamp fit")
 
     def _build_expected_lines_panel(self) -> None:
-        """The expected-line list, down the tall left column (F17 item 1).
+        """The expected-line list, down the right rail (F17 item 1, F20).
 
-        Under the spectrum the table showed four rows of a twenty-row list
-        while the left column stood empty below the alignment panel.  Here it
-        gets the height it wants, stays in view whichever control tab is open,
-        and takes no width from the plots — the control tabs are wider than it
-        is anyway.
+        Under the spectrum the table showed four rows of a twenty-row list; in
+        the left column below the controls it was still sharing one column's
+        height with four tabs of controls.  In the tables rail it is as long as
+        the window, beside the anchor table it feeds, and in view whichever
+        control tab is open.
         """
 
         panel = QtWidgets.QGroupBox("Expected lines")
@@ -1579,9 +1879,13 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         self.line_help_table.setSelectionMode(QtWidgets.QAbstractItemView.SingleSelection)
         self.line_help_table.setAlternatingRowColors(True)
         self.line_help_table.verticalHeader().setVisible(False)
+        # The same row height as the anchor table beside it: two working lists
+        # of the same kind of thing, and the denser row buys readable rows in
+        # the rail rather than padding.
+        self.line_help_table.verticalHeader().setDefaultSectionSize(24)
         panel_layout.addWidget(self.line_help_table, 1)
         self.expected_lines_panel = panel
-        self.controls_splitter.addWidget(panel)
+        self.tables_splitter.addWidget(panel)
 
     def _build_sphere_view(self) -> None:
         widget = QtWidgets.QWidget()
