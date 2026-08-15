@@ -29,11 +29,13 @@ from .calibration_campaign import (
     ComparisonState,
     ExposureState,
     ExposureTriage,
+    LampReferenceSet,
     MeasurementRole,
     TomlState,
-    catalog_lines_for_order,
     catalog_mismatch_warning,
     default_validity,
+    expected_lines_for_order,
+    lamp_reference_set,
     triage_for_role,
 )
 from .snapshot import SnapshotError
@@ -80,6 +82,11 @@ _SUGGESTED_COLOR = "#ffb86b"
 #: The badge that marks an unconfirmed suggestion.  It lives in the file cell
 #: and in the control's colour — never inside the combo's own text.
 _SUGGESTED_BADGE = "SUGGESTED"
+
+#: What the top-end panel says when the last 10% of the range holds nothing.
+#: In words, because an empty log histogram draws a solid block that reads
+#: like a full one (F17 item 3).
+_TOP_END_EMPTY = "No pixels within 10% of full scale."
 
 _SUGGESTED_TOOLTIP = (
     "This role is only a guess read from the filename. The bench has NOT been "
@@ -336,11 +343,11 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         self._detector_key: tuple[str, int] | None = None
         #: Pooled order-plot decorations.  An order change moves and relabels
         #: these; it never destroys and rebuilds them, which is what made
-        #: arrow-key order scrolling crawl on a real 2560x2160 frame.
+        #: arrow-key order scrolling crawl on a real 2560x2160 frame.  There is
+        #: one pool because there is one expected-line list (F17 item 2).
         self._line_pool: list[tuple[object, object]] = []
-        self._catalog_pool: list[tuple[object, object]] = []
         self._anchor_scatter: pg.ScatterPlotItem | None = None
-        self._catalog_cache: dict[tuple[int, str], tuple] = {}
+        self._catalog_cache: dict[tuple, tuple] = {}
         self._catalog_rows: tuple = ()
         self._queue: list[Path] = []
         self._file_rows: list[Path] = []
@@ -395,12 +402,25 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         controls_layout.addWidget(title)
         controls_layout.addWidget(subtitle)
 
+        # The left column is split so the expected-line list can be as long as
+        # the window under the controls, which is the tall space F17 item 1 is
+        # about.  It costs the plots no width: the list is narrower than the
+        # control tabs already are.
+        self.controls_splitter = QtWidgets.QSplitter(QtCore.Qt.Vertical)
+        self.controls_splitter.setChildrenCollapsible(False)
+        self.controls_splitter.setHandleWidth(8)
         self.control_tabs = QtWidgets.QTabWidget()
         self._build_files_tab()
         self._build_procedure_tab()
         self._build_lamp_tab()
         self._build_save_tab()
-        controls_layout.addWidget(self.control_tabs, 1)
+        self.controls_splitter.addWidget(self.control_tabs)
+        self._build_expected_lines_panel()
+        self.controls_splitter.setStretchFactor(0, 3)
+        self.controls_splitter.setStretchFactor(1, 2)
+        # Both halves start with real height; the handle is the operator's.
+        self.controls_splitter.setSizes([420, 300])
+        controls_layout.addWidget(self.controls_splitter, 1)
         root.addWidget(controls)
 
         self.view_tabs = QtWidgets.QTabWidget()
@@ -517,8 +537,9 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         """One dock that explains whatever the operator just clicked.
 
         The whys are learned once and then remembered, so they live behind a
-        hover or a click instead of standing permanently between the operator
-        and the numbers.
+        click instead of standing permanently between the operator and the
+        numbers — and behind a click only, so moving the mouse across the
+        window never rewrites what is being read.
         """
 
         dock = QtWidgets.QDockWidget("Why this reading", self)
@@ -528,8 +549,8 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         self.details_view.setOpenExternalLinks(False)
         self.details_view.setMinimumHeight(110)
         self.details_view.setPlaceholderText(
-            "Hover or click any verdict, checklist row, file, or anchor and the "
-            "whole explanation is written here."
+            "Click any verdict, checklist row, file, or anchor and the whole "
+            "explanation is written here. It changes only when asked."
         )
         dock.setWidget(self.details_view)
         self.details_dock = dock
@@ -555,8 +576,9 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         """Route one widget's explanation to the Why dock, not to a tooltip.
 
         The tooltip keeps a single short line — enough to say that there is
-        more — and hovering or focusing the widget writes the whole text into
-        the dock, where it can be read without covering the controls.
+        more — and clicking or focusing the widget writes the whole text into
+        the dock, where it can be read without covering the controls.  Hover
+        deliberately does nothing: the dock holds still while it is read.
         """
 
         widget.setToolTip(hint or one_line(text))
@@ -577,16 +599,16 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
             self._explainable_widgets.remove(widget)
             widget.removeEventFilter(self)
 
-    #: Hover, focus, and click all mean "tell me more", and all answer in the
-    #: dock.  Nothing has to be clicked to be explained.
+    #: Asking is a click or a focus, never a hover (F17 item 5).  A dock that
+    #: rewrote itself under the pointer yanked the sentence away mid-read
+    #: whenever the mouse crossed something on its way somewhere else.
     _EXPLAIN_EVENTS = (
         QtCore.QEvent.MouseButtonPress,
-        QtCore.QEvent.Enter,
         QtCore.QEvent.FocusIn,
     )
 
     def eventFilter(self, source, event) -> bool:  # noqa: N802 - Qt naming
-        """Send any explained widget's hover, focus, or click to the dock."""
+        """Send any explained widget's click or focus to the dock."""
 
         if event.type() in self._EXPLAIN_EVENTS:
             title = source.property("explainTitle")
@@ -717,7 +739,9 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         # sized by its content and never squeezed into an ellipsis.
         header.setSectionResizeMode(1, QtWidgets.QHeaderView.ResizeToContents)
         header.setSectionResizeMode(2, QtWidgets.QHeaderView.ResizeToContents)
-        self.file_table.setMouseTracking(True)
+        # Mouse tracking is deliberately off: nothing in this window reacts to
+        # the pointer merely passing over it (F17 item 5).
+        self.file_table.setMouseTracking(False)
         self.file_table.verticalHeader().setVisible(False)
         self.file_table.verticalHeader().setDefaultSectionSize(34)
         self.file_table.verticalHeader().setSectionResizeMode(
@@ -1008,24 +1032,48 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         self.histogram_plot.setLabel("left", "pixels per bin")
         self.histogram_plot.getAxis("bottom").enableAutoSIPrefix(False)
         self.histogram_plot.setLogMode(y=True)
-        self.top_histogram_plot = graphics.addPlot(
-            row=1, col=0, title="Top end — the last 10% before full scale"
+        layout.addWidget(graphics, 1)
+
+        # The top end lives in its own widget so that the honest answer — "no
+        # pixels are up here" — can take its place in words (F17 item 3). An
+        # empty log histogram drew a solid block, which says nothing at all.
+        self.top_histogram_widget = pg.GraphicsLayoutWidget()
+        self.top_histogram_widget.setBackground("#10151b")
+        self.top_histogram_plot = self.top_histogram_widget.addPlot(
+            row=0, col=0, title="Top end — the last 10% before full scale"
         )
         self.top_histogram_plot.setLabel("bottom", "counts")
         self.top_histogram_plot.setLabel("left", "pixels per bin")
         self.top_histogram_plot.getAxis("bottom").enableAutoSIPrefix(False)
         self.top_histogram_plot.setLogMode(y=True)
-        layout.addWidget(graphics, 1)
+        layout.addWidget(self.top_histogram_widget, 1)
+        self.top_end_message = QtWidgets.QLabel(_TOP_END_EMPTY)
+        self.top_end_message.setWordWrap(True)
+        self.top_end_message.setObjectName("messagePanel")
+        self.top_end_message.setVisible(False)
+        self._explainable(
+            self.top_end_message,
+            "The top end of the counts histogram",
+            "This panel bins only the last 10% of the detector's range, where "
+            "clipping happens. When nothing is up there the frame has headroom "
+            "and there is no distribution to draw, so it says so rather than "
+            "drawing an empty box that looks like a full one.",
+        )
+        layout.addWidget(self.top_end_message)
         self.view_tabs.addTab(widget, "Exposure triage")
 
     def _build_lamp_fit_view(self) -> None:
-        """One surface for the whole line workflow: spectrum plus its lines.
+        """The spectrum surface of the line workflow.
 
-        Choosing a lamp and then juggling two tabs is not a workflow.  The
-        expected-line table lives beside the spectrum it belongs to and fills
-        itself from the active lamp, order, and wavelength table.
+        Its expected-line list lives down the tall left column rather than
+        crammed under the plot (F17 item 1), but it is the same list: the
+        sticks drawn here and the rows listed there come from one call.
         """
 
+        #: Two pens, made once.  An order change re-points them; it never
+        #: allocates a pen per stick per refresh.
+        self._expected_pen = pg.mkPen("#f5b95f", width=1, style=QtCore.Qt.DashLine)
+        self._anchored_pen = pg.mkPen("#6ee7b7", width=1.6)
         widget = QtWidgets.QWidget()
         outer = QtWidgets.QVBoxLayout(widget)
         outer.setContentsMargins(0, 0, 0, 0)
@@ -1079,8 +1127,20 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         self.residual_plot.getAxis("left").enableAutoSIPrefix(False)
         self.residual_plot.addLine(y=0, pen=pg.mkPen("#64748b", style=QtCore.Qt.DashLine))
         split.addWidget(graphics)
+        split.setStretchFactor(0, 1)
+        self.view_tabs.addTab(widget, "Lamp fit")
 
-        panel = QtWidgets.QWidget()
+    def _build_expected_lines_panel(self) -> None:
+        """The expected-line list, down the tall left column (F17 item 1).
+
+        Under the spectrum the table showed four rows of a twenty-row list
+        while the left column stood empty below the alignment panel.  Here it
+        gets the height it wants, stays in view whichever control tab is open,
+        and takes no width from the plots — the control tabs are wider than it
+        is anyway.
+        """
+
+        panel = QtWidgets.QGroupBox("Expected lines")
         panel_layout = QtWidgets.QVBoxLayout(panel)
         panel_layout.setContentsMargins(6, 6, 6, 4)
         panel_layout.setSpacing(5)
@@ -1092,11 +1152,12 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         self._explainable(
             self.line_panel_header,
             "The expected-line panel fills itself",
-            "These are the packaged catalog lines of the active lamp that fall "
-            "inside the selected order, placed by interpolating the current "
-            "wavelength table. Selecting a row marks its stick on the spectrum "
-            "above; a row already anchored on this frame is ticked. There is "
-            "nothing to populate by hand and nowhere else to go for it.",
+            "These are the assigned lamp's own wavelength-table rows that fall "
+            "inside the selected order — the same list, line for line, as the "
+            "labelled sticks on the spectrum, and the same rows a click can "
+            "anchor. Selecting a row marks its stick; a row already anchored "
+            "on this frame is ticked, and clicking its stick takes the anchor "
+            "back off. There is nothing to populate by hand.",
         )
         panel_layout.addWidget(self.line_panel_header)
         self.line_help_table = QtWidgets.QTableWidget(0, 5)
@@ -1113,10 +1174,8 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         self.line_help_table.setAlternatingRowColors(True)
         self.line_help_table.verticalHeader().setVisible(False)
         panel_layout.addWidget(self.line_help_table, 1)
-        split.addWidget(panel)
-        split.setStretchFactor(0, 3)
-        split.setStretchFactor(1, 1)
-        self.view_tabs.addTab(widget, "Lamp fit")
+        self.expected_lines_panel = panel
+        self.controls_splitter.addWidget(panel)
 
     def _build_sphere_view(self) -> None:
         widget = QtWidgets.QWidget()
@@ -1177,7 +1236,7 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         self.confirm_roles_button.clicked.connect(self._confirm_suggested_roles)
         self.show_frame_button.clicked.connect(self._open_selected_file)
         self.file_table.itemSelectionChanged.connect(self._file_selection_changed)
-        self.file_table.itemEntered.connect(self._file_row_hovered)
+        self.file_table.itemClicked.connect(self._file_row_clicked)
         self.checklist_tree.currentRowChanged.connect(self._checklist_row_selected)
         self.anchor_table.itemSelectionChanged.connect(self._anchor_row_selected)
         self.line_help_table.itemSelectionChanged.connect(self._expected_line_selected)
@@ -1316,14 +1375,13 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         entry = self._catalog_rows[row]
         self.line_highlight.setValue(entry.detector_pixel)
         self.line_highlight.setVisible(True)
-        source = entry.line.source_resource.replace("\\", "/").rsplit("/", 1)[-1]
         self.explain(
-            f"{entry.line.label} — expected at pixel {entry.detector_pixel:.1f}",
-            f"{entry.line.wavelength_nm:.4f} nm, order {entry.order_idx}, from the "
-            f"packaged catalog {source}. The pixel is interpolated from the "
-            "current wavelength table, so it says where to look, not where the "
-            "line is: click the peak itself to fit its centroid and accept it "
-            "as an anchor.",
+            f"{entry.label} — expected at pixel {entry.detector_pixel:.1f}",
+            f"{entry.wavelength_nm:.4f} nm, order {entry.order_idx}, from "
+            f"{entry.source}. The pixel is where the current wavelength table "
+            "puts the line, so it says where to look, not where the line is: "
+            "click the peak itself to fit its centroid and accept it as an "
+            "anchor, and click an anchored stick again to take it back off.",
         )
 
     def _refresh_reference(self) -> None:
@@ -1867,13 +1925,58 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         self._refresh_frame_selector()
         self.refresh_plots()
 
+    def anchor_near(self, order_idx: int, pixel: float):
+        """The anchor of *order_idx* whose stick a click at *pixel* lands on.
+
+        Either end counts: the curated row's expected pixel, where the stick is
+        drawn, and the fitted centroid, where the green marker sits.
+        """
+
+        best = None
+        for anchor in self.session.anchor_rows():
+            if anchor.line.order_idx != int(order_idx):
+                continue
+            tolerance = max(3.0, anchor.line.width_px)
+            distance = min(
+                abs(pixel - anchor.line.center_pixel),
+                abs(pixel - anchor.fit.center_pixel),
+            )
+            if distance <= tolerance and (best is None or distance < best[0]):
+                best = (distance, anchor)
+        return None if best is None else best[1]
+
     def _order_plot_clicked(self, event) -> None:
-        if event.button() != QtCore.Qt.LeftButton or self.session.frame is None:
+        """Click a line to anchor it; click its anchored stick to un-anchor.
+
+        F17 item 4: removal used to live only in the left table, blind to the
+        plot the operator is actually looking at. Both buttons remove here, so
+        the whole anchor workflow happens on the spectrum and the table follows.
+        """
+
+        buttons = (QtCore.Qt.LeftButton, QtCore.Qt.RightButton)
+        if event.button() not in buttons or self.session.frame is None:
             return
         if not self.order_plot.sceneBoundingRect().contains(event.scenePos()):
             return
         point = self.order_plot.getViewBox().mapSceneToView(event.scenePos())
-        result = self.session.fit_anchor_at(self.session.selected_order, point.x())
+        order_idx = self.session.selected_order
+        anchor = self.anchor_near(order_idx, point.x())
+        if anchor is not None:
+            self.session.remove_anchor(anchor.key)
+            self.message_value.setText(
+                f"{anchor.line.species} {anchor.line.wavelength_nm:.3f} nm "
+                "un-anchored from the spectrum; the anchor table is in step and "
+                "the alignment was recomputed. Click the line again to re-anchor it."
+            )
+            self.refresh()
+            return
+        if event.button() == QtCore.Qt.RightButton:
+            self.message_value.setText(
+                "No anchor sits at that pixel. Right-click an anchored line to "
+                "remove it; left-click a labelled line to anchor it."
+            )
+            return
+        result = self.session.fit_anchor_at(order_idx, point.x())
         self.message_value.setText(result.reason)
         self.refresh()
 
@@ -1943,7 +2046,7 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
             self.triage_headline, f"{path.name} — exposure verdict", whole_verdict
         )
         self._draw_histogram(self.histogram_plot, triage, triage.histogram)
-        self._draw_histogram(self.top_histogram_plot, triage, triage.top_histogram)
+        self._draw_top_histogram(triage)
         guidance = record.exposure
         peak = "—" if guidance.peak_value is None else f"{guidance.peak_value:.0f} counts"
         # The one line that decides the next action stays on screen; the four
@@ -1969,15 +2072,25 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
 
     @staticmethod
     def _draw_histogram(plot, triage: ExposureTriage, histogram) -> None:
+        """Draw one counts histogram as outlined bins on a log floor.
+
+        The plot is in log mode, so the fill level has to be given in log
+        space: filling an empty bin down to y=1 is what turned a histogram of
+        zeros into a solid painted block.  Bins are floored just below one
+        pixel and outlined, so a bin holding a handful of pixels is visible and
+        a bin holding none draws nothing.
+        """
+
         plot.clear()
-        counts = np.maximum(np.asarray(histogram.counts, dtype=float), 0.5)
+        floor = 0.5
+        counts = np.maximum(np.asarray(histogram.counts, dtype=float), floor)
         plot.plot(
             np.asarray(histogram.edges, dtype=float),
             counts,
             stepMode="center",
-            fillLevel=0,
+            fillLevel=float(np.log10(floor)),
             brush=pg.mkBrush("#1f4d63"),
-            pen=pg.mkPen("#76d6ff", width=1.2),
+            pen=pg.mkPen("#76d6ff", width=1.4),
         )
         plot.addLine(
             x=triage.saturation.saturation_level,
@@ -1987,6 +2100,24 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
             x=triage.full_scale,
             pen=pg.mkPen("#ff8f8f", style=QtCore.Qt.DashLine),
         )
+
+    def _draw_top_histogram(self, triage: ExposureTriage) -> None:
+        """Draw the top end, or say in words that nothing is up there.
+
+        F17 item 3: an all-zero log histogram rendered as a solid block that
+        conveyed nothing.  Emptiness here is a real and good answer — the frame
+        has headroom — so it is written out instead of drawn.
+        """
+
+        occupied = int(np.count_nonzero(np.asarray(triage.top_histogram.counts)))
+        if occupied == 0:
+            self.top_histogram_widget.setVisible(False)
+            self.top_end_message.setText(_TOP_END_EMPTY)
+            self.top_end_message.setVisible(True)
+            return
+        self.top_end_message.setVisible(False)
+        self.top_histogram_widget.setVisible(True)
+        self._draw_histogram(self.top_histogram_plot, triage, triage.top_histogram)
 
     def refresh(self) -> None:
         """Render the current domain state without changing it."""
@@ -2208,8 +2339,12 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         )
         role_combo.setMinimumWidth(role_combo_minimum_width(role_combo))
 
-    def _file_row_hovered(self, item) -> None:
-        """Hovering a file row writes its whole verdict into the Why dock."""
+    def _file_row_clicked(self, item) -> None:
+        """Clicking a file row writes its whole verdict into the Why dock.
+
+        This used to fire on hover, which meant the dock rewrote itself
+        whenever the pointer crossed the files table on its way elsewhere.
+        """
 
         row = item.row()
         if 0 <= row < len(self._file_rows):
@@ -2381,64 +2516,77 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         self._select_pattern_trace(order_idx)
         top = float(np.nanmax(spectrum)) if np.any(np.isfinite(spectrum)) else 1.0
 
-        line_rows = self.session.lines_for_order(order_idx)
-        for index, line in enumerate(line_rows):
-            marker, label = self._pooled_marker(
-                self._line_pool,
-                index,
-                pg.mkPen("#f5b95f", width=1, style=QtCore.Qt.DashLine),
-                "#f5c56f",
-            )
-            marker.setValue(line.center_pixel)
-            label.setText(f"{line.species} {line.wavelength_nm:.3f}")
-            label.setPos(
-                line.center_pixel, top * (0.90, 0.72, 0.54, 0.36)[index % 4]
-            )
-        self._hide_pooled(self._line_pool, len(line_rows))
-
-        catalog_rows = self._catalog_rows_for_order(order_idx)
-        self._catalog_rows = catalog_rows
-        for index, row in enumerate(catalog_rows):
-            marker, label = self._pooled_marker(
-                self._catalog_pool,
-                index,
-                pg.mkPen("#6aa7ff", width=0.9, style=QtCore.Qt.DotLine),
-                "#8ebcff",
-            )
-            marker.setValue(row.detector_pixel)
-            if index % 3 == 0:
-                label.setText(row.line.label)
-                label.setPos(row.detector_pixel, top * 0.22)
-                label.setVisible(True)
-            else:
-                label.setVisible(False)
-        self._hide_pooled(self._catalog_pool, len(catalog_rows))
-
         anchors = [
             anchor
             for anchor in self.session.anchor_rows()
             if anchor.line.order_idx == order_idx
         ]
+        anchored_nm = [anchor.line.wavelength_nm for anchor in anchors]
+
+        # One list, one pool: the sticks the operator reads and the rows the
+        # panel lists are literally the same objects (F17 item 2).
+        expected = self._expected_rows_for_order(order_idx)
+        self._catalog_rows = expected
+        for index, row in enumerate(expected):
+            marker, label = self._pooled_marker(
+                self._line_pool, index, self._expected_pen, "#f5c56f"
+            )
+            is_anchored = any(
+                abs(row.wavelength_nm - value) <= 0.05 for value in anchored_nm
+            )
+            # An anchored stick wears the anchor's colour, because clicking it
+            # is now how an anchor is taken back off (F17 item 4).
+            marker.setPen(self._anchored_pen if is_anchored else self._expected_pen)
+            marker.setValue(row.detector_pixel)
+            label.setText(row.label)
+            label.setColor("#6ee7b7" if is_anchored else "#f5c56f")
+            label.setPos(
+                row.detector_pixel, top * (0.90, 0.72, 0.54, 0.36)[index % 4]
+            )
+        self._hide_pooled(self._line_pool, len(expected))
+
         self._anchor_scatter.setData(
             [anchor.fit.center_pixel for anchor in anchors],
             [anchor.fit.amplitude + anchor.fit.baseline for anchor in anchors],
         )
         self.line_highlight.setVisible(False)
-        self._refresh_line_help_table(catalog_rows)
+        self._refresh_line_help_table(expected)
         self._refresh_residual_plot()
 
-    def _catalog_rows_for_order(self, order_idx: int) -> tuple:
-        """Cache the packaged catalog's rows per (order, lamp) pair.
+    def _display_reference(self) -> LampReferenceSet | None:
+        """The one reference set the sticks, the rows, and the counts read.
 
-        Re-reading and re-sorting a whole NIST table on every arrow-key press
-        is work the answer does not change with.
+        Normally it is the session's own — the assigned lamp's scoped rows,
+        exactly what a click can snap to.  A hand-picked catalog is an override
+        for comparison, and it moves the sticks with the table rather than only
+        one of them; the panel says loudly that the anchors still reference the
+        assigned lamp.
         """
 
-        key = (int(order_idx), self.line_family_combo.currentText())
+        if self._family_override:
+            return lamp_reference_set(
+                self.line_family_combo.currentText(), self.session.lines
+            )
+        return self.session.reference
+
+    def _expected_rows_for_order(self, order_idx: int) -> tuple:
+        """Cache the expected-line list per (order, reference) pair.
+
+        Rebuilding it on every arrow-key press is work the answer does not
+        change with, and F16's order-scrolling budget has no room for it.
+        """
+
+        reference = self._display_reference()
+        key = (
+            int(order_idx),
+            "" if reference is None else reference.lamp,
+            "" if reference is None else reference.state.value,
+            0 if reference is None else len(reference.lines),
+        )
         rows = self._catalog_cache.get(key)
         if rows is None:
-            rows = catalog_lines_for_order(
-                self.session.lines, order_idx, key[1], maximum_lines=16
+            rows = expected_lines_for_order(
+                reference, order_idx, fallback_lines=self.session.lines
             )
             self._catalog_cache[key] = rows
         return rows
@@ -2464,7 +2612,12 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
             label.setVisible(False)
 
     def _refresh_line_help_table(self, rows) -> None:
-        """Fill the expected-lines panel and tick the rows already anchored."""
+        """Fill the expected-lines panel from the list the sticks were drawn from.
+
+        The count in this header, the rows below it, and the labelled sticks on
+        the spectrum are three renderings of one tuple, so "0 expected Ne lines
+        in this order" can no longer sit under three labelled Ne sticks.
+        """
 
         anchored = {
             round(anchor.line.wavelength_nm, 3)
@@ -2473,44 +2626,48 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         }
         self.line_help_table.setRowCount(len(rows))
         for index, row in enumerate(rows):
-            intensity = row.line.relative_intensity
+            intensity = row.relative_intensity
             is_anchored = any(
-                abs(row.line.wavelength_nm - value) <= 0.05 for value in anchored
+                abs(row.wavelength_nm - value) <= 0.05 for value in anchored
             )
             values = (
-                row.line.label,
-                f"{row.line.wavelength_nm:.4f}",
+                row.label,
+                f"{row.wavelength_nm:.4f}",
                 f"{row.detector_pixel:.1f}",
                 "—" if intensity is None else f"{intensity:.2f}",
                 "✓" if is_anchored else "",
             )
-            source = row.line.source_resource.replace("\\", "/").rsplit("/", 1)[-1]
             for column, value in enumerate(values):
                 item = QtWidgets.QTableWidgetItem(value)
-                item.setToolTip(one_line(f"{row.line.label} from {source}"))
+                item.setToolTip(one_line(f"{row.label} from {row.source}"))
                 if is_anchored:
                     item.setForeground(QtGui.QColor("#6ee7b7"))
                 self.line_help_table.setItem(index, column, item)
-        lamp = "" if self.campaign is None else self.campaign.lamp_for_frame(self.session)
-        family = self.line_family_combo.currentText()
+        reference = self._display_reference()
+        lamp = "" if reference is None else reference.lamp
+        assigned = (
+            "" if self.campaign is None else self.campaign.lamp_for_frame(self.session)
+        )
         order_idx = self.session.selected_order
+        scope = f"{lamp} " if lamp else ""
         header = (
-            f"{len(rows)} expected {family} line(s) in order {order_idx} · "
+            f"{len(rows)} expected {scope}line(s) in order {order_idx} · "
             f"{len(anchored)} anchored here"
         )
-        if lamp and family and catalog_mismatch_warning(family, lamp):
-            header += f" · showing {family}, the assigned lamp is {lamp}"
+        if assigned and lamp and catalog_mismatch_warning(lamp, assigned):
+            header += f" · showing {lamp}, the assigned lamp is {assigned}"
         elif not rows:
-            # "Empty" has two different causes and only one of them is the
-            # operator's to fix; saying which is the whole point of the panel.
-            header += (
-                f" — no {family} lines fall in this order"
-                if lamp
-                else " — assign a lamp role and this fills itself"
-            )
-            best = self.session.best_reference_order()
-            if best is not None and best != order_idx:
-                header += f"; {lamp} is strongest in order {best}"
+            # "Empty" has several causes and only some are the operator's to
+            # fix; saying which is the whole point of the panel.
+            if reference is None:
+                header += " — assign a lamp role and this fills itself"
+            elif not reference.is_referenceable:
+                header += f" — {reference.message}"
+            else:
+                header += f" — no {lamp} lines fall in this order"
+                best = reference.best_order
+                if best is not None and best != order_idx:
+                    header += f"; {lamp} is strongest in order {best}"
         self.line_panel_header.setText(header)
 
     def _refresh_pattern_traces(self) -> None:

@@ -63,11 +63,11 @@ full-screen window without leaning in:
 - the pane divider is a **real splitter with no width ceiling**: drag the
   controls as wide as the reading needs. Triage lines, advice, checklist rows,
   and file cells **wrap**; nothing important is ellipsized;
-- every verdict and parameter carries its **full explanation as a tooltip**, and
-  clicking one — or any checklist row, file row, or anchor — writes that
-  explanation into the **Why this reading** dock at the bottom. The whys live
-  behind a hover or a click, once, rather than standing permanently between the
-  operator and the numbers.
+- every verdict and parameter carries a **one-line tooltip**, and clicking or
+  focusing one — or any checklist row, file row, or anchor — writes the full
+  explanation into the **Why this reading** dock at the bottom. The dock never
+  reacts to the pointer merely passing over a widget: it changes when it is
+  asked to, so a sentence cannot be yanked away mid-read.
 
 The bench window carries its own icon, derived at run time from the same
 `echelle.png` the main GUI uses — tinted and badged rather than redrawn — so the
@@ -105,8 +105,11 @@ Triage needs nothing but a file — no role, no lamp, no folder. As soon as a
 frame is read, the **Exposure triage** view shows one verdict line, the raw
 counts histogram, and a second histogram of the last 10% before full scale, so
 the top end stays legible where the background peak would otherwise dwarf it.
-This replaces squinting at the acquisition software: shoot, drop the file, one
-glance, adjust the lamp, shoot again.
+When no pixel reaches that last 10% there is no distribution to draw, and the
+panel says so in words — *No pixels within 10% of full scale.* — instead of
+painting an empty log histogram as a solid block. This replaces squinting at
+the acquisition software: shoot, drop the file, one glance, adjust the lamp,
+shoot again.
 
 Saturation is judged by clustering alone:
 
@@ -223,17 +226,28 @@ belongs to the spectrum it was measured on.
 The lamp-fit view retains the Packet 4 interaction:
 
 1. choose an order and which frame to fit;
-2. read the blue shared-catalog sticks and the dedicated **Line identification**
-   table for ThAr, Ne, Hg, or Fulcher H2 provenance and approximate pixel
-   positions;
-3. click a gold curated calibration row near the measured peak;
+2. read the labelled sticks on the spectrum, or the same lines listed in the
+   **Expected lines** panel down the left column — selecting a row marks its
+   stick;
+3. click a labelled line near the measured peak to anchor it;
 4. review the raw-pixel saturation verdict and Gaussian centroid;
-5. repeat on another line/order to solve translation plus rotation;
-6. review dx, dy, rotation, RMS, and per-anchor residuals.
+5. click an anchored stick again — with either mouse button — to take the
+   anchor back off; the anchor table follows immediately;
+6. repeat on another line/order to solve translation plus rotation;
+7. review dx, dy, rotation, RMS, and per-anchor residuals.
 
-Shared-catalog positions are interpolated through the current wavelength-table
-rows for identification help. They do not silently become fit anchors. Accepted
-anchors still use the curated calibration table and established fitting,
+**There is one expected-line list.** The labelled sticks, the rows of the
+Expected lines panel, and the count in that panel's header are three renderings
+of one tuple: the assigned lamp's own wavelength-table rows falling in the
+selected order. The packaged NIST caches annotate those rows — relative
+intensity and provenance — where they happen to carry the wavelength, and they
+never add or remove a line. Earlier rounds drew sticks from the curated table
+while filling the panel from the caches interpolated onto the order, which is
+how order 7 could label a NeI 640.225 the panel had never heard of and order 6
+could show three labelled Ne sticks under "0 expected Ne lines in this order":
+the packaged Ne cache spans 580.4–638.3 nm and the curated table does not.
+
+Accepted anchors use the curated calibration table and the established fitting,
 saturation, detector-point, and rigid-transform functions. A low selected-anchor
 RMS does not replace wavelength-table QC or Balmer/Fulcher plasma validation.
 

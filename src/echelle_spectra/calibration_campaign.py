@@ -12,6 +12,7 @@ ever a gate.
 
 from __future__ import annotations
 
+import bisect
 import json
 import os
 import re
@@ -21,6 +22,7 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date
 from enum import Enum
+from functools import lru_cache
 from pathlib import Path
 
 import numpy as np
@@ -59,6 +61,7 @@ __all__ = [
     "ExposureGuidance",
     "ExposureState",
     "ExposureTriage",
+    "ExpectedLine",
     "FileRoleSuggestion",
     "LampReferenceSet",
     "LoadedFrameRecord",
@@ -77,6 +80,7 @@ __all__ = [
     "counts_histogram",
     "default_validity",
     "evaluate_exposure",
+    "expected_lines_for_order",
     "lamp_reference_set",
     "measure_saturation_clusters",
     "normalize_lamp_name",
@@ -377,6 +381,33 @@ class CatalogOrderLine:
 
 
 @dataclass(frozen=True)
+class ExpectedLine:
+    """One line the assigned lamp is expected to show inside one order.
+
+    This is the bench's *only* expected-line source.  The labelled stick on the
+    spectrum, the row in the expected-lines panel, and the per-order count in
+    that panel's header are all rendered from a list of these and from nothing
+    else, so the three can never disagree again.
+
+    The row is the anchorable curated wavelength-table row — the same object a
+    click snaps to — because a line the operator can see but cannot anchor is
+    not help.  The packaged NIST entry, when the caches happen to carry that
+    wavelength, rides along as annotation (relative intensity, provenance) and
+    is never allowed to add or remove a line.
+    """
+
+    row: CalibrationTableLine
+    order_idx: int
+    detector_pixel: float
+    label: str
+    wavelength_nm: float
+    species: str
+    relative_intensity: float | None
+    source: str
+    catalog: SpectralLine | None = None
+
+
+@dataclass(frozen=True)
 class LampReferenceSet:
     """The curated lookup rows one assigned lamp's own catalog contributes.
 
@@ -399,6 +430,17 @@ class LampReferenceSet:
         """Whether an anchor may be looked up against this set at all."""
 
         return self.state in {ReferenceState.UNSCOPED, ReferenceState.MATCHED}
+
+    @property
+    def best_order(self) -> int | None:
+        """The order carrying most of this lamp's own rows, if it has any."""
+
+        counts: dict[int, int] = {}
+        for line in self.lines:
+            counts[line.order_idx] = counts.get(line.order_idx, 0) + 1
+        if not counts:
+            return None
+        return max(counts, key=lambda order: (counts[order], -order))
 
 
 _LAMP_ALIASES = {
@@ -1053,6 +1095,101 @@ def catalog_lines_for_order(
         )
         for line in chosen
     )
+
+
+@lru_cache(maxsize=8)
+def _catalog_by_wavelength(family: str) -> tuple[tuple[float, ...], tuple[SpectralLine, ...]]:
+    """Return one packaged catalog family sorted by wavelength, read once."""
+
+    if not family:
+        return ((), ())
+    ordered = sorted(load_line_table(family), key=lambda line: line.wavelength_nm)
+    return (
+        tuple(float(line.wavelength_nm) for line in ordered),
+        tuple(ordered),
+    )
+
+
+def _nearest_catalog_line(
+    family: str, wavelength_nm: float, tolerance_nm: float
+) -> SpectralLine | None:
+    """The packaged entry within *tolerance_nm* of a curated row, if any."""
+
+    wavelengths, lines = _catalog_by_wavelength(family)
+    if not wavelengths:
+        return None
+    index = bisect.bisect_left(wavelengths, wavelength_nm)
+    best: SpectralLine | None = None
+    best_distance = float(tolerance_nm)
+    for candidate in (index - 1, index):
+        if not 0 <= candidate < len(lines):
+            continue
+        distance = abs(wavelengths[candidate] - wavelength_nm)
+        if distance <= best_distance:
+            best_distance = distance
+            best = lines[candidate]
+    return best
+
+
+def expected_lines_for_order(
+    reference: LampReferenceSet | None,
+    order_idx: int,
+    *,
+    fallback_lines: Sequence[CalibrationTableLine] = (),
+    match_tolerance_nm: float = 0.05,
+) -> tuple[ExpectedLine, ...]:
+    """Return the single expected-line list one order shows for one lamp.
+
+    The bench used to draw its labelled sticks from the curated wavelength
+    table while filling the expected-lines panel from the packaged NIST caches
+    interpolated onto the order.  Those are two different lists: the 2025 Ne
+    cache stops at 638.3 nm, so order 7 drew a stick for the curated NeI
+    640.225 row that the panel had never heard of, and orders 0-6 drew three
+    sticks each under a panel reading "0 expected Ne lines in this order".
+
+    There is one list now, and this returns it: the assigned lamp's own
+    reference rows falling in this order, in detector order, annotated from the
+    packaged catalog where it happens to know the wavelength.  A reference set
+    that cannot anchor anything (a free-text lamp, or a lamp whose species this
+    table never carries) contributes nothing, and its own message says why.
+    """
+
+    if reference is None:
+        rows: Sequence[CalibrationTableLine] = tuple(fallback_lines)
+        family = ""
+    elif reference.is_referenceable:
+        rows = reference.lines
+        family = reference.catalog_family
+    else:
+        rows = ()
+        family = ""
+    order = int(order_idx)
+    scoped = sorted(
+        (row for row in rows if row.order_idx == order),
+        key=lambda row: (row.center_pixel, row.wavelength_nm),
+    )
+    expected = []
+    for row in scoped:
+        match = _nearest_catalog_line(family, row.wavelength_nm, match_tolerance_nm)
+        source = (
+            row.comment.strip() or "the curated wavelength table"
+            if match is None
+            else match.source_resource.replace("\\", "/").rsplit("/", 1)[-1]
+        )
+        expected.append(
+            ExpectedLine(
+                row,
+                order,
+                float(row.center_pixel),
+                f"{row.species} {row.wavelength_nm:.3f}",
+                float(row.wavelength_nm),
+                row.species,
+                None if match is None else match.relative_intensity,
+                source,
+                match,
+            )
+        )
+    return tuple(expected)
 
 
 def compute_absolute_calibration(

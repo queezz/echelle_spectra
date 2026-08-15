@@ -99,11 +99,16 @@ def _window(tmp_path: Path, *, with_loader: bool = False, **frame_options) -> Ca
     pattern = np.column_stack(
         [np.full(_COLUMNS, 12, dtype=float), np.full(_COLUMNS, 30, dtype=float)]
     )
+    # Both lamps carry rows in this table, because F17's whole point is that
+    # the panel and the sticks read the assigned lamp's own rows: a Ne lamp
+    # against a Th-only table is honestly empty, and would prove nothing.
     lines = (
         CalibrationTableLine(0, 20, 30, 25, 578.0, "ThI", "ok"),
         CalibrationTableLine(0, 65, 75, 70, 640.0, "ArI", "ok"),
         CalibrationTableLine(1, 50, 60, 55, 580.0, "ThI", "ok"),
         CalibrationTableLine(1, 65, 75, 70, 635.0, "ArI", "ok"),
+        CalibrationTableLine(0, 21, 31, 26, 585.2488, "NeI", "ok"),
+        CalibrationTableLine(1, 51, 61, 56, 588.1895, "NeI", "ok"),
     )
     session = CalibrationBenchSession(pattern, lines)
     session.accept_frame(_frame_for(tmp_path / "bench-fixture.sif"))
@@ -706,10 +711,17 @@ def test_long_help_reads_in_the_dock_not_in_a_floating_tooltip(qt_app, tmp_path)
         # The full text is longer than the tooltip and lives in the dock.
         assert widget.property("explainText")
 
-    # Hover alone fills the dock; nothing has to be clicked to be explained.
+    # F17 item 5 supersedes F16's hover route: a click fills the dock.
     window.details_view.setHtml("")
     window.eventFilter(
-        window.rms_value, QtCore.QEvent(QtCore.QEvent.Enter)
+        window.rms_value,
+        QtGui.QMouseEvent(
+            QtCore.QEvent.MouseButtonPress,
+            QtCore.QPointF(1.0, 1.0),
+            QtCore.Qt.LeftButton,
+            QtCore.Qt.LeftButton,
+            QtCore.Qt.NoModifier,
+        ),
     )
     assert "root-mean-square" in window.details_view.toPlainText()
     # So does focus.
@@ -953,8 +965,9 @@ def test_the_expected_line_panel_lives_with_the_spectrum_and_fills_itself(
     assert window.line_family_combo.currentText() == "Ne"
     assert window.line_help_table.rowCount() > 0
     assert "expected Ne line(s)" in window.line_panel_header.text()
-    # And it lives in the same view as the spectrum it belongs to.
-    assert window.lamp_fit_splitter.isAncestorOf(window.line_help_table)
+    # F17 item 1 moved it out from under the spectrum into the tall left
+    # column; the spectrum keeps its own view.
+    assert window.controls_splitter.isAncestorOf(window.line_help_table)
     assert window.lamp_fit_splitter.isAncestorOf(window.order_plot.getViewWidget())
 
     # Picking the work on the left brings its own view with it.
@@ -1090,4 +1103,283 @@ def test_packet5_toml_and_save_controls_follow_domain_state(qt_app, tmp_path):
     assert window.toml_preview.toPlainText().startswith("#")
     assert window.save_state_value.text() == "READY"
     assert window.save_snapshot_button.isEnabled()
+    window.close()
+
+
+# ----------------------------------------------------------------------
+# Packet F17 — line-work round 3
+# ----------------------------------------------------------------------
+
+
+def _drawn_sticks(window) -> list[tuple[str, float]]:
+    """Every labelled expected-line stick currently drawn on the spectrum."""
+
+    drawn = []
+    for marker, label in window._line_pool:
+        if not marker.isVisible():
+            continue
+        drawn.append((label.toPlainText(), float(marker.value())))
+    return drawn
+
+
+def _listed_rows(window) -> list[tuple[str, float]]:
+    """Every row of the expected-lines panel, as it reads on screen."""
+
+    table = window.line_help_table
+    return [
+        (table.item(row, 0).text(), float(table.item(row, 2).text()))
+        for row in range(table.rowCount())
+    ]
+
+
+class _PlotClick:
+    """The two things ``_order_plot_clicked`` asks a mouse event for."""
+
+    def __init__(self, button, scene_pos) -> None:
+        self._button = button
+        self._scene_pos = scene_pos
+
+    def button(self):
+        return self._button
+
+    def scenePos(self):  # noqa: N802 - pyqtgraph's own spelling
+        return self._scene_pos
+
+
+def _click_at(window, x: float, button=QtCore.Qt.LeftButton) -> _PlotClick:
+    """A click on the order plot at data column *x*, mid-height."""
+
+    box = window.order_plot.getViewBox()
+    # Off-screen the plot is never painted, so its view range stays the unit
+    # square until it is asked to fit the curve it holds.
+    box.autoRange(padding=0.02)
+    (_x0, _x1), (y0, y1) = box.viewRange()
+    scene_pos = box.mapViewToScene(QtCore.QPointF(float(x), (y0 + y1) / 2.0))
+    assert window.order_plot.sceneBoundingRect().contains(scene_pos)
+    return _PlotClick(button, scene_pos)
+
+
+def test_the_sticks_and_the_table_are_one_line_list(qt_app, tmp_path):
+    """F17 item 2: one source of truth for sticks, rows, and per-order counts.
+
+    The bench used to label sticks from the curated wavelength table while
+    filling the panel from the packaged NIST caches interpolated onto the
+    order. On the owner's real Ne data that produced a labelled NeI 640.225 in
+    order 7 that the table had never heard of, and three labelled Ne sticks in
+    order 6 under a panel reading "0 expected Ne lines in this order".
+    """
+
+    window, _paths = _real_folder_window(qt_app, tmp_path)
+    window.show()
+    window.confirm_roles_button.click()
+    qt_app.processEvents()
+    _wait_for_loads(window, qt_app)
+    assert window.campaign.assigned_lamps == ("Ne",)
+
+    for order in (0, 1):
+        window.order_spin.setValue(order)
+        qt_app.processEvents()
+        drawn = _drawn_sticks(window)
+        listed = _listed_rows(window)
+        assert drawn, f"order {order} drew no expected line at all"
+        # Label for label and pixel for pixel, the plot and the panel agree.
+        assert drawn == listed, f"order {order}: sticks {drawn} vs table {listed}"
+        # And so does the count the header states.
+        assert (
+            f"{len(listed)} expected Ne line(s) in order {order}"
+            in window.line_panel_header.text()
+        )
+        # It is the assigned lamp's list: no other element leaks into it.
+        assert all(name.startswith("Ne") for name, _pixel in listed), listed
+    window.close()
+
+
+def test_the_expected_line_list_stands_in_the_tall_left_column(qt_app, tmp_path):
+    """F17 item 1: the list gets the empty left column, not a cramped strip."""
+
+    window = _campaign_window(tmp_path)
+    window.resize(*bench_default_geometry())
+    window.show()
+    qt_app.processEvents()
+
+    assert window.controls_splitter.orientation() == QtCore.Qt.Vertical
+    assert window.controls_splitter.isAncestorOf(window.line_help_table)
+    assert not window.controls_splitter.childrenCollapsible()
+    panel = window.expected_lines_panel
+    assert panel.isVisible()
+    # It sits under the controls and takes a real share of the column's
+    # height, rather than the four-row strip it had under the spectrum.
+    assert window.controls_splitter.indexOf(panel) == 1
+    column = window.controls_splitter.height()
+    assert panel.height() >= 0.25 * column, (panel.height(), column)
+    assert panel.height() > window.line_help_table.horizontalHeader().height() * 4
+    # It is in view from every control tab, not only the lamp-fit one.
+    for index in range(window.control_tabs.count()):
+        window.control_tabs.setCurrentIndex(index)
+        qt_app.processEvents()
+        assert panel.isVisible()
+
+    # Row-click still marks the stick on the spectrum (F16 item 7 preserved).
+    assert not window.line_highlight.isVisible()
+    window.line_help_table.selectRow(0)
+    qt_app.processEvents()
+    assert window.line_highlight.isVisible()
+    assert window.line_highlight.value() == pytest.approx(
+        window._catalog_rows[0].detector_pixel
+    )
+    window.close()
+
+
+def test_the_moved_line_table_adds_no_per_order_item_churn(qt_app, tmp_path):
+    """F17 item 1 must not undo F16 item 4: order scrolling stays cheap."""
+
+    window = _window(tmp_path)
+    window.show()
+    qt_app.processEvents()
+
+    pool = [id(pair) for pair in window._line_pool]
+    scene_items = len(window.order_plot.items)
+    builds = []
+    original = window.line_help_table.setRowCount
+    window.line_help_table.setRowCount = lambda count: (
+        builds.append(count),
+        original(count),
+    )[1]
+
+    for order in (1, 0, 1, 0):
+        window.order_spin.setValue(order)
+        qt_app.processEvents()
+
+    # Sticks and labels are pooled: the same objects moved and relabelled.
+    assert [id(pair) for pair in window._line_pool] == pool
+    assert len(window.order_plot.items) == scene_items
+    # The table is refilled, but its list is computed once per (order, lamp).
+    assert builds, "the table never refilled on an order change"
+    assert len(window._catalog_cache) <= window.session.pattern.shape[1]
+    window.close()
+
+
+def test_an_empty_top_end_states_itself_in_words(qt_app, tmp_path):
+    """F17 item 3: an all-zero log histogram was a solid block saying nothing."""
+
+    window = _manual_window(tmp_path)
+    window.show()
+    path = tmp_path / "Ne-0.02s-x3-bright-lines.sif"
+    path.write_bytes(b"sif\n")
+    _drop(window, [path])
+    _wait_for_loads(window, qt_app)
+    window.file_table.selectRow(0)
+    qt_app.processEvents()
+
+    # This fixture peaks at 40000 of 65535: nothing sits in the last 10%.
+    assert window.top_end_message.isVisible()
+    assert (
+        "no pixels within 10% of full scale"
+        in window.top_end_message.text().casefold()
+    )
+    assert not window.top_histogram_widget.isVisible()
+    window.close()
+
+
+def test_a_populated_top_end_draws_visible_outlined_bins(qt_app, tmp_path):
+    """F17 item 3, the other half: when pixels are up there, show them."""
+
+    window = _manual_window(tmp_path, peak=65000.0)
+    window.show()
+    path = tmp_path / "Ne-0.02s-x3-bright-lines.sif"
+    path.write_bytes(b"sif\n")
+    _drop(window, [path])
+    _wait_for_loads(window, qt_app)
+    window.file_table.selectRow(0)
+    qt_app.processEvents()
+
+    assert not window.top_end_message.isVisible()
+    assert window.top_histogram_widget.isVisible()
+    curves = window.top_histogram_plot.listDataItems()
+    assert curves, "the populated top end drew no bins"
+    curve = curves[0]
+    assert curve.opts["pen"].width() >= 1  # outlined, not a flat wash
+    # The plot is in log mode, so the fill has to start below one pixel;
+    # filling to y=1 is what painted an empty histogram as a solid block.
+    assert curve.opts["fillLevel"] == pytest.approx(float(np.log10(0.5)))
+    window.close()
+
+
+def test_anchors_come_off_at_the_spectrum(qt_app, tmp_path):
+    """F17 item 4: removal used to live only in the table, blind to the plot."""
+
+    window = _window(tmp_path)
+    window.show()
+    qt_app.processEvents()
+
+    window._order_plot_clicked(_click_at(window, 26.0))
+    qt_app.processEvents()
+    assert len(window.session.anchor_rows()) == 1
+    assert window.anchor_table.rowCount() == 1
+    anchor = window.session.anchor_rows()[0]
+
+    # The anchored stick wears the anchor's colour, so it looks removable.
+    anchored_sticks = [
+        marker
+        for marker, _label in window._line_pool
+        if marker.isVisible()
+        and abs(marker.value() - anchor.line.center_pixel) < 0.001
+    ]
+    assert anchored_sticks
+    assert anchored_sticks[0].pen.color().name() == "#6ee7b7"
+    assert window.anchor_near(0, anchor.line.center_pixel + 1.0) is anchor
+    assert window.anchor_near(1, anchor.line.center_pixel) is None
+
+    # Clicking it again takes the anchor off, and the table follows.
+    window._order_plot_clicked(_click_at(window, anchor.fit.center_pixel))
+    qt_app.processEvents()
+    assert window.session.anchor_rows() == ()
+    assert window.anchor_table.rowCount() == 0
+    assert "un-anchored" in window.message_value.text()
+    assert all(
+        window.line_help_table.item(row, 4).text() == ""
+        for row in range(window.line_help_table.rowCount())
+    )
+
+    # Right-click removes too, and says so honestly when there is nothing there.
+    window._order_plot_clicked(_click_at(window, 26.0))
+    qt_app.processEvents()
+    assert len(window.session.anchor_rows()) == 1
+    window._order_plot_clicked(_click_at(window, 26.0, QtCore.Qt.RightButton))
+    qt_app.processEvents()
+    assert window.session.anchor_rows() == ()
+    window._order_plot_clicked(_click_at(window, 5.0, QtCore.Qt.RightButton))
+    qt_app.processEvents()
+    assert "No anchor sits at that pixel" in window.message_value.text()
+    window.close()
+
+
+def test_the_why_dock_changes_only_when_asked(qt_app, tmp_path):
+    """F17 item 5: hover yanked the sentence away while it was being read."""
+
+    window = _campaign_window(tmp_path)
+    window.show()
+    qt_app.processEvents()
+
+    assert QtCore.QEvent.Enter not in window._EXPLAIN_EVENTS
+    assert not window.file_table.hasMouseTracking()
+
+    window.explain("Held still", "This sentence must survive the pointer.")
+    held = window.details_view.toPlainText()
+    hover_events = (
+        QtCore.QEvent.Enter,
+        QtCore.QEvent.HoverEnter,
+        QtCore.QEvent.HoverMove,
+        QtCore.QEvent.ToolTip,
+    )
+    for widget in list(window._explainable_widgets):
+        for kind in hover_events:
+            window.eventFilter(widget, QtCore.QEvent(kind))
+    assert window.details_view.toPlainText() == held
+
+    # Asking still works, and the tooltip stays the one short line F16 set.
+    window.eventFilter(window.rms_value, QtCore.QEvent(QtCore.QEvent.FocusIn))
+    assert "root-mean-square" in window.details_view.toPlainText()
+    assert "\n" not in window.rms_value.toolTip()
+    assert len(window.rms_value.toolTip()) <= BENCH_TOOLTIP_LIMIT
     window.close()

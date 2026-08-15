@@ -23,11 +23,14 @@ from echelle_spectra.calibration_campaign import (
     ComparisonState,
     ExposureState,
     MeasurementRole,
+    ReferenceState,
     SaveState,
     TomlState,
     catalog_lines_for_order,
     compute_absolute_calibration,
     evaluate_exposure,
+    expected_lines_for_order,
+    lamp_reference_set,
     measure_saturation_clusters,
     normalize_lamp_name,
     suggest_file_roles,
@@ -1045,3 +1048,102 @@ def test_the_lamp_pair_names_the_signal_and_its_own_background(tmp_path):
     assert background is not None and background.name.endswith("dimm-lines-bg.sif")
     # A lamp nobody measured has no pair, and says so without raising.
     assert campaign.lamp_pair("ThAr") == (None, None)
+
+
+# ----------------------------------------------------------------------
+# Packet F17 item 2 — one line source for sticks, rows, and counts
+# ----------------------------------------------------------------------
+
+
+def _packaged_wavelength_rows():
+    resources = Path(__file__).parents[1] / "src" / "echelle_spectra" / "resources"
+    return load_wavelength_table(
+        resources
+        / "calibration_files"
+        / "alignments"
+        / "Th_wavelength_CMOS_20240305_aligned_to_20250926.txt"
+    )
+
+
+def test_expected_lines_are_the_lamps_own_rows_not_a_second_catalog():
+    """The owner's own two counter-examples, pinned against the real table.
+
+    Live on his 2025 Ne data the bench labelled NeI 640.225 in order 7 while
+    the expected-lines table did not carry it, and labelled three NeI lines in
+    order 6 under a panel reading "0 expected Ne lines in this order". The
+    cause was two sources: sticks from the curated wavelength table, rows from
+    the packaged NIST Ne cache interpolated onto the order. That cache stops at
+    638.3 nm and starts at 580.4 nm, so it can neither see 640.225 nor reach
+    order 6 at all.
+    """
+
+    rows = _packaged_wavelength_rows()
+    reference = lamp_reference_set("Ne", rows)
+    assert reference.state is ReferenceState.MATCHED
+
+    order_seven = expected_lines_for_order(reference, 7)
+    assert [f"{line.wavelength_nm:.3f}" for line in order_seven] != []
+    assert any(
+        line.species == "NeI" and abs(line.wavelength_nm - 640.225) < 0.001
+        for line in order_seven
+    ), [line.label for line in order_seven]
+
+    # Order 6 carries neon and now says so; the packaged cache holds none of it.
+    order_six = expected_lines_for_order(reference, 6)
+    assert len(order_six) == 3
+    assert {line.species for line in order_six} == {"NeI"}
+    assert catalog_lines_for_order(rows, 6, "Ne") == ()
+
+    # Every listed line is an anchorable curated row, in detector order.
+    for line in (*order_six, *order_seven):
+        assert line.row in reference.lines
+        assert line.detector_pixel == line.row.center_pixel
+        assert line.label == f"{line.species} {line.wavelength_nm:.3f}"
+    pixels = [line.detector_pixel for line in order_seven]
+    assert pixels == sorted(pixels)
+
+    # No other element ever leaks in, whichever order is asked for.
+    for order_idx in range(12):
+        listed = expected_lines_for_order(reference, order_idx)
+        assert {line.species for line in listed} <= {"NeI", "NeII"}
+
+
+def test_expected_lines_annotate_from_the_catalog_without_obeying_it():
+    """The packaged cache may enrich a row; it may never add or remove one."""
+
+    rows = _packaged_wavelength_rows()
+    reference = lamp_reference_set("Ne", rows)
+    listed = expected_lines_for_order(reference, 9)
+    assert listed
+    # Order 9 sits inside the packaged cache's span, so intensities appear...
+    assert any(line.relative_intensity is not None for line in listed)
+    assert all(
+        line.catalog is None or abs(line.catalog.wavelength_nm - line.wavelength_nm) <= 0.05
+        for line in listed
+    )
+    # ...and the count is still exactly the curated rows of that order.
+    assert len(listed) == len(
+        [row for row in reference.lines if row.order_idx == 9]
+    )
+
+
+def test_an_unreferenceable_lamp_lists_nothing_and_says_why():
+    """A lamp with no catalog contributes no expected lines, honestly."""
+
+    rows = _packaged_wavelength_rows()
+    unknown = lamp_reference_set("Kr", rows)
+    assert unknown.state is ReferenceState.NO_CATALOG
+    assert expected_lines_for_order(unknown, 9) == ()
+    assert "no line catalog for Kr" in unknown.message
+
+    # With no lamp assigned at all the whole table is the fallback, so the
+    # sticks the bench already draws are exactly what the panel lists.
+    fallback = expected_lines_for_order(None, 9, fallback_lines=rows)
+    assert len(fallback) == len([row for row in rows if row.order_idx == 9])
+
+    # The strongest-order hint reads the same list it is a hint about.
+    neon = lamp_reference_set("Ne", rows)
+    assert neon.best_order == max(
+        {row.order_idx for row in neon.lines},
+        key=lambda order: len([r for r in neon.lines if r.order_idx == order]),
+    )

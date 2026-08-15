@@ -571,12 +571,9 @@ class CalibrationBenchSession:
         hunt for them is the empty room again, one tab further along.
         """
 
-        if self.reference is None or not self.reference.lines:
+        if self.reference is None:
             return None
-        counts: dict[int, int] = {}
-        for line in self.reference.lines:
-            counts[line.order_idx] = counts.get(line.order_idx, 0) + 1
-        return max(counts, key=lambda order: (counts[order], -order))
+        return self.reference.best_order
 
     def lines_for_order(self, order_idx: int | None = None) -> tuple[CalibrationTableLine, ...]:
         selected = self.selected_order if order_idx is None else int(order_idx)
