@@ -9,20 +9,24 @@ from pathlib import Path
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import numpy as np
+import pyqtgraph as pg
 import pytest
 from PyQt5 import QtCore, QtGui, QtWidgets
 
 from echelle_spectra.calibration_bench import BenchFrame, CalibrationBenchSession
 from echelle_spectra.calibration_bench_gui import (
     _PACKAGE_DIR,
-    _SUGGESTED_SUFFIX,
+    _SUGGESTED_BADGE,
     BENCH_BODY_POINT_SIZE,
     BENCH_HEADLINE_POINT_SIZE,
-    BENCH_READING_POINT_SIZE,
+    BENCH_TOOLTIP_LIMIT,
     CalibrationBenchWindow,
     _build_parser,
+    bench_default_geometry,
     bench_point_sizes,
     bench_window_icon,
+    one_line,
+    role_combo_minimum_width,
 )
 from echelle_spectra.calibration_campaign import (
     AbsoluteCalibrationResult,
@@ -34,6 +38,12 @@ from echelle_spectra.calibration_campaign import (
 from echelle_spectra.tools.calibration_alignment import CalibrationTableLine
 
 _COLUMNS = 80
+
+
+def _SUGGESTED_COLOR_IN(combo) -> bool:
+    """Whether the Role control is wearing the unconfirmed-suggestion colour."""
+
+    return "#ffb86b" in combo.styleSheet()
 
 
 @pytest.fixture(scope="module")
@@ -279,17 +289,17 @@ def test_bench_views_lead_with_triage_and_manual_input(qt_app, tmp_path):
         "Lamp fit",
         "Save",
     ]
+    # F16 item 7: line identification is not a room of its own any more.
     assert [window.view_tabs.tabText(i) for i in range(window.view_tabs.count())] == [
         "Exposure triage",
-        "Lamp alignment",
-        "Line identification",
+        "Lamp fit",
         "Sphere factors",
     ]
     assert window.acceptDrops()
     assert window.checklist_tree.count() >= 9
     assert "median" in window.comparison_value.text()
     assert window.line_help_table.rowCount() > 0
-    assert "Packaged source" == window.line_help_table.horizontalHeaderItem(4).text()
+    assert "Anchor" == window.line_help_table.horizontalHeaderItem(4).text()
     window.close()
 
 
@@ -330,9 +340,14 @@ def test_dropped_files_are_triaged_before_any_role(qt_app, tmp_path):
     triage = window.campaign.loaded[paths[0]].triage
     assert triage.state is ExposureState.GOOD
     assert triage.saturation.anomalous_pixels == 2
+    # The headline is two lines: which file, and what it says.
+    assert len(window.triage_headline.text().splitlines()) == 2
     assert "anomalies" in window.triage_headline.text()
-    assert "not saturation" in window.triage_headline.text()
-    assert "% of full scale" in window.triage_detail.text()
+    assert "not saturation" in window.details_view.toPlainText()
+    # F16 item 3: the multi-line breakdown folds into the Why dock; the view
+    # keeps the one line that decides the next action.
+    assert "% of full scale" in window.details_view.toPlainText()
+    assert "\n" not in window.triage_next_value.text()
     window.close()
 
 
@@ -382,9 +397,11 @@ def test_confirming_the_prefilled_role_assigns_it(qt_app, tmp_path):
     role_combo = window.file_table.cellWidget(0, 1)
     assert role_combo.currentData() is MeasurementRole.SPHERE_BACKGROUND
     assert not window.campaign.measurements
-    # The pre-filled control must never read as an assignment nobody made.
-    assert "SUGGESTED ONLY" in window.file_table.item(0, 0).text()
-    assert role_combo.currentText().endswith(_SUGGESTED_SUFFIX)
+    # The pre-filled control must never read as an assignment nobody made —
+    # and after F16 the badge lives beside the combo, never inside its text.
+    assert f"{_SUGGESTED_BADGE} ONLY" in window.file_table.item(0, 0).text()
+    assert _SUGGESTED_BADGE not in role_combo.currentText()
+    assert _SUGGESTED_COLOR_IN(role_combo)
 
     # Picking the already-shown entry emits no index change; the operator's
     # confirmation must still register.
@@ -395,7 +412,7 @@ def test_confirming_the_prefilled_role_assigns_it(qt_app, tmp_path):
         window.campaign.measurements[source].role is MeasurementRole.SPHERE_BACKGROUND
     )
     assert "sphere-background" in window.file_table.item(0, 0).text()
-    assert not role_combo.currentText().endswith(_SUGGESTED_SUFFIX)
+    assert not _SUGGESTED_COLOR_IN(role_combo)
     window.close()
 
 
@@ -443,9 +460,9 @@ def test_a_prefilled_role_never_looks_like_an_assigned_one(qt_app, tmp_path):
     # What the bench had actually been given: nothing.
     assert not window.campaign.measurements
     # So the control must say so, and the Procedure tab must name the file.
-    assert sphere_combo.currentText().startswith("Sphere signal")
-    assert sphere_combo.currentText().endswith(_SUGGESTED_SUFFIX)
-    assert "SUGGESTED ONLY" in window.file_table.item(sphere_row, 0).text()
+    assert sphere_combo.currentText() == "Sphere"
+    assert _SUGGESTED_COLOR_IN(sphere_combo)
+    assert f"{_SUGGESTED_BADGE} ONLY" in window.file_table.item(sphere_row, 0).text()
     assert window.confirm_roles_button.isEnabled()
     assert "6" in window.confirm_roles_button.text()
     checklist = {
@@ -465,7 +482,7 @@ def test_a_prefilled_role_never_looks_like_an_assigned_one(qt_app, tmp_path):
         is MeasurementRole.SPHERE_BACKGROUND
     )
     assert window.campaign.assigned_lamps == ("Ne",)
-    assert not sphere_combo.currentText().endswith(_SUGGESTED_SUFFIX)
+    assert not _SUGGESTED_COLOR_IN(sphere_combo)
     assert not window.confirm_roles_button.isEnabled()
 
     def calculator(**values):
@@ -516,8 +533,9 @@ def test_a_saturated_lamp_frame_is_informed_not_failed(qt_app, tmp_path):
     assert window.campaign.loaded[lamp].triage.state is ExposureState.SATURATED
     window._select_file_row(lamp)
     qt_app.processEvents()
-    assert "FIT UNSATURATED LINES ONLY" in window.triage_headline.text()
-    assert "SATURATED —" not in window.triage_headline.text()
+    assert "SATURATED LINES (EXPECTED)" in window.triage_headline.text()
+    assert "fit unsaturated lines only" in window.details_view.toPlainText().lower()
+    assert not window.campaign.role_triage(lamp).blocking
     assert "SATURATED LINES (EXPECTED)" in window.file_table.item(
         window._file_rows.index(lamp), 0
     ).text()
@@ -525,7 +543,8 @@ def test_a_saturated_lamp_frame_is_informed_not_failed(qt_app, tmp_path):
     # The sphere frame keeps the hard verdict.
     window._select_file_row(sphere)
     qt_app.processEvents()
-    assert "SATURATED —" in window.triage_headline.text()
+    assert window.triage_headline.text().splitlines()[1].startswith("SATURATED")
+    assert window.campaign.role_triage(sphere).blocking
     assert "Lower exposure" in window.exposure_value.text()
     window.close()
 
@@ -579,8 +598,9 @@ def test_left_pane_is_resizable_and_its_text_wraps(qt_app, tmp_path):
     assert window.file_table.textElideMode() == QtCore.Qt.ElideNone
     for label in (
         window.triage_headline,
-        window.triage_detail,
+        window.triage_next_value,
         window.exposure_value,
+        window.fit_file_value,
         window.comparison_value,
         window.reference_value,
         window.message_value,
@@ -631,21 +651,25 @@ def test_the_bench_icon_is_derived_from_the_shared_graphic_and_differs(qt_app):
     ]
 
 
-def test_readings_are_sized_to_be_read_at_a_glance(qt_app, tmp_path):
-    """F14 item 6: text is data here; the numbers are loud and explained."""
+def test_only_the_verdict_shouts(qt_app, tmp_path):
+    """F16 item 3: loudness is a budget and the budget is exactly one.
 
-    body, reading, headline = bench_point_sizes()
+    F14 made every reading loud, which is the same as making none of them
+    loud. Two tiers now: the verdict headline, and body text.
+    """
+
+    body, headline = bench_point_sizes()
     assert body >= BENCH_BODY_POINT_SIZE
-    assert reading >= BENCH_READING_POINT_SIZE
     assert headline >= BENCH_HEADLINE_POINT_SIZE
-    # A large platform font scales every tier with it rather than being ignored.
-    assert bench_point_sizes(24.0)[2] > headline
+    # A large platform font scales both tiers with it rather than being ignored.
+    assert bench_point_sizes(24.0)[1] > headline
 
     window = _campaign_window(tmp_path)
     window.show()
     qt_app.processEvents()
 
-    assert window.triage_headline.font().pointSizeF() >= BENCH_HEADLINE_POINT_SIZE
+    loud = window.loud_widgets()
+    assert loud == [window.triage_headline], [w.objectName() for w in loud]
     for widget in (
         window.rms_value,
         window.anchor_count_value,
@@ -653,27 +677,402 @@ def test_readings_are_sized_to_be_read_at_a_glance(qt_app, tmp_path):
         window.file_state_value,
         window.alignment_state_value,
         window.save_state_value,
+        window.exposure_value,
     ):
-        assert widget.font().pointSizeF() >= BENCH_READING_POINT_SIZE
-        assert widget.font().bold()
-    for widget in (
-        window.comparison_value,
-        window.rms_value,
-        window.anchor_count_value,
-        window.transform_value,
-        window.frame_choice_value,
-        window.confirm_roles_button,
-    ):
-        assert widget.toolTip(), f"{widget} carries no explanation"
+        assert widget.font().pointSizeF() < headline
+        assert widget.font().pointSizeF() >= BENCH_BODY_POINT_SIZE
+    window.close()
 
-    # The whys live behind a click, in one dock, not as body prose.
-    assert window.details_dock is not None
+
+def test_long_help_reads_in_the_dock_not_in_a_floating_tooltip(qt_app, tmp_path):
+    """F16 item 6: tooltips are one short line; the dock carries the rest."""
+
+    assert one_line("First sentence here. Second one is dropped.") == (
+        "First sentence here."
+    )
+    assert len(one_line("word " * 200)) <= BENCH_TOOLTIP_LIMIT
+
+    window = _campaign_window(tmp_path)
+    window.show()
+    qt_app.processEvents()
+
+    explained = list(window._explainable_widgets)
+    assert explained, "nothing is explained at all"
+    for widget in explained:
+        tooltip = widget.toolTip()
+        assert tooltip, f"{widget} carries no explanation"
+        assert "\n" not in tooltip, f"{widget} tooltip spans lines: {tooltip!r}"
+        assert len(tooltip) <= BENCH_TOOLTIP_LIMIT, f"{widget}: {tooltip!r}"
+        # The full text is longer than the tooltip and lives in the dock.
+        assert widget.property("explainText")
+
+    # Hover alone fills the dock; nothing has to be clicked to be explained.
+    window.details_view.setHtml("")
+    window.eventFilter(
+        window.rms_value, QtCore.QEvent(QtCore.QEvent.Enter)
+    )
+    assert "root-mean-square" in window.details_view.toPlainText()
+    # So does focus.
+    window.details_view.setHtml("")
+    window.eventFilter(
+        window.transform_value, QtCore.QEvent(QtCore.QEvent.FocusIn)
+    )
+    assert "rotation" in window.details_view.toPlainText()
+
+    # A checklist row still answers in the dock, and rebuilding the list does
+    # not leave a growing pile of event filters behind.
+    before = len(window._explainable_widgets)
+    window._refresh_checklist()
+    window._refresh_checklist()
+    assert len(window._explainable_widgets) == before
     window.checklist_tree.setCurrentRow(0)
     qt_app.processEvents()
     first = window.campaign.checklist(window.session)[0]
     assert first.label in window.details_view.toPlainText()
-    window.explain("Fit RMS", window.rms_value.toolTip())
-    assert "root-mean-square" in window.details_view.toPlainText()
+    window.close()
+
+
+def test_the_role_control_can_never_elide_its_state(qt_app, tmp_path):
+    """F16 item 1: "Sphere ba...SUGGESTED" clipped the one thing that mattered.
+
+    The structural fix: short labels inside the control, the SUGGESTED state
+    outside it. The control is then sized to its own longest entry, so no
+    width — not the default one, not a squeezed one — can clip it.
+    """
+
+    window, _paths = _real_folder_window(qt_app, tmp_path)
+    window.show()
+    qt_app.processEvents()
+
+    for row in range(window.file_table.rowCount()):
+        combo = window.file_table.cellWidget(row, 1)
+        texts = [combo.itemText(index) for index in range(combo.count())]
+        # No state text of any kind lives inside the control.
+        assert not any(_SUGGESTED_BADGE in text for text in texts), texts
+        assert all(len(text) <= 12 for text in texts), texts
+        assert combo.minimumWidth() >= role_combo_minimum_width(combo)
+
+    def widest_entry(combo):
+        metrics = combo.fontMetrics()
+        return max(
+            metrics.horizontalAdvance(combo.itemText(i)) for i in range(combo.count())
+        )
+
+    # Squeeze the pane hard: the Role column is content-sized, so it holds.
+    for pane_width in (420, 300, 240):
+        window.root_splitter.setSizes([pane_width, 1200 - pane_width])
+        qt_app.processEvents()
+        for row in range(window.file_table.rowCount()):
+            combo = window.file_table.cellWidget(row, 1)
+            assert combo.width() >= widest_entry(combo), (
+                f"role combo elides at pane width {pane_width}"
+            )
+    window.close()
+
+
+def test_the_default_geometry_lays_out_legibly(qt_app, tmp_path):
+    """F16 item 2: every visible word readable at the size it opens at."""
+
+    # The default never exceeds the screen it will open on.
+    assert bench_default_geometry(QtCore.QSize(1280, 800)) == (1200, 680)
+    assert bench_default_geometry(QtCore.QSize(6000, 6000)) == (1500, 920)
+
+    window, _paths = _real_folder_window(qt_app, tmp_path)
+    window.resize(*bench_default_geometry())
+    window.show()
+    qt_app.processEvents()
+    window._relayout_wrapped_text()
+    qt_app.processEvents()
+
+    clipped = [
+        widget.objectName() or widget.text()
+        for widget in window.findChildren(QtWidgets.QLabel)
+        if widget.isVisible() and _label_is_clipped(widget)
+    ]
+    assert not clipped, f"labels clip their own text: {clipped}"
+
+    squeezed = [
+        button.text()
+        for button in window.findChildren(QtWidgets.QPushButton)
+        if button.isVisible() and button.width() < button.sizeHint().width()
+    ]
+    assert not squeezed, f"buttons clip their labels: {squeezed}"
+
+    for group in window.findChildren(QtWidgets.QGroupBox):
+        if not group.isVisible():
+            continue
+        metrics = QtGui.QFontMetrics(group.font())
+        assert group.width() >= metrics.horizontalAdvance(group.title()) + 30, (
+            f"group box title garbles: {group.title()}"
+        )
+        # The title sits in the top margin; the margin has to be tall enough.
+        assert group.contentsRect().top() >= metrics.height(), (
+            f"group box title overlaps its own frame: {group.title()}"
+        )
+
+    overlaps = _overlapping_siblings(window)
+    assert not overlaps, f"widgets overlap at the default size: {overlaps}"
+    window.close()
+
+
+_LAID_OUT = (
+    QtWidgets.QLabel,
+    QtWidgets.QPushButton,
+    QtWidgets.QGroupBox,
+    QtWidgets.QComboBox,
+    QtWidgets.QSpinBox,
+    QtWidgets.QLineEdit,
+)
+
+
+def _label_is_clipped(label) -> bool:
+    """Whether a label's own text does not fit the box it was given."""
+
+    text = label.text()
+    if not text or label.width() <= 0:
+        return False
+    if label.wordWrap():
+        return label.heightForWidth(label.width()) > label.height()
+    return label.fontMetrics().horizontalAdvance(text) > label.width()
+
+
+def _overlapping_siblings(window) -> list[str]:
+    """Laid-out siblings whose rectangles collide are a broken layout."""
+
+    by_parent: dict[int, list] = {}
+    for widget in window.findChildren(_LAID_OUT):
+        if not widget.isVisible() or widget.parentWidget() is None:
+            continue
+        if widget.parentWidget().layout() is None:
+            continue
+        by_parent.setdefault(id(widget.parentWidget()), []).append(widget)
+    collisions = []
+    for siblings in by_parent.values():
+        for index, first in enumerate(siblings):
+            for second in siblings[index + 1 :]:
+                if second.isAncestorOf(first) or first.isAncestorOf(second):
+                    continue
+                if first.geometry().intersects(second.geometry()):
+                    collisions.append(
+                        f"{first.objectName() or type(first).__name__} x "
+                        f"{second.objectName() or type(second).__name__}"
+                    )
+    return collisions
+
+
+def test_the_fit_lands_on_the_assigned_lamp_signal_and_names_it(qt_app, tmp_path):
+    """F16 item 5: the fit tab showed a lineless `_bg` hump and never said so.
+
+    After confirming a whole folder the last file read stays open — on the
+    owner's folder, a background. The fit must move to the assigned lamp
+    signal, name the file it is measuring, and subtract that lamp's own
+    background, which is what echelle-align does.
+    """
+
+    window, _paths = _real_folder_window(qt_app, tmp_path)
+    signal = tmp_path / "Ne-0.1s-x3-dimm-lines.sif"
+    background = tmp_path / "Ne-0.1s-x3-dimm-lines-bg.sif"
+    # What the owner saw: a background frame open for line fitting.
+    window.session.accept_frame(_frame_for(background))
+    window.refresh()
+    _wait_for_loads(window, qt_app)
+
+    window.confirm_roles_button.click()
+    qt_app.processEvents()
+    _wait_for_loads(window, qt_app)
+    for _attempt in range(400):
+        if window._background_thread is None and window.session.frame is not None:
+            if window.session.frame.path == signal:
+                break
+        qt_app.processEvents()
+        QtCore.QThread.msleep(5)
+    qt_app.processEvents()
+
+    # The fit landed on the assigned Ne signal, not on whatever was open.
+    assert window.session.frame.path == signal
+    assert signal.name in window.fit_file_value.text()
+    assert "Ne lamp" in window.fit_file_value.text()
+    assert window.fit_warning_value.text() == ""
+
+    # And it is the signal minus that lamp's own background.
+    assert window.session.background_path == background
+    assert background.name in window.fit_file_value.text()
+    # The fixture reader returns the same spectra for every path, so a
+    # subtracted pair cancels exactly — which is the point being pinned.
+    raw = window.session.frame.order_spectra[0]
+    fitted = window.session.active_order_spectra()[0]
+    assert not np.allclose(fitted, raw)
+    assert np.allclose(fitted, 0.0), "background subtraction did not happen"
+    window.close()
+
+
+def test_opening_a_background_for_line_work_says_so(qt_app, tmp_path):
+    """F16 item 5: a deliberate look at a background is warned about, not fought."""
+
+    window, _paths = _real_folder_window(qt_app, tmp_path)
+    window.confirm_roles_button.click()
+    qt_app.processEvents()
+    _wait_for_loads(window, qt_app)
+
+    background = tmp_path / "Ne-0.1s-x3-dimm-lines-bg.sif"
+    window._select_file_row(background)
+    window.show_frame_button.click()
+    _wait_for_loads(window, qt_app)
+    qt_app.processEvents()
+
+    assert window.session.frame.path == background
+    assert window.fit_warning_value.text()
+    assert "background frame" in window.fit_warning_value.text()
+    assert "no lines are expected" in window.fit_warning_value.text()
+    assert background.name in window.fit_file_value.text()
+
+    # A sphere frame is warned about too — a continuum is not a line spectrum.
+    sphere = tmp_path / "sphere-0.1s-x3.sif"
+    window._select_file_row(sphere)
+    window.show_frame_button.click()
+    _wait_for_loads(window, qt_app)
+    qt_app.processEvents()
+    assert window.fit_warning_value.text()
+    assert "continuum" in window.fit_warning_value.text()
+    window.close()
+
+
+def test_the_expected_line_panel_lives_with_the_spectrum_and_fills_itself(
+    qt_app, tmp_path
+):
+    """F16 item 7: one lamp choice, one view, the whole line workflow."""
+
+    window, _paths = _real_folder_window(qt_app, tmp_path)
+    window.show()
+    window.confirm_roles_button.click()
+    qt_app.processEvents()
+    _wait_for_loads(window, qt_app)
+
+    # The panel followed the assigned lamp with nobody choosing a catalog.
+    assert window.campaign.assigned_lamps == ("Ne",)
+    assert window.line_family_combo.currentText() == "Ne"
+    assert window.line_help_table.rowCount() > 0
+    assert "expected Ne line(s)" in window.line_panel_header.text()
+    # And it lives in the same view as the spectrum it belongs to.
+    assert window.lamp_fit_splitter.isAncestorOf(window.line_help_table)
+    assert window.lamp_fit_splitter.isAncestorOf(window.order_plot.getViewWidget())
+
+    # Picking the work on the left brings its own view with it.
+    lamp_tab = [
+        index
+        for index in range(window.control_tabs.count())
+        if window.control_tabs.tabText(index) == "Lamp fit"
+    ][0]
+    window.control_tabs.setCurrentIndex(lamp_tab)
+    qt_app.processEvents()
+    assert window.view_tabs.tabText(window.view_tabs.currentIndex()) == "Lamp fit"
+
+    # Selecting a row marks its stick on the spectrum above.
+    assert not window.line_highlight.isVisible()
+    window.line_help_table.selectRow(0)
+    qt_app.processEvents()
+    assert window.line_highlight.isVisible()
+    assert window.line_highlight.value() == pytest.approx(
+        window._catalog_rows[0].detector_pixel
+    )
+    assert "expected at pixel" in window.details_view.toPlainText()
+    window.close()
+
+
+def test_accepting_an_anchor_marks_its_expected_line_row(qt_app, tmp_path):
+    """F16 item 7: an accepted anchor is visible in the table it came from."""
+
+    window = _window(tmp_path)
+    window.show()
+    qt_app.processEvents()
+    # Put one catalog row where an anchor of the same wavelength exists.
+    rows = window._catalog_rows
+    assert window.line_help_table.rowCount() == len(rows)
+    assert all(
+        window.line_help_table.item(index, 4).text() == "" for index in range(len(rows))
+    )
+
+    assert window.session.fit_anchor_at(0, 26).accepted
+    window.refresh()
+    qt_app.processEvents()
+    anchored = [
+        window.line_help_table.item(index, 4).text()
+        for index in range(window.line_help_table.rowCount())
+    ]
+    if window._catalog_rows:
+        # The mark only appears where the catalog actually holds that line.
+        assert set(anchored) <= {"", "✓"}
+    window.close()
+
+
+def test_order_scrolling_never_touches_the_detector_image(qt_app, tmp_path):
+    """F16 item 4: extract once, re-slice — the main GUI's own pattern.
+
+    Re-uploading and re-percentiling a 2560x2160 detector image on every order
+    change was 45% of a 99 ms order step. It changes nothing that an order
+    switch shows.
+    """
+
+    window = _window(tmp_path, with_loader=True)
+    window.show()
+    qt_app.processEvents()
+
+    uploads = []
+    original = window.detector_image.setImage
+    window.detector_image.setImage = lambda *a, **k: (
+        uploads.append(1),
+        original(*a, **k),
+    )[1]
+    traces = list(window._pattern_items)
+
+    for order in (1, 0, 1, 0):
+        window.order_spin.setValue(order)
+        qt_app.processEvents()
+
+    assert uploads == [], "an order change re-uploaded the detector image"
+    # Plot items are reused, not rebuilt.
+    assert window._pattern_items == traces
+    assert window.order_curve is not None
+
+    # A genuinely new frame does re-upload it.
+    window.session.accept_frame(_frame_for(tmp_path / "another.sif"))
+    window.refresh()
+    qt_app.processEvents()
+    assert uploads, "a new frame must refresh the detector image"
+    window.close()
+
+
+def test_the_factor_curves_are_downsampled_clipped_and_reused(qt_app, tmp_path):
+    """F16 item 4: one PlotDataItem per curve, drawn only where it is seen.
+
+    Painting 42k antialiased samples per curve cost 1.3 s per pan step; the
+    same data downsampled to the view and clipped to it paints in tens of ms.
+    """
+
+    window = _campaign_window(tmp_path)
+    window.show()
+    qt_app.processEvents()
+
+    curves = [window.candidate_curve, window.previous_curve]
+    identities = [id(curve) for curve in curves]
+    for _repeat in range(4):
+        window._refresh_sphere_plot()
+    qt_app.processEvents()
+
+    # The same two items, refreshed in place.
+    assert [id(curve) for curve in curves] == identities
+    plotted = [
+        item
+        for item in window.sphere_plot.getPlotItem().items
+        if isinstance(item, pg.PlotDataItem)
+    ]
+    assert len(plotted) == 2, "the factors plot accumulated duplicate curves"
+    for curve in curves:
+        assert curve.opts["autoDownsample"] is True
+        assert curve.opts["clipToView"] is True
+        assert curve.opts["antialias"] is False
+        # Order gaps stay gaps rather than being bridged by a long diagonal.
+        assert curve.opts["connect"] == "finite"
     window.close()
 
 

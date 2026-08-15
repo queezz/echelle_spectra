@@ -1329,6 +1329,23 @@ class CalibrationCampaignSession:
                 return record.lamp_family
         return self._primary_lamp()
 
+    def lamp_pair(self, lamp: str) -> tuple[Path | None, Path | None]:
+        """Return *lamp*'s assigned (signal, background) paths, as far as given.
+
+        Line fitting belongs on the signal, and on the signal minus its own
+        background when the pair is complete — the same thing ``echelle-align``
+        measures.  Either half may be missing; the caller says what that means.
+        """
+
+        if not str(lamp).strip():
+            return None, None
+        signals = self._records(MeasurementRole.LAMP, lamp)
+        backgrounds = self._records(MeasurementRole.LAMP_BACKGROUND, lamp)
+        return (
+            signals[-1].path if signals else None,
+            backgrounds[-1].path if backgrounds else None,
+        )
+
     def scope_alignment_to_lamp(
         self, alignment: CalibrationBenchSession
     ) -> LampReferenceSet:

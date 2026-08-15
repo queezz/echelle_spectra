@@ -53,13 +53,16 @@ _DEFAULT_PREVIOUS_SPHERE_BACKGROUND = (
     _CALIBRATION_DIR / "sphere_cmos_20240305_bkg.sif"
 )
 
+#: Role labels are deliberately short.  The Role control shows only the role;
+#: nothing about a file's *state* is ever written into it, because a combo box
+#: elides its text and the clipped half is always the half that mattered.
 _ROLE_CHOICES: tuple[tuple[str, MeasurementRole | None], ...] = (
-    ("— unassigned —", None),
-    ("Sphere signal", MeasurementRole.SPHERE),
-    ("Sphere background", MeasurementRole.SPHERE_BACKGROUND),
-    ("Lamp signal", MeasurementRole.LAMP),
-    ("Lamp background", MeasurementRole.LAMP_BACKGROUND),
-    ("Experiment / other", MeasurementRole.OTHER),
+    ("none", None),
+    ("Sphere", MeasurementRole.SPHERE),
+    ("Sphere bg", MeasurementRole.SPHERE_BACKGROUND),
+    ("Lamp", MeasurementRole.LAMP),
+    ("Lamp bg", MeasurementRole.LAMP_BACKGROUND),
+    ("Other", MeasurementRole.OTHER),
 )
 
 _LAMP_ROLES = (MeasurementRole.LAMP, MeasurementRole.LAMP_BACKGROUND)
@@ -74,8 +77,9 @@ _TRIAGE_COLORS = {
 #: Colour for a control showing a filename suggestion nobody has confirmed.
 _SUGGESTED_COLOR = "#ffb86b"
 
-#: Suffix that makes an unconfirmed suggestion unmistakable in the Role column.
-_SUGGESTED_SUFFIX = " · SUGGESTED"
+#: The badge that marks an unconfirmed suggestion.  It lives in the file cell
+#: and in the control's colour — never inside the combo's own text.
+_SUGGESTED_BADGE = "SUGGESTED"
 
 _SUGGESTED_TOOLTIP = (
     "This role is only a guess read from the filename. The bench has NOT been "
@@ -84,25 +88,27 @@ _SUGGESTED_TOOLTIP = (
 )
 
 # ----------------------------------------------------------------------
-# Typography: text is data here, not decoration
+# Loudness is a budget: one loud element per view, everything else body size
 # ----------------------------------------------------------------------
-#: Floor for ordinary bench prose, in points.  Point sizes rather than pixels
-#: so a lower-resolution display scales the whole surface with the platform
-#: font instead of shrinking it.
+#: Ordinary bench prose and every secondary reading, in points.  Point sizes
+#: rather than pixels so a lower-resolution display scales the whole surface
+#: with the platform font instead of shrinking it.
 BENCH_BODY_POINT_SIZE = 11.0
 
-#: Floor for the readings the operator judges an exposure by.
-BENCH_READING_POINT_SIZE = 14.0
-
-#: Floor for the one-glance verdict headline.
+#: The one loud element: the verdict headline the next action is read from.
 BENCH_HEADLINE_POINT_SIZE = 17.0
 
+#: A tooltip is one short line.  Everything longer belongs in the Why dock,
+#: where it can be read calmly instead of floating over the controls.
+BENCH_TOOLTIP_LIMIT = 88
 
-def bench_point_sizes(base_point_size: float | None = None) -> tuple[float, float, float]:
-    """Return (body, reading, headline) point sizes for this platform's font.
 
-    The floors are absolute: a small platform font never shrinks the bench
-    below legibility, and a large one scales every tier with it together.
+def bench_point_sizes(base_point_size: float | None = None) -> tuple[float, float]:
+    """Return the (body, headline) point sizes for this platform's font.
+
+    Two tiers, not three: the verdict shouts and everything else is body text.
+    The floors are absolute, so a small platform font never shrinks the bench
+    below legibility and a large one scales both tiers with it together.
     """
 
     if base_point_size is None or base_point_size <= 0:
@@ -113,11 +119,72 @@ def bench_point_sizes(base_point_size: float | None = None) -> tuple[float, floa
     if base_point_size <= 0:  # a pixel-sized platform font reports no points
         base_point_size = 9.0
     body = max(BENCH_BODY_POINT_SIZE, float(base_point_size) * 1.15)
-    return (
-        body,
-        max(BENCH_READING_POINT_SIZE, body * 1.28),
-        max(BENCH_HEADLINE_POINT_SIZE, body * 1.55),
+    return body, max(BENCH_HEADLINE_POINT_SIZE, body * 1.55)
+
+
+def bench_default_geometry(
+    available: QtCore.QSize | None = None,
+) -> tuple[int, int]:
+    """Return a default window size that fits the screen it will open on.
+
+    The preferred size is what the bench wants; the screen is what it gets.
+    A smaller display — the owner's Mac — receives a window that fits it
+    rather than one whose right-hand half is off the edge.
+    """
+
+    if available is None:
+        screen = QtWidgets.QApplication.primaryScreen()
+        available = screen.availableGeometry().size() if screen is not None else None
+    if available is None or available.width() <= 0 or available.height() <= 0:
+        return _PREFERRED_WINDOW_SIZE
+    width = min(_PREFERRED_WINDOW_SIZE[0], max(1, available.width() - 80))
+    height = min(_PREFERRED_WINDOW_SIZE[1], max(1, available.height() - 120))
+    return int(max(width, _MINIMUM_WINDOW_SIZE[0])), int(
+        max(height, _MINIMUM_WINDOW_SIZE[1])
     )
+
+
+#: What the bench asks for, and the floor it stays legible at.  The floor is
+#: what the layout is actually built to satisfy; the preference is a comfort.
+_PREFERRED_WINDOW_SIZE = (1500, 920)
+_MINIMUM_WINDOW_SIZE = (1020, 660)
+
+
+def one_line(text: str, limit: int = BENCH_TOOLTIP_LIMIT) -> str:
+    """Reduce an explanation to the one short line a tooltip may carry."""
+
+    collapsed = " ".join(str(text).split())
+    if not collapsed:
+        return ""
+    sentence = collapsed.split(". ")[0].rstrip(".")
+    if len(sentence) + 1 <= limit:
+        return f"{sentence}." if sentence else ""
+    return sentence[: max(1, limit - 1)].rstrip() + "…"
+
+
+def role_combo_minimum_width(combo) -> int:
+    """The width at which *combo* can show its longest entry unelided.
+
+    A role is state the operator must read exactly, so the control is sized to
+    its content rather than left to shrink into an ellipsis at some width
+    nobody predicted.
+    """
+
+    metrics = combo.fontMetrics()
+    widest = max(
+        (metrics.horizontalAdvance(combo.itemText(index)) for index in range(combo.count())),
+        default=0,
+    )
+    style = combo.style()
+    options = QtWidgets.QStyleOptionComboBox()
+    options.initFrom(combo)
+    arrow = style.subControlRect(
+        QtWidgets.QStyle.CC_ComboBox,
+        options,
+        QtWidgets.QStyle.SC_ComboBoxArrow,
+        combo,
+    ).width()
+    return int(widest + max(arrow, 18) + 16)
 
 
 def _emphasise(widget, point_size: float, *, bold: bool = True) -> None:
@@ -261,14 +328,30 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         self.initial_base_snapshot = base_snapshot
         self.valid_from = valid_from
         self._load_thread: FrameLoadThread | None = None
+        self._background_thread: FrameLoadThread | None = None
         self._campaign_thread: CampaignTaskThread | None = None
         self._pattern_items: list[pg.PlotDataItem] = []
-        self._line_items: list[object] = []
-        self._catalog_items: list[object] = []
-        self._anchor_items: list[object] = []
+        self._pattern_key: tuple[int, int] | None = None
+        self._selected_trace: int | None = None
+        self._detector_key: tuple[str, int] | None = None
+        #: Pooled order-plot decorations.  An order change moves and relabels
+        #: these; it never destroys and rebuilds them, which is what made
+        #: arrow-key order scrolling crawl on a real 2560x2160 frame.
+        self._line_pool: list[tuple[object, object]] = []
+        self._catalog_pool: list[tuple[object, object]] = []
+        self._anchor_scatter: pg.ScatterPlotItem | None = None
+        self._catalog_cache: dict[tuple[int, str], tuple] = {}
+        self._catalog_rows: tuple = ()
         self._queue: list[Path] = []
         self._file_rows: list[Path] = []
         self._explainable_widgets: list[object] = []
+        self._checklist_labels: list[object] = []
+        #: Files the operator opened deliberately; the fit view never argues
+        #: with an explicit choice, it only warns about what it is showing.
+        self._explicitly_opened: set[Path] = set()
+        self._landed_on: tuple[Path, str] | None = None
+        self._auto_following = False
+        self._family_override = False
         self.last_folder = Path(watcher.folder) if watcher is not None else Path.cwd()
         self._build_ui()
         self._connect_ui()
@@ -285,9 +368,9 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
     def _build_ui(self) -> None:
         self.setWindowTitle("Echelle calibration bench")
         self.setWindowIcon(bench_window_icon())
-        self.resize(1540, 940)
-        self.setMinimumSize(1080, 700)
-        self.body_pt, self.reading_pt, self.headline_pt = bench_point_sizes()
+        self.setMinimumSize(*_MINIMUM_WINDOW_SIZE)
+        self.resize(*bench_default_geometry())
+        self.body_pt, self.headline_pt = bench_point_sizes()
 
         root = QtWidgets.QSplitter(QtCore.Qt.Horizontal)
         root.setChildrenCollapsible(False)
@@ -298,15 +381,14 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         controls = QtWidgets.QWidget()
         # No maximum: the left pane is the operator's to widen, and its text is
         # the reading, not a caption.
-        controls.setMinimumWidth(420)
         controls_layout = QtWidgets.QVBoxLayout(controls)
-        controls_layout.setContentsMargins(18, 18, 14, 18)
-        controls_layout.setSpacing(10)
+        controls_layout.setContentsMargins(14, 12, 12, 12)
+        controls_layout.setSpacing(8)
 
         title = QtWidgets.QLabel("LIVE CALIBRATION")
         title.setObjectName("benchTitle")
         subtitle = QtWidgets.QLabel(
-            "Drop files → triage exposure → assign roles → identify → compare → validate"
+            "Drop files → triage → assign roles → fit lines → compare → validate"
         )
         subtitle.setWordWrap(True)
         subtitle.setObjectName("benchSubtitle")
@@ -323,19 +405,16 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
 
         self.view_tabs = QtWidgets.QTabWidget()
         self._build_triage_view()
-        self._build_alignment_view()
-        self._build_line_help_view()
+        self._build_lamp_fit_view()
         self._build_sphere_view()
         root.addWidget(self.view_tabs)
         root.setStretchFactor(0, 0)
         root.setStretchFactor(1, 1)
-        root.setSizes([560, 980])
         root.splitterMoved.connect(lambda *_args: self._relayout_wrapped_text())
 
         self._build_details_dock()
 
         body = self.body_pt
-        reading = self.reading_pt
         headline = self.headline_pt
         # Sizes are set through real fonts rather than through the stylesheet:
         # a stylesheet font-size is resolved through the platform's pixel
@@ -344,43 +423,53 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         base_font = self.font()
         base_font.setPointSizeF(body)
         self.setFont(base_font)
+        # A group box's title sits in its top margin.  Sizing that margin from
+        # the real font metrics is what stops "Bench state" from garbling into
+        # its own border on a display whose font is larger than the designer's.
+        title_height = QtGui.QFontMetrics(base_font).height()
         self.setStyleSheet(
-            """
-            QMainWindow, QWidget { background: #151b22; color: #dce8f2; }
-            QGroupBox { border: 1px solid #334252; border-radius: 7px; margin-top: 9px;
-                        padding-top: 8px; font-weight: 600; }
-            QGroupBox::title { subcontrol-origin: margin; left: 10px; color: #8fd9ff; }
-            #benchTitle { color: #80ddff; font-weight: 700; letter-spacing: 1px; }
-            #benchSubtitle, #benchHelp, #mutedText { color: #93a8b8; }
-            #dropTarget { border: 2px dashed #49b5df; border-radius: 9px;
+            f"""
+            QMainWindow, QWidget {{ background: #151b22; color: #dce8f2; }}
+            QGroupBox {{ border: 1px solid #334252; border-radius: 7px;
+                        margin-top: {title_height + 6}px;
+                        padding-top: {max(6, title_height // 2)}px; font-weight: 600; }}
+            QGroupBox::title {{ subcontrol-origin: margin; subcontrol-position: top left;
+                        left: 10px; padding: 0 4px; color: #8fd9ff; }}
+            #benchTitle {{ color: #80ddff; font-weight: 700; letter-spacing: 2px; }}
+            #benchSubtitle, #benchHelp, #mutedText {{ color: #93a8b8; }}
+            #dropTarget {{ border: 2px dashed #49b5df; border-radius: 9px;
                           color: #8fd9ff; font-weight: 700; letter-spacing: 1px;
-                          padding: 12px; }
-            #triageHeadline { font-weight: 700; padding: 8px; }
-            #stateBadge { color: #7ee2b8; font-weight: 700; }
-            #reading { color: #e8f4ff; font-weight: 700; }
-            #messagePanel { background: #0f141a; border-left: 3px solid #49b5df;
-                            padding: 9px; color: #bed4e1; }
-            QTableWidget, QTreeWidget, QListWidget, QPlainTextEdit, QTextBrowser {
+                          padding: 12px; }}
+            #triageHeadline {{ font-weight: 700; padding: 6px; }}
+            #stateBadge {{ color: #7ee2b8; font-weight: 700; }}
+            #warningPanel {{ background: #2a1e13; border-left: 3px solid #ffb86b;
+                            padding: 7px; color: #ffd6a3; }}
+            #messagePanel {{ background: #0f141a; border-left: 3px solid #49b5df;
+                            padding: 7px; color: #bed4e1; }}
+            QTableWidget, QTreeWidget, QListWidget, QPlainTextEdit, QTextBrowser {{
                 background: #10151b; alternate-background-color: #18212a;
-                gridline-color: #2b3946; }
-            QHeaderView::section { background: #202b36; color: #b9d5e5; padding: 5px; }
-            QPushButton { background: #273746; border: 1px solid #416078; border-radius: 5px;
-                          padding: 7px; }
-            QPushButton:hover { background: #315069; }
-            QPushButton:disabled { color: #657786; border-color: #33404a; }
-            QSpinBox, QComboBox, QLineEdit {
-                background: #0f141a; border: 1px solid #416078; padding: 4px; }
-            QSplitter::handle { background: #22303c; }
-            QSplitter::handle:hover { background: #3a5f79; }
-            QTabWidget::pane { border: 1px solid #334252; }
-            QTabBar::tab { background: #202b36; color: #9fb6c6; padding: 7px 12px; }
-            QTabBar::tab:selected { background: #294052; color: #8fe3ff; }
-            QToolTip { background: #0f141a; color: #dce8f2;
-                       border: 1px solid #49b5df; padding: 6px; }
+                gridline-color: #2b3946; }}
+            QHeaderView::section {{ background: #202b36; color: #b9d5e5; padding: 4px; }}
+            QPushButton {{ background: #273746; border: 1px solid #416078; border-radius: 5px;
+                          padding: 6px 8px; }}
+            QPushButton:hover {{ background: #315069; }}
+            QPushButton:disabled {{ color: #657786; border-color: #33404a; }}
+            QSpinBox, QComboBox, QLineEdit {{
+                background: #0f141a; border: 1px solid #416078; padding: 3px 4px; }}
+            QSplitter::handle {{ background: #22303c; }}
+            QSplitter::handle:hover {{ background: #3a5f79; }}
+            QTabWidget::pane {{ border: 1px solid #334252; }}
+            QTabBar::tab {{ background: #202b36; color: #9fb6c6; padding: 6px 10px; }}
+            QTabBar::tab:selected {{ background: #294052; color: #8fe3ff; }}
+            QToolTip {{ background: #0f141a; color: #dce8f2;
+                       border: 1px solid #49b5df; padding: 5px; }}
             """
         )
-        _emphasise(title, headline * 1.15)
-        _emphasise(self.drop_hint, reading)
+        # The loudness budget: exactly one element carries the headline size,
+        # and it is the verdict the next action is read from.  Everything else
+        # — including this window's own title — is body text.
+        _emphasise(title, body)
+        _emphasise(self.drop_hint, body)
         for widget in (
             self.rms_value,
             self.anchor_count_value,
@@ -390,9 +479,39 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
             self.save_state_value,
         ):
             widget.setObjectName("reading")
-            _emphasise(widget, reading)
+            _emphasise(widget, body)
         _emphasise(self.triage_headline, headline)
-        _emphasise(self.exposure_value, reading, bold=False)
+        _emphasise(self.exposure_value, body, bold=False)
+        controls.setMinimumWidth(self._controls_minimum_width())
+        self.root_splitter.setSizes([controls.minimumWidth() + 60, 980])
+
+    def _controls_minimum_width(self) -> int:
+        """Widen the left pane until its own controls stop clipping.
+
+        The minimum is read off the content rather than guessed, which is what
+        makes the default geometry legible instead of merely large.
+        """
+
+        widest = self.control_tabs.tabBar().sizeHint().width()
+        for widget in self.control_tabs.findChildren(
+            (QtWidgets.QPushButton, QtWidgets.QComboBox)
+        ):
+            widest = max(widest, widget.sizeHint().width())
+        return int(min(560, max(400, widest + 60)))
+
+    def loud_widgets(self) -> list[object]:
+        """Every widget currently drawn at the headline size.
+
+        The budget is one.  This is how the surface proves it, rather than a
+        promise in a docstring nobody can check.
+        """
+
+        threshold = self.headline_pt - 0.01
+        return [
+            widget
+            for widget in self.findChildren(QtWidgets.QWidget)
+            if widget.font().pointSizeF() >= threshold
+        ]
 
     def _build_details_dock(self) -> None:
         """One dock that explains whatever the operator just clicked.
@@ -407,10 +526,10 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         dock.setAllowedAreas(QtCore.Qt.BottomDockWidgetArea | QtCore.Qt.RightDockWidgetArea)
         self.details_view = QtWidgets.QTextBrowser()
         self.details_view.setOpenExternalLinks(False)
-        self.details_view.setMinimumHeight(120)
+        self.details_view.setMinimumHeight(110)
         self.details_view.setPlaceholderText(
-            "Click any verdict, checklist row, file, or anchor to read the full "
-            "explanation here. Hovering shows the same text as a tooltip."
+            "Hover or click any verdict, checklist row, file, or anchor and the "
+            "whole explanation is written here."
         )
         dock.setWidget(self.details_view)
         self.details_dock = dock
@@ -432,10 +551,15 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
             f"<div style='color:#cfe0ec;line-height:145%'>{body}</div>"
         )
 
-    def _explainable(self, widget, title: str, text: str) -> None:
-        """Give one widget its tooltip and make a click fill the details dock."""
+    def _explainable(self, widget, title: str, text: str, *, hint: str = "") -> None:
+        """Route one widget's explanation to the Why dock, not to a tooltip.
 
-        widget.setToolTip(text)
+        The tooltip keeps a single short line — enough to say that there is
+        more — and hovering or focusing the widget writes the whole text into
+        the dock, where it can be read without covering the controls.
+        """
+
+        widget.setToolTip(hint or one_line(text))
         if isinstance(widget, QtWidgets.QLabel):
             # A button already looks clickable; a reading does not, so only the
             # readings advertise that there is more behind them.
@@ -446,10 +570,25 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
             self._explainable_widgets.append(widget)
             widget.installEventFilter(self)
 
-    def eventFilter(self, source, event) -> bool:  # noqa: N802 - Qt naming
-        """Turn a click on any explained reading into its dock entry."""
+    def _forget_explainable(self, widget) -> None:
+        """Drop a rebuilt widget's routing so the filter list cannot grow."""
 
-        if event.type() == QtCore.QEvent.MouseButtonPress:
+        if widget in self._explainable_widgets:
+            self._explainable_widgets.remove(widget)
+            widget.removeEventFilter(self)
+
+    #: Hover, focus, and click all mean "tell me more", and all answer in the
+    #: dock.  Nothing has to be clicked to be explained.
+    _EXPLAIN_EVENTS = (
+        QtCore.QEvent.MouseButtonPress,
+        QtCore.QEvent.Enter,
+        QtCore.QEvent.FocusIn,
+    )
+
+    def eventFilter(self, source, event) -> bool:  # noqa: N802 - Qt naming
+        """Send any explained widget's hover, focus, or click to the dock."""
+
+        if event.type() in self._EXPLAIN_EVENTS:
             title = source.property("explainTitle")
             if title:
                 self.explain(title, source.property("explainText") or "")
@@ -460,7 +599,13 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         self._relayout_wrapped_text()
 
     def _relayout_wrapped_text(self) -> None:
-        """Re-wrap the checklist to the pane's real width; nothing is clipped."""
+        """Give every wrapping label the height its own text needs.
+
+        A word-wrapped QLabel in a vertical layout is handed its one-line
+        height and silently swallows the rest, which is how the left pane came
+        to overlap itself.  Asking each label what its text costs at its real
+        width, and reserving that, is what makes the default geometry legible.
+        """
 
         if getattr(self, "checklist_tree", None) is None:
             return
@@ -472,6 +617,14 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
                 continue
             label.setFixedWidth(width)
             item.setSizeHint(QtCore.QSize(0, label.sizeHint().height() + 8))
+        for label in self.findChildren(QtWidgets.QLabel):
+            if not label.wordWrap() or label.width() <= 0:
+                continue
+            if label.parent() is self.checklist_tree.viewport():
+                continue
+            needed = label.heightForWidth(label.width())
+            if needed > 0 and label.minimumHeight() != needed:
+                label.setMinimumHeight(needed)
         self.file_table.resizeRowsToContents()
 
     def _build_procedure_tab(self) -> None:
@@ -494,7 +647,34 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         self.checklist_tree.setAlternatingRowColors(True)
         self.checklist_tree.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
         layout.addWidget(self.checklist_tree, 1)
-        self.control_tabs.addTab(tab, "Procedure")
+        self.control_tabs.addTab(self._scrollable(tab), "Procedure")
+
+    @staticmethod
+    def _scrollable(widget) -> QtWidgets.QScrollArea:
+        """Let a control tab scroll instead of crushing its own contents.
+
+        On the owner's smaller screen the left pane is shorter than the
+        controls it holds. Scrolling is honest; overlapping is not.
+        """
+
+        area = QtWidgets.QScrollArea()
+        area.setWidgetResizable(True)
+        area.setFrameShape(QtWidgets.QFrame.NoFrame)
+        area.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
+        area.setWidget(widget)
+        return area
+
+    @staticmethod
+    def _form_layout(parent) -> QtWidgets.QFormLayout:
+        """A form whose labels wrap instead of clipping at a narrow width."""
+
+        form = QtWidgets.QFormLayout(parent)
+        form.setRowWrapPolicy(QtWidgets.QFormLayout.WrapLongRows)
+        form.setFieldGrowthPolicy(QtWidgets.QFormLayout.ExpandingFieldsGrow)
+        form.setLabelAlignment(QtCore.Qt.AlignLeft | QtCore.Qt.AlignVCenter)
+        form.setHorizontalSpacing(10)
+        form.setVerticalSpacing(6)
+        return form
 
     def _build_files_tab(self) -> None:
         tab = QtWidgets.QWidget()
@@ -531,11 +711,13 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
 
         self.file_table = QtWidgets.QTableWidget(0, 3)
         self.file_table.setHorizontalHeaderLabels(["File · triage", "Role", "Lamp"])
-        self.file_table.horizontalHeader().setSectionResizeMode(
-            0, QtWidgets.QHeaderView.Stretch
-        )
-        self.file_table.setColumnWidth(1, 210)
-        self.file_table.setColumnWidth(2, 96)
+        header = self.file_table.horizontalHeader()
+        header.setSectionResizeMode(0, QtWidgets.QHeaderView.Stretch)
+        # The role is state the operator must read exactly, so its column is
+        # sized by its content and never squeezed into an ellipsis.
+        header.setSectionResizeMode(1, QtWidgets.QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(2, QtWidgets.QHeaderView.ResizeToContents)
+        self.file_table.setMouseTracking(True)
         self.file_table.verticalHeader().setVisible(False)
         self.file_table.verticalHeader().setDefaultSectionSize(34)
         self.file_table.verticalHeader().setSectionResizeMode(
@@ -554,7 +736,7 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         layout.addWidget(self.show_frame_button)
 
         status_group = QtWidgets.QGroupBox("Bench state")
-        status_form = QtWidgets.QFormLayout(status_group)
+        status_form = self._form_layout(status_group)
         self.watch_value = QtWidgets.QLabel("manual — drag and drop or Add files")
         self.watch_value.setWordWrap(True)
         self.file_value = QtWidgets.QLabel("no file open")
@@ -595,12 +777,32 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         comparison_layout.addWidget(self.comparison_value)
         comparison_layout.addWidget(self.compare_button)
         layout.addWidget(comparison_group)
-        self.control_tabs.addTab(tab, "Files")
+        self.control_tabs.addTab(self._scrollable(tab), "Files")
 
     def _build_lamp_tab(self) -> None:
         tab = QtWidgets.QWidget()
         layout = QtWidgets.QVBoxLayout(tab)
         layout.setContentsMargins(10, 12, 10, 10)
+
+        # The fit view names the file it is fitting. Reading a lineless hump
+        # and not knowing it was the background frame is what this ends.
+        self.fit_file_value = QtWidgets.QLabel("no file open for fitting")
+        self.fit_file_value.setWordWrap(True)
+        self.fit_file_value.setObjectName("messagePanel")
+        self._explainable(
+            self.fit_file_value,
+            "Which file this fit is measuring",
+            "The fit tab opens the assigned lamp signal by default, and states "
+            "here which file it is showing and whether the assigned lamp "
+            "background is being subtracted from it. Opening any other file "
+            "from the Files tab overrides this and the line above says so.",
+        )
+        layout.addWidget(self.fit_file_value)
+        self.fit_warning_value = QtWidgets.QLabel("")
+        self.fit_warning_value.setWordWrap(True)
+        self.fit_warning_value.setObjectName("warningPanel")
+        self.fit_warning_value.setVisible(False)
+        layout.addWidget(self.fit_warning_value)
 
         order_group = QtWidgets.QGroupBox("Order and frame")
         order_layout = QtWidgets.QVBoxLayout(order_group)
@@ -650,18 +852,20 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         order_layout.addWidget(self.frame_choice_value)
 
         family_row = QtWidgets.QHBoxLayout()
-        family_row.addWidget(QtWidgets.QLabel("Line help"))
+        family_row.addWidget(QtWidgets.QLabel("Expected lines"))
         self.line_family_combo = QtWidgets.QComboBox()
-        self.line_family_combo.addItems(["ThAr", "Ne", "Hg", "H2"])
-        family_row.addWidget(self.line_family_combo)
+        self.line_family_combo.addItems(list(KNOWN_LAMP_NAMES))
+        family_row.addWidget(self.line_family_combo, 1)
         order_layout.addLayout(family_row)
-        help_text = QtWidgets.QLabel(
-            "Blue sticks use shared packaged line knowledge. Gold rows remain the "
-            "curated click-to-fit anchors. Saturated raw pixels are refused."
+        self._explainable(
+            self.line_family_combo,
+            "Which catalog fills the expected-lines table",
+            "This follows the assigned lamp on its own: assign a Ne lamp and "
+            "the expected-lines panel fills with neon. Changing it by hand is "
+            "an override for comparing one lamp's catalog against another "
+            "frame; the anchors themselves always reference the assigned "
+            "lamp's own rows, and the panel warns when the two disagree.",
         )
-        help_text.setWordWrap(True)
-        help_text.setObjectName("benchHelp")
-        order_layout.addWidget(help_text)
         layout.addWidget(order_group)
 
         self.reference_value = QtWidgets.QLabel(
@@ -672,7 +876,7 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         layout.addWidget(self.reference_value)
 
         fit_group = QtWidgets.QGroupBox("Rigid alignment")
-        fit_form = QtWidgets.QFormLayout(fit_group)
+        fit_form = self._form_layout(fit_group)
         self.alignment_state_value = QtWidgets.QLabel("WAITING FOR FRAME")
         self.alignment_state_value.setObjectName("stateBadge")
         self.anchor_count_value = QtWidgets.QLabel("0")
@@ -738,7 +942,7 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         self.message_value.setWordWrap(True)
         self.message_value.setObjectName("messagePanel")
         layout.addWidget(self.message_value)
-        self.control_tabs.addTab(tab, "Lamp fit")
+        self.control_tabs.addTab(self._scrollable(tab), "Lamp fit")
 
     def _build_save_tab(self) -> None:
         tab = QtWidgets.QWidget()
@@ -746,7 +950,7 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         layout.setContentsMargins(10, 12, 10, 10)
 
         identity_group = QtWidgets.QGroupBox("Snapshot identity")
-        form = QtWidgets.QFormLayout(identity_group)
+        form = self._form_layout(identity_group)
         self.snapshot_id_edit = QtWidgets.QLineEdit(self.initial_snapshot_id)
         self.detector_edit = QtWidgets.QLineEdit(self.initial_detector)
         self.base_snapshot_edit = QtWidgets.QLineEdit(self.initial_base_snapshot)
@@ -776,7 +980,7 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
             "Generated campaign.toml appears here; all files remain ordinary and editable."
         )
         layout.addWidget(self.toml_preview, 1)
-        self.control_tabs.addTab(tab, "Save")
+        self.control_tabs.addTab(self._scrollable(tab), "Save")
 
     def _build_triage_view(self) -> None:
         widget = QtWidgets.QWidget()
@@ -787,12 +991,15 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         self.triage_headline.setObjectName("triageHeadline")
         self.triage_headline.setWordWrap(True)
         layout.addWidget(self.triage_headline)
-        self.triage_detail = QtWidgets.QLabel(
+        # The four-line breakdown that used to sit here now folds into the Why
+        # dock: the verdict decides the next action, the arithmetic behind it
+        # is one hover away.
+        self.triage_next_value = QtWidgets.QLabel(
             "Shoot → drop the file → one glance → adjust the lamp → shoot again."
         )
-        self.triage_detail.setWordWrap(True)
-        self.triage_detail.setObjectName("messagePanel")
-        layout.addWidget(self.triage_detail)
+        self.triage_next_value.setWordWrap(True)
+        self.triage_next_value.setObjectName("messagePanel")
+        layout.addWidget(self.triage_next_value)
 
         graphics = pg.GraphicsLayoutWidget()
         graphics.setBackground("#10151b")
@@ -811,7 +1018,22 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         layout.addWidget(graphics, 1)
         self.view_tabs.addTab(widget, "Exposure triage")
 
-    def _build_alignment_view(self) -> None:
+    def _build_lamp_fit_view(self) -> None:
+        """One surface for the whole line workflow: spectrum plus its lines.
+
+        Choosing a lamp and then juggling two tabs is not a workflow.  The
+        expected-line table lives beside the spectrum it belongs to and fills
+        itself from the active lamp, order, and wavelength table.
+        """
+
+        widget = QtWidgets.QWidget()
+        outer = QtWidgets.QVBoxLayout(widget)
+        outer.setContentsMargins(0, 0, 0, 0)
+        split = QtWidgets.QSplitter(QtCore.Qt.Vertical)
+        split.setChildrenCollapsible(False)
+        self.lamp_fit_splitter = split
+        outer.addWidget(split)
+
         graphics = pg.GraphicsLayoutWidget()
         graphics.setBackground("#10151b")
 
@@ -830,42 +1052,71 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         self.order_plot.setLabel("left", "mean extracted counts")
         self.order_plot.getAxis("bottom").enableAutoSIPrefix(False)
         self.order_plot.getAxis("left").enableAutoSIPrefix(False)
-        self.order_curve = self.order_plot.plot(pen=pg.mkPen("#76d6ff", width=1.4))
+        self.order_curve = self.order_plot.plot(
+            pen=pg.mkPen("#76d6ff", width=1.2), antialias=False
+        )
+        self.order_plot.setDownsampling(auto=True, mode="peak")
+        self.order_plot.setClipToView(True)
+        # The stick the expected-lines panel points at.  One item, moved — not
+        # a new item per selection.
+        self.line_highlight = pg.InfiniteLine(
+            0.0, angle=90, movable=False, pen=pg.mkPen("#ffe08a", width=2.4)
+        )
+        self.line_highlight.setVisible(False)
+        self.order_plot.addItem(self.line_highlight, ignoreBounds=True)
+        # One scatter item for every accepted anchor of the shown order, fed
+        # with setData rather than rebuilt one item per anchor.
+        self._anchor_scatter = pg.ScatterPlotItem(
+            size=11, brush=pg.mkBrush("#6ee7b7"), pen=pg.mkPen("#d7fff1", width=1)
+        )
+        self.order_plot.addItem(self._anchor_scatter)
 
         self.residual_plot = graphics.addPlot(row=2, col=0, title="Anchor residuals")
-        self.residual_plot.setMaximumHeight(190)
+        self.residual_plot.setMaximumHeight(180)
         self.residual_plot.setLabel("bottom", "accepted anchor")
         self.residual_plot.setLabel("left", "fit residual", units="px")
-        self.residual_plot.getAxis("bottom").setHeight(62)
+        self.residual_plot.getAxis("bottom").setHeight(58)
         self.residual_plot.getAxis("left").enableAutoSIPrefix(False)
         self.residual_plot.addLine(y=0, pen=pg.mkPen("#64748b", style=QtCore.Qt.DashLine))
-        self.view_tabs.addTab(graphics, "Lamp alignment")
+        split.addWidget(graphics)
 
-    def _build_line_help_view(self) -> None:
-        widget = QtWidgets.QWidget()
-        layout = QtWidgets.QVBoxLayout(widget)
-        intro = QtWidgets.QLabel(
-            "Expected lines come from the same packaged ThAr, Ne, Hg, and Fulcher H2 "
-            "catalogs used by the main GUI and validation tools. Pixel positions are "
-            "interpolated from the current wavelength table for identification help."
+        panel = QtWidgets.QWidget()
+        panel_layout = QtWidgets.QVBoxLayout(panel)
+        panel_layout.setContentsMargins(6, 6, 6, 4)
+        panel_layout.setSpacing(5)
+        self.line_panel_header = QtWidgets.QLabel(
+            "Expected lines — assign a lamp and this fills itself."
         )
-        intro.setWordWrap(True)
-        intro.setObjectName("messagePanel")
-        layout.addWidget(intro)
+        self.line_panel_header.setWordWrap(True)
+        self.line_panel_header.setObjectName("messagePanel")
+        self._explainable(
+            self.line_panel_header,
+            "The expected-line panel fills itself",
+            "These are the packaged catalog lines of the active lamp that fall "
+            "inside the selected order, placed by interpolating the current "
+            "wavelength table. Selecting a row marks its stick on the spectrum "
+            "above; a row already anchored on this frame is ticked. There is "
+            "nothing to populate by hand and nowhere else to go for it.",
+        )
+        panel_layout.addWidget(self.line_panel_header)
         self.line_help_table = QtWidgets.QTableWidget(0, 5)
         self.line_help_table.setHorizontalHeaderLabels(
-            ["Label", "λ (nm)", "Pixel", "Rel. I", "Packaged source"]
+            ["Line", "λ nm", "Pixel", "Rel. I", "Anchor"]
         )
-        self.line_help_table.horizontalHeader().setSectionResizeMode(
-            0, QtWidgets.QHeaderView.ResizeToContents
-        )
-        self.line_help_table.horizontalHeader().setSectionResizeMode(
-            4, QtWidgets.QHeaderView.Stretch
-        )
+        header = self.line_help_table.horizontalHeader()
+        header.setSectionResizeMode(0, QtWidgets.QHeaderView.Stretch)
+        for column in (1, 2, 3, 4):
+            header.setSectionResizeMode(column, QtWidgets.QHeaderView.ResizeToContents)
         self.line_help_table.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
+        self.line_help_table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
+        self.line_help_table.setSelectionMode(QtWidgets.QAbstractItemView.SingleSelection)
         self.line_help_table.setAlternatingRowColors(True)
-        layout.addWidget(self.line_help_table)
-        self.view_tabs.addTab(widget, "Line identification")
+        self.line_help_table.verticalHeader().setVisible(False)
+        panel_layout.addWidget(self.line_help_table, 1)
+        split.addWidget(panel)
+        split.setStretchFactor(0, 3)
+        split.setStretchFactor(1, 1)
+        self.view_tabs.addTab(widget, "Lamp fit")
 
     def _build_sphere_view(self) -> None:
         widget = QtWidgets.QWidget()
@@ -881,8 +1132,32 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         self.sphere_plot.setLabel("bottom", "wavelength", units="nm")
         self.sphere_plot.setLabel("left", "factor", units="W m⁻² sr⁻¹ nm⁻¹ count⁻¹")
         self.sphere_plot.addLegend()
+        # One PlotDataItem per curve, created once and fed with setData.  A
+        # 42k-sample factor curve is only heavy when it is drawn point for
+        # point: downsampled to the view, clipped to it, and unantialiased, the
+        # same curve pans at interactive speed.
+        self.candidate_curve = self._factor_curve("#70d6ae", 1.6, "new measured pair")
+        self.previous_curve = self._factor_curve("#f5b95f", 1.2, "previous campaign")
+        # Downsampling and clipping are set on the plot, not on the curves:
+        # PlotItem pushes its own control-panel state onto every item whenever
+        # the log mode changes, which silently undoes a per-curve setting.
+        self.sphere_plot.setDownsampling(auto=True, mode="peak")
+        self.sphere_plot.setClipToView(True)
+        self.sphere_plot.setLogMode(y=True)
         layout.addWidget(self.sphere_plot)
         self.view_tabs.addTab(widget, "Sphere factors")
+
+    def _factor_curve(self, color: str, width: float, name: str) -> pg.PlotDataItem:
+        """Add one persistent factor curve to the plot."""
+
+        curve = pg.PlotDataItem(
+            pen=pg.mkPen(color, width=width),
+            name=name,
+            antialias=False,
+            connect="finite",
+        )
+        self.sphere_plot.addItem(curve)
+        return curve
 
     def _connect_ui(self) -> None:
         self.order_spin.valueChanged.connect(self._order_changed)
@@ -902,12 +1177,30 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         self.confirm_roles_button.clicked.connect(self._confirm_suggested_roles)
         self.show_frame_button.clicked.connect(self._open_selected_file)
         self.file_table.itemSelectionChanged.connect(self._file_selection_changed)
+        self.file_table.itemEntered.connect(self._file_row_hovered)
         self.checklist_tree.currentRowChanged.connect(self._checklist_row_selected)
         self.anchor_table.itemSelectionChanged.connect(self._anchor_row_selected)
+        self.line_help_table.itemSelectionChanged.connect(self._expected_line_selected)
         self.compare_button.clicked.connect(self._start_sphere_comparison)
         self.generate_tomls_button.clicked.connect(self._generate_tomls)
         self.save_snapshot_button.clicked.connect(self._save_snapshot)
         self.snapshot_id_edit.textChanged.connect(self.refresh_campaign)
+        # Picking the work on the left brings its own view with it: one lamp
+        # choice, one view, the whole line workflow in one place.
+        self.control_tabs.currentChanged.connect(self._control_tab_changed)
+
+    #: Which view answers which piece of work.  Tabs the operator has not asked
+    #: about are left exactly where they were.
+    _VIEW_FOR_CONTROL_TAB = {"Files": "Exposure triage", "Lamp fit": "Lamp fit"}
+
+    def _control_tab_changed(self, index: int) -> None:
+        wanted = self._VIEW_FOR_CONTROL_TAB.get(self.control_tabs.tabText(index))
+        if not wanted:
+            return
+        for position in range(self.view_tabs.count()):
+            if self.view_tabs.tabText(position) == wanted:
+                self.view_tabs.setCurrentIndex(position)
+                return
 
     def _frame_choice_changed(self, index: int) -> None:
         """Fit the mean of the acquisition, or one of its single frames."""
@@ -978,20 +1271,60 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         )
         self.campaign.scope_alignment_to_lamp(self.session)
         names = ", ".join(record.path.name for record in confirmed)
-        if confirmed:
-            self.message_value.setText(
-                f"Assigned {len(confirmed)} suggested role(s): {names}. "
-                "Change any of them in the Role column."
-            )
-        else:
-            self.message_value.setText(
-                "No suggestion could be confirmed; assign those roles by hand."
-            )
+        outcome = (
+            f"Assigned {len(confirmed)} suggested role(s): {names}. "
+            "Change any of them in the Role column."
+            if confirmed
+            else "No suggestion could be confirmed; assign those roles by hand."
+        )
+        # The refresh may open the assigned lamp signal and report that; the
+        # operator's own action is what they need to read, so it is set last.
         self.refresh()
+        self.message_value.setText(outcome)
 
     def _line_family_changed(self) -> None:
+        """A hand-picked catalog is an override; the default follows the lamp."""
+
+        self._family_override = True
+        self._catalog_cache.clear()
         self._refresh_reference()
         self.refresh_plots()
+
+    def _follow_assigned_lamp_catalog(self) -> None:
+        """Fill the expected-lines panel from the assigned lamp on its own."""
+
+        if self.campaign is None or self._family_override:
+            return
+        lamp = self.campaign.lamp_for_frame(self.session)
+        index = self.line_family_combo.findText(lamp) if lamp else -1
+        if index < 0 or index == self.line_family_combo.currentIndex():
+            return
+        self.line_family_combo.blockSignals(True)
+        try:
+            self.line_family_combo.setCurrentIndex(index)
+        finally:
+            self.line_family_combo.blockSignals(False)
+        self._catalog_cache.clear()
+
+    def _expected_line_selected(self) -> None:
+        """Mark the selected expected line's stick on the spectrum above."""
+
+        row = self.line_help_table.currentRow()
+        if not (0 <= row < len(self._catalog_rows)):
+            self.line_highlight.setVisible(False)
+            return
+        entry = self._catalog_rows[row]
+        self.line_highlight.setValue(entry.detector_pixel)
+        self.line_highlight.setVisible(True)
+        source = entry.line.source_resource.replace("\\", "/").rsplit("/", 1)[-1]
+        self.explain(
+            f"{entry.line.label} — expected at pixel {entry.detector_pixel:.1f}",
+            f"{entry.line.wavelength_nm:.4f} nm, order {entry.order_idx}, from the "
+            f"packaged catalog {source}. The pixel is interpolated from the "
+            "current wavelength table, so it says where to look, not where the "
+            "line is: click the peak itself to fit its centroid and accept it "
+            "as an anchor.",
+        )
 
     def _refresh_reference(self) -> None:
         """State which catalog anchors this fit, and when it is not the lamp's."""
@@ -1090,17 +1423,194 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
 
     def _file_selection_changed(self) -> None:
         selected = self._selected_file()
+        # The buttons follow the selection immediately: a control that ignores
+        # a click because some other refresh has not run yet is a dead surface.
+        self._refresh_file_buttons()
         if selected is not None:
             self._show_triage(selected)
+
+    def _refresh_file_buttons(self) -> None:
+        """Enable the per-file actions for whatever row is selected now."""
+
+        selected = self._selected_file()
+        self.remove_file_button.setEnabled(selected is not None)
+        self.show_frame_button.setEnabled(
+            selected is not None and self.loader is not None and self._load_thread is None
+        )
 
     def _open_selected_file(self) -> None:
         selected = self._selected_file()
         if selected is None:
             return
+        # An explicit choice is never argued with; the fit view only says what
+        # it is showing and warns when that is a background.
+        self._explicitly_opened.add(selected)
         if self.session.frame is not None and self.session.frame.path == selected:
             self.message_value.setText(f"{selected.name} is already open for fitting.")
             return
         self.add_paths([selected])
+
+    # ------------------------------------------------------------------
+    # The fit tab fits the assigned lamp signal, and says which file that is
+    # ------------------------------------------------------------------
+
+    def _assigned_lamp_files(self) -> tuple[Path | None, Path | None]:
+        """The primary lamp's (signal, background) paths, as far as assigned."""
+
+        if self.campaign is None:
+            return None, None
+        return self.campaign.lamp_pair(self.campaign.lamp_for_frame(self.session))
+
+    def _open_frame_role(self) -> MeasurementRole | None:
+        frame = self.session.frame
+        if frame is None or self.campaign is None:
+            return None
+        record = self.campaign.measurements.get(Path(frame.path))
+        return record.role if record is not None else None
+
+    def _follow_assigned_lamp_signal(self) -> None:
+        """Land the fit on the assigned lamp signal rather than whatever is open.
+
+        The frame that happens to be open after loading a folder is the last
+        file read, which on the owner's folder was a background: a lineless
+        hump the fit view showed without ever naming it.
+        """
+
+        if self.campaign is None or self.loader is None or self._auto_following:
+            return
+        # Loading refreshes the surface, and the surface asks this question
+        # again: without the guard the two call each other forever.
+        if self._load_thread is not None or self._queue:
+            return
+        if self.session.file_state is FileLoadState.LOADING:
+            return
+        signal, _background = self._assigned_lamp_files()
+        if signal is None or not signal.is_file():
+            return
+        open_path = getattr(self.session.frame, "path", None)
+        if open_path is not None and Path(open_path) == signal:
+            return
+        if open_path is not None and Path(open_path) in self._explicitly_opened:
+            return
+        if self._open_frame_role() is MeasurementRole.LAMP:
+            return
+        self._auto_following = True
+        try:
+            self.message_value.setText(
+                f"Opened the assigned lamp signal {signal.name} for fitting."
+            )
+            self.add_paths([signal])
+        finally:
+            self._auto_following = False
+
+    def _pair_lamp_background(self) -> None:
+        """Subtract the assigned lamp background once the pair is complete."""
+
+        if self.campaign is None or self.loader is None:
+            return
+        if self._background_thread is not None:
+            return
+        signal, background = self._assigned_lamp_files()
+        open_path = getattr(self.session.frame, "path", None)
+        if (
+            open_path is None
+            or signal is None
+            or background is None
+            or Path(open_path) != signal
+            or not background.is_file()
+        ):
+            if self.session.background_path is not None and (
+                background is None or open_path is None or Path(open_path) != signal
+            ):
+                self.session.use_background_frame(None)
+            return
+        if self.session.background_path == background:
+            return
+        thread = FrameLoadThread(background, self.loader, self)
+        thread.loaded.connect(self._background_loaded)
+        thread.failed.connect(self._background_failed)
+        thread.finished.connect(self._background_finished)
+        self._background_thread = thread
+        thread.start()
+
+    @QtCore.pyqtSlot(object)
+    def _background_loaded(self, frame: BenchFrame) -> None:
+        try:
+            self.session.use_background_frame(frame)
+        except ValueError as exc:
+            self.message_value.setText(f"Lamp background was not subtracted: {exc}")
+            return
+        self.message_value.setText(
+            f"Fitting {frame.path.name} subtracted from the lamp signal, as "
+            "echelle-align does."
+        )
+        self.refresh()
+
+    @QtCore.pyqtSlot(str, str)
+    def _background_failed(self, path: str, reason: str) -> None:
+        self.message_value.setText(
+            f"The assigned lamp background {Path(path).name} could not be read "
+            f"({reason}); the fit shows the raw signal."
+        )
+
+    @QtCore.pyqtSlot()
+    def _background_finished(self) -> None:
+        if self._background_thread is not None:
+            self._background_thread.deleteLater()
+        self._background_thread = None
+
+    def _land_on_the_lamps_own_orders(self) -> None:
+        """Open a lamp on an order that actually carries its lines.
+
+        Landing on order 0 with an empty expected-line panel is the empty room
+        the operator had to discover and feed, moved one tab along. This lands
+        once per frame-and-lamp; every later order change is the operator's.
+        """
+
+        frame = self.session.frame
+        if frame is None:
+            return
+        reference = self.session.reference
+        key = (Path(frame.path), "" if reference is None else reference.lamp)
+        if key == self._landed_on:
+            return
+        self._landed_on = key
+        order = self.session.best_reference_order()
+        if order is None or order == self.order_spin.value():
+            return
+        self.order_spin.setValue(order)
+
+    def _refresh_fit_target(self) -> None:
+        """State which file the fit is measuring, and warn when it is wrong."""
+
+        frame = self.session.frame
+        if frame is None:
+            self.fit_file_value.setText("no file open for fitting")
+            self.fit_warning_value.setVisible(False)
+            return
+        role = self._open_frame_role()
+        lamp = "" if self.campaign is None else self.campaign.lamp_for_frame(self.session)
+        described = "unassigned file" if role is None else role.value
+        if role in _LAMP_ROLES and lamp:
+            described = f"{lamp} {described}"
+        self.fit_file_value.setText(
+            f"Fitting {frame.path.name} · {described} · "
+            f"{self.session.frame_choice_label()} · {self.session.background_label()}"
+        )
+        warning = ""
+        if role in {MeasurementRole.LAMP_BACKGROUND, MeasurementRole.SPHERE_BACKGROUND}:
+            warning = (
+                f"{frame.path.name} is a background frame — no lines are "
+                "expected in it. Open the lamp signal from the Files tab to fit "
+                "lines."
+            )
+        elif role is MeasurementRole.SPHERE:
+            warning = (
+                f"{frame.path.name} is the integrating-sphere signal — a smooth "
+                "continuum, not a line spectrum. Open the lamp signal to fit lines."
+            )
+        self.fit_warning_value.setText(warning)
+        self.fit_warning_value.setVisible(bool(warning))
 
     def _remove_selected_file(self) -> None:
         selected = self._selected_file()
@@ -1380,6 +1890,27 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         self.message_value.setText("All anchors cleared.")
         self.refresh()
 
+    @staticmethod
+    def _short_verdict(path: Path, triage: ExposureTriage, verdict) -> str:
+        """Two lines: which file, and what it says. Nothing else shouts.
+
+        The full sentence, its advice, and the four-line breakdown are all in
+        the Why dock. A headline that runs to fourteen lines is a paragraph
+        wearing a headline's font, and it is exactly what "all loud and big"
+        produced.
+        """
+
+        readings = []
+        if triage.state is ExposureState.SATURATED:
+            clusters = triage.saturation.cluster_count
+            readings.append(f"{clusters} saturated cluster(s)")
+        if triage.headroom_fraction is not None:
+            readings.append(f"peak {100.0 * triage.headroom_fraction:.0f}% of full scale")
+        if triage.saturation.anomalous_pixels:
+            readings.append(f"{triage.saturation.anomalous_pixels} anomalies")
+        tail = f" · {' · '.join(readings)}" if readings else ""
+        return f"{path.name}\n{verdict.label.upper()}{tail}"
+
     def _show_triage(self, path: Path) -> None:
         """Render one file's exposure verdict; roles play no part in it."""
 
@@ -1399,26 +1930,33 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
             # lines; saying FAILED here would be the bench misreading physics.
             color = _TRIAGE_COLORS[ExposureState.DIM]
             headline = verdict.headline.upper()
-        self.triage_headline.setText(f"{path.name}\n{headline}")
+        self.triage_headline.setText(self._short_verdict(path, triage, verdict))
         self.triage_headline.setStyleSheet(f"color: {color};")
-        self._explainable(
-            self.triage_headline,
-            f"{path.name} — exposure verdict",
-            f"{headline}\n\n{verdict.advice}",
-        )
-        self.triage_detail.setText("\n".join(triage.details))
-        self._explainable(
-            self.triage_detail,
-            f"{path.name} — how the verdict was reached",
+        breakdown = (
             "\n".join(triage.details)
             + "\n\nIsolated full-scale pixels are cosmic rays or hot pixels and "
             "are counted, not held against the frame. Only a connected cluster "
-            "of full-scale pixels is real saturation.",
+            "of full-scale pixels is real saturation."
+        )
+        whole_verdict = f"{headline}\n\n{verdict.advice}\n\n{breakdown}"
+        self._explainable(
+            self.triage_headline, f"{path.name} — exposure verdict", whole_verdict
         )
         self._draw_histogram(self.histogram_plot, triage, triage.histogram)
         self._draw_histogram(self.top_histogram_plot, triage, triage.top_histogram)
         guidance = record.exposure
         peak = "—" if guidance.peak_value is None else f"{guidance.peak_value:.0f} counts"
+        # The one line that decides the next action stays on screen; the four
+        # lines of arithmetic behind it live in the dock.
+        self.triage_next_value.setText(guidance.next_action)
+        self._explainable(
+            self.triage_next_value,
+            f"{path.name} — how the verdict was reached",
+            breakdown,
+        )
+        # Selecting a file writes its whole verdict into the dock at once:
+        # what it says, what to do about it, and the numbers behind both.
+        self.explain(f"{path.name} — exposure verdict", whole_verdict)
         self.exposure_value.setText(
             f"{path.name} · {verdict.label.upper()} · peak {peak}. "
             f"{guidance.next_action}"
@@ -1494,7 +2032,10 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         elif self.session.alignment_state is AlignmentState.FAILED:
             self.message_value.setText(f"Alignment failed: {self.session.last_error}")
         self._refresh_frame_selector()
+        self._follow_assigned_lamp_catalog()
+        self._land_on_the_lamps_own_orders()
         self._refresh_reference()
+        self._refresh_fit_target()
         self._refresh_anchor_table()
         self.refresh_plots()
         self.refresh_campaign()
@@ -1535,11 +2076,7 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         enabled = self.campaign is not None
         busy = self._campaign_thread is not None
         self.add_files_button.setEnabled(self.loader is not None)
-        selected = self._selected_file()
-        self.remove_file_button.setEnabled(selected is not None)
-        self.show_frame_button.setEnabled(
-            selected is not None and self.loader is not None and self._load_thread is None
-        )
+        self._refresh_file_buttons()
         self.drop_hint.setVisible(not self._file_rows)
         self.compare_button.setEnabled(enabled and not busy)
         self.generate_tomls_button.setEnabled(enabled and not busy)
@@ -1578,6 +2115,10 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
                     campaign_path.read_text(encoding="utf-8")
                 )
         self._refresh_sphere_plot()
+        # The fit belongs on the assigned lamp signal, minus its own
+        # background — decided here, after the roles are known.
+        self._follow_assigned_lamp_signal()
+        self._pair_lamp_background()
 
     def _refresh_file_table(self) -> None:
         """Show each loaded file's verdict and the role it currently carries."""
@@ -1598,8 +2139,10 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
                 if record.triage.saturation.anomalous_pixels:
                     marks.append(f"{record.triage.saturation.anomalous_pixels} anomalies")
             if measurement is None:
+                # The badge for an unconfirmed suggestion lives here, in full,
+                # never inside the Role control where it would be elided.
                 marks.append(
-                    "SUGGESTED ONLY — no role assigned"
+                    f"{_SUGGESTED_BADGE} ONLY — no role assigned"
                     if path in suggested
                     else "no role yet"
                 )
@@ -1623,48 +2166,57 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
                     # Expected saturation is a note, not an alarm.
                     colour = _TRIAGE_COLORS[ExposureState.DIM]
                 item.setForeground(QtGui.QColor(colour))
+                title = "exposure verdict"
                 explanation = f"{path}\n{verdict.headline}\n\n{verdict.advice}"
                 if measurement is None and path in suggested:
+                    title = "suggested role only"
                     explanation = f"{path}\n{_SUGGESTED_TOOLTIP}\n\n{verdict.headline}"
-                item.setToolTip(explanation)
+                # One short line hovers; the whole thing goes to the dock.
+                item.setToolTip(one_line(verdict.headline))
+                item.setData(QtCore.Qt.UserRole, title)
+                item.setData(QtCore.Qt.UserRole + 1, explanation)
             lamp_combo = self.file_table.cellWidget(row, 2)
             lamp_combo.setEnabled(
                 measurement is not None and measurement.role in _LAMP_ROLES
             )
 
-    @staticmethod
-    def _render_role_combo(role_combo, is_only_suggested: bool) -> None:
+    def _render_role_combo(self, role_combo, is_only_suggested: bool) -> None:
         """Make an unconfirmed suggestion impossible to read as an assignment.
 
-        The entry's *data* is untouched, so the control still proposes the
-        filename's guess; only its text and colour say that the bench has not
-        been given that role yet.
+        The combo's *text* is never touched: it holds a short role label and
+        nothing else, so it cannot elide away the very state the operator has
+        to read.  The SUGGESTED state is carried outside the control — by its
+        colour here, and by the badge in the file cell beside it.
         """
 
         if role_combo is None:
             return
-        for index in range(role_combo.count()):
-            label = role_combo.itemText(index).removesuffix(_SUGGESTED_SUFFIX)
-            wanted = (
-                f"{label}{_SUGGESTED_SUFFIX}"
-                if is_only_suggested
-                and index == role_combo.currentIndex()
-                and role_combo.itemData(index) is not None
-                else label
-            )
-            if wanted != role_combo.itemText(index):
-                role_combo.setItemText(index, wanted)
-        role_combo.setToolTip(
+        self._explainable(
+            role_combo,
+            "Suggested is not assigned"
+            if is_only_suggested
+            else "The role this file carries",
             _SUGGESTED_TOOLTIP
             if is_only_suggested
             else "The measurement role this file carries. Change it freely; "
-            "the bench never infers one behind your back."
+            "the bench never infers one behind your back.",
         )
         role_combo.setStyleSheet(
             f"border: 1px solid {_SUGGESTED_COLOR}; color: {_SUGGESTED_COLOR};"
             if is_only_suggested
             else ""
         )
+        role_combo.setMinimumWidth(role_combo_minimum_width(role_combo))
+
+    def _file_row_hovered(self, item) -> None:
+        """Hovering a file row writes its whole verdict into the Why dock."""
+
+        row = item.row()
+        if 0 <= row < len(self._file_rows):
+            path = self._file_rows[row]
+            title = item.data(QtCore.Qt.UserRole)
+            if title:
+                self.explain(f"{path.name} — {title}", item.data(QtCore.Qt.UserRole + 1) or "")
 
     def _refresh_comparison_summary(self) -> None:
         assert self.campaign is not None
@@ -1683,6 +2235,8 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
 
     def _refresh_checklist(self) -> None:
         assert self.campaign is not None
+        while self._checklist_labels:
+            self._forget_explainable(self._checklist_labels.pop())
         self.checklist_tree.clear()
         symbols = {
             ChecklistState.DONE: "✓",
@@ -1702,52 +2256,56 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
             if item.unblocked_by:
                 text += f"\n     unblocked by: {item.unblocked_by}"
             row = QtWidgets.QListWidgetItem()
-            tooltip = f"{item.label}\n{item.detail}"
+            explanation = item.detail
             if item.unblocked_by:
-                tooltip += f"\n\nWhat unblocks it: {item.unblocked_by}"
-            row.setToolTip(tooltip)
+                explanation += f"\n\nWhat unblocks it: {item.unblocked_by}"
+            if not item.blocking:
+                explanation += "\n\nThis row is advice. It never blocks anything."
+            row.setToolTip(one_line(item.detail))
             label = QtWidgets.QLabel(text)
             label.setWordWrap(True)
             label.setContentsMargins(8, 6, 8, 6)
-            label.setToolTip(tooltip)
             label.setStyleSheet(f"color: {colors[item.state].name()};")
             _emphasise(label, self.body_pt, bold=item.state is ChecklistState.ATTENTION)
             label.setFixedWidth(width)
+            self._explainable(label, item.label, explanation)
+            self._checklist_labels.append(label)
             row.setSizeHint(QtCore.QSize(0, label.sizeHint().height() + 8))
             self.checklist_tree.addItem(row)
             self.checklist_tree.setItemWidget(row, label)
 
     def _refresh_sphere_plot(self) -> None:
-        self.sphere_plot.clear()
+        """Feed the two persistent factor curves; never rebuild the plot.
+
+        The factor curves hold tens of thousands of samples.  Recreating them
+        on every refresh, drawing every sample, and antialiasing the result is
+        what turned a pan into a slideshow.
+        """
+
         if self.campaign is None:
             return
         comparison = self.campaign.comparison
-        if comparison.candidate is not None:
-            size = min(
-                comparison.candidate.wavelength_nm.size,
-                comparison.candidate.factors_wmsr.size,
-            )
-            self.sphere_plot.plot(
-                comparison.candidate.wavelength_nm[:size],
-                comparison.candidate.factors_wmsr[:size],
-                pen=pg.mkPen("#70d6ae", width=2),
-                name="new measured pair",
-            )
-        if comparison.previous is not None:
-            size = min(
-                comparison.previous.wavelength_nm.size,
-                comparison.previous.factors_wmsr.size,
-            )
-            self.sphere_plot.plot(
-                comparison.previous.wavelength_nm[:size],
-                comparison.previous.factors_wmsr[:size],
-                pen=pg.mkPen("#f5b95f", width=1.5),
-                name="previous campaign",
-            )
-        self.sphere_plot.setLogMode(y=True)
+        self._set_factor_curve(self.candidate_curve, comparison.candidate)
+        self._set_factor_curve(self.previous_curve, comparison.previous)
         self.sphere_view_message.setText(
             f"{comparison.state.value.replace('-', ' ').upper()} — {comparison.reason}"
         )
+
+    @staticmethod
+    def _set_factor_curve(curve: pg.PlotDataItem, result) -> None:
+        """Update one factor curve in place, gaps drawn as gaps."""
+
+        if result is None:
+            curve.setData([], [])
+            curve.setVisible(False)
+            return
+        size = min(result.wavelength_nm.size, result.factors_wmsr.size)
+        curve.setData(
+            np.asarray(result.wavelength_nm[:size], dtype=float),
+            np.asarray(result.factors_wmsr[:size], dtype=float),
+            connect="finite",
+        )
+        curve.setVisible(True)
 
     def _refresh_anchor_table(self) -> None:
         anchors = self.session.anchor_rows()
@@ -1772,120 +2330,228 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         frame = self.session.frame
         if frame is None:
             return
+        self._refresh_detector_view(frame)
+        self._refresh_pattern_traces()
+        self._refresh_order_view()
+
+    def _refresh_detector_view(self, frame: BenchFrame) -> None:
+        """Upload the detector image once per frame, never per order.
+
+        Percentiling a 2560x2160 image and re-uploading it costs tens of
+        milliseconds; an order change does not alter one pixel of it, so it is
+        keyed to the frame's identity and skipped otherwise.
+        """
+
+        key = (str(frame.path), id(frame.detector_image))
+        if key == self._detector_key:
+            return
         finite = frame.detector_image[np.isfinite(frame.detector_image)]
         levels = None
         if finite.size:
             low, high = np.percentile(finite, (1.0, 99.8))
             if high > low:
                 levels = (float(low), float(high))
+        self.detector_image.setAutoDownsample(True)
         self.detector_image.setImage(
             frame.detector_image.T,
             autoLevels=levels is None,
             levels=levels,
         )
-        self._refresh_pattern_traces()
+        self._detector_key = key
+
+    def _refresh_order_view(self) -> None:
+        """Redraw only what an order change actually changes.
+
+        The main GUI scrolls a 1 GB acquisition instantly because it extracts
+        every order once and then re-slices.  This does the same: the detector
+        image, its levels, and the order traces belong to the frame, so an
+        order switch moves pens and pooled labels and touches nothing else.
+        """
 
         order_idx = self.session.selected_order
-        spectrum = self.session.active_order_spectra()[order_idx]
+        spectra = self.session.active_order_spectra()
+        if order_idx >= len(spectra):
+            return
+        spectrum = spectra[order_idx]
         self.order_curve.setData(np.arange(spectrum.size), spectrum)
         self.order_plot.setTitle(
             f"Order {order_idx} · {self.session.frame_choice_label()}: "
             "click a labeled expected line"
         )
-        self._clear_items(self.order_plot, self._line_items)
-        self._clear_items(self.order_plot, self._catalog_items)
-        self._clear_items(self.order_plot, self._anchor_items)
+        self._select_pattern_trace(order_idx)
         top = float(np.nanmax(spectrum)) if np.any(np.isfinite(spectrum)) else 1.0
+
         line_rows = self.session.lines_for_order(order_idx)
         for index, line in enumerate(line_rows):
-            marker = pg.InfiniteLine(
-                line.center_pixel,
-                angle=90,
-                movable=False,
-                pen=pg.mkPen("#f5b95f", width=1, style=QtCore.Qt.DashLine),
+            marker, label = self._pooled_marker(
+                self._line_pool,
+                index,
+                pg.mkPen("#f5b95f", width=1, style=QtCore.Qt.DashLine),
+                "#f5c56f",
             )
-            label = pg.TextItem(
-                f"{line.species} {line.wavelength_nm:.3f}",
-                color="#f5c56f",
-                anchor=(0.5, 0.5),
+            marker.setValue(line.center_pixel)
+            label.setText(f"{line.species} {line.wavelength_nm:.3f}")
+            label.setPos(
+                line.center_pixel, top * (0.90, 0.72, 0.54, 0.36)[index % 4]
             )
-            label_level = (0.90, 0.72, 0.54, 0.36)[index % 4]
-            label.setPos(line.center_pixel, top * label_level)
-            self.order_plot.addItem(marker, ignoreBounds=True)
-            self.order_plot.addItem(label, ignoreBounds=True)
-            self._line_items.extend([marker, label])
-        catalog_rows = catalog_lines_for_order(
-            self.session.lines,
-            order_idx,
-            self.line_family_combo.currentText(),
-            maximum_lines=16,
-        )
+        self._hide_pooled(self._line_pool, len(line_rows))
+
+        catalog_rows = self._catalog_rows_for_order(order_idx)
+        self._catalog_rows = catalog_rows
         for index, row in enumerate(catalog_rows):
-            marker = pg.InfiniteLine(
-                row.detector_pixel,
-                angle=90,
-                movable=False,
-                pen=pg.mkPen("#6aa7ff", width=0.9, style=QtCore.Qt.DotLine),
+            marker, label = self._pooled_marker(
+                self._catalog_pool,
+                index,
+                pg.mkPen("#6aa7ff", width=0.9, style=QtCore.Qt.DotLine),
+                "#8ebcff",
             )
-            self.order_plot.addItem(marker, ignoreBounds=True)
-            self._catalog_items.append(marker)
+            marker.setValue(row.detector_pixel)
             if index % 3 == 0:
-                label = pg.TextItem(
-                    row.line.label,
-                    color="#8ebcff",
-                    anchor=(0.5, 0.5),
-                )
-                label.setPos(row.detector_pixel, top * (0.22 + 0.09 * (index % 3)))
-                self.order_plot.addItem(label, ignoreBounds=True)
-                self._catalog_items.append(label)
-        for anchor in self.session.anchor_rows():
-            if anchor.line.order_idx != order_idx:
-                continue
-            marker = pg.ScatterPlotItem(
-                [anchor.fit.center_pixel],
-                [anchor.fit.amplitude + anchor.fit.baseline],
-                size=11,
-                brush=pg.mkBrush("#6ee7b7"),
-                pen=pg.mkPen("#d7fff1", width=1),
-            )
-            self.order_plot.addItem(marker)
-            self._anchor_items.append(marker)
+                label.setText(row.line.label)
+                label.setPos(row.detector_pixel, top * 0.22)
+                label.setVisible(True)
+            else:
+                label.setVisible(False)
+        self._hide_pooled(self._catalog_pool, len(catalog_rows))
+
+        anchors = [
+            anchor
+            for anchor in self.session.anchor_rows()
+            if anchor.line.order_idx == order_idx
+        ]
+        self._anchor_scatter.setData(
+            [anchor.fit.center_pixel for anchor in anchors],
+            [anchor.fit.amplitude + anchor.fit.baseline for anchor in anchors],
+        )
+        self.line_highlight.setVisible(False)
         self._refresh_line_help_table(catalog_rows)
         self._refresh_residual_plot()
 
+    def _catalog_rows_for_order(self, order_idx: int) -> tuple:
+        """Cache the packaged catalog's rows per (order, lamp) pair.
+
+        Re-reading and re-sorting a whole NIST table on every arrow-key press
+        is work the answer does not change with.
+        """
+
+        key = (int(order_idx), self.line_family_combo.currentText())
+        rows = self._catalog_cache.get(key)
+        if rows is None:
+            rows = catalog_lines_for_order(
+                self.session.lines, order_idx, key[1], maximum_lines=16
+            )
+            self._catalog_cache[key] = rows
+        return rows
+
+    def _pooled_marker(self, pool: list, index: int, pen, color: str):
+        """Reuse the index-th stick and label of *pool*, creating it once."""
+
+        while len(pool) <= index:
+            marker = pg.InfiniteLine(0.0, angle=90, movable=False, pen=pen)
+            label = pg.TextItem("", color=color, anchor=(0.5, 0.5))
+            self.order_plot.addItem(marker, ignoreBounds=True)
+            self.order_plot.addItem(label, ignoreBounds=True)
+            pool.append((marker, label))
+        marker, label = pool[index]
+        marker.setVisible(True)
+        label.setVisible(True)
+        return marker, label
+
+    @staticmethod
+    def _hide_pooled(pool: list, used: int) -> None:
+        for marker, label in pool[used:]:
+            marker.setVisible(False)
+            label.setVisible(False)
+
     def _refresh_line_help_table(self, rows) -> None:
+        """Fill the expected-lines panel and tick the rows already anchored."""
+
+        anchored = {
+            round(anchor.line.wavelength_nm, 3)
+            for anchor in self.session.anchor_rows()
+            if anchor.line.order_idx == self.session.selected_order
+        }
         self.line_help_table.setRowCount(len(rows))
         for index, row in enumerate(rows):
             intensity = row.line.relative_intensity
-            source = row.line.source_resource.replace("\\", "/").rsplit("/", 1)[-1]
+            is_anchored = any(
+                abs(row.line.wavelength_nm - value) <= 0.05 for value in anchored
+            )
             values = (
                 row.line.label,
                 f"{row.line.wavelength_nm:.4f}",
                 f"{row.detector_pixel:.1f}",
                 "—" if intensity is None else f"{intensity:.2f}",
-                source,
+                "✓" if is_anchored else "",
             )
+            source = row.line.source_resource.replace("\\", "/").rsplit("/", 1)[-1]
             for column, value in enumerate(values):
-                self.line_help_table.setItem(
-                    index, column, QtWidgets.QTableWidgetItem(value)
-                )
+                item = QtWidgets.QTableWidgetItem(value)
+                item.setToolTip(one_line(f"{row.line.label} from {source}"))
+                if is_anchored:
+                    item.setForeground(QtGui.QColor("#6ee7b7"))
+                self.line_help_table.setItem(index, column, item)
+        lamp = "" if self.campaign is None else self.campaign.lamp_for_frame(self.session)
+        family = self.line_family_combo.currentText()
+        order_idx = self.session.selected_order
+        header = (
+            f"{len(rows)} expected {family} line(s) in order {order_idx} · "
+            f"{len(anchored)} anchored here"
+        )
+        if lamp and family and catalog_mismatch_warning(family, lamp):
+            header += f" · showing {family}, the assigned lamp is {lamp}"
+        elif not rows:
+            # "Empty" has two different causes and only one of them is the
+            # operator's to fix; saying which is the whole point of the panel.
+            header += (
+                f" — no {family} lines fall in this order"
+                if lamp
+                else " — assign a lamp role and this fills itself"
+            )
+            best = self.session.best_reference_order()
+            if best is not None and best != order_idx:
+                header += f"; {lamp} is strongest in order {best}"
+        self.line_panel_header.setText(header)
 
     def _refresh_pattern_traces(self) -> None:
+        """Build one trace per order once; an order change only moves the pen."""
+
+        key = (self.session.pattern.shape[0], self.session.pattern.shape[1])
+        if key == self._pattern_key and self._pattern_items:
+            return
         while self._pattern_items:
             self.detector_plot.removeItem(self._pattern_items.pop())
         columns = np.arange(self.session.pattern.shape[0])
         for order_idx in range(self.session.pattern.shape[1]):
-            selected = order_idx == self.session.selected_order
             item = self.detector_plot.plot(
                 columns,
                 self.session.pattern[:, order_idx],
-                pen=pg.mkPen(
+                pen=pg.mkPen("#7b91a4", width=0.7),
+                antialias=False,
+            )
+            item.setZValue(10)
+            self._pattern_items.append(item)
+        self._pattern_key = key
+        self._selected_trace = None
+
+    def _select_pattern_trace(self, order_idx: int) -> None:
+        """Restyle only the two traces whose selection actually changed."""
+
+        if order_idx == self._selected_trace:
+            return
+        for index in (self._selected_trace, order_idx):
+            if index is None or not (0 <= index < len(self._pattern_items)):
+                continue
+            selected = index == order_idx
+            item = self._pattern_items[index]
+            item.setPen(
+                pg.mkPen(
                     "#6ee7b7" if selected else "#7b91a4",
                     width=2.2 if selected else 0.7,
-                ),
+                )
             )
             item.setZValue(12 if selected else 10)
-            self._pattern_items.append(item)
+        self._selected_trace = order_idx
 
     def _refresh_residual_plot(self) -> None:
         self.residual_plot.clear()
@@ -1905,11 +2571,6 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         ]
         axis = self.residual_plot.getAxis("bottom")
         axis.setTicks([list(zip(x, labels))])
-
-    @staticmethod
-    def _clear_items(plot, items: list[object]) -> None:
-        while items:
-            plot.removeItem(items.pop())
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -2034,7 +2695,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         else None
     )
     loader = FrameLoader(pattern)
-    pg.setConfigOptions(antialias=True, imageAxisOrder="col-major")
+    # Antialiasing a 42k-sample factor curve costs more than it shows: the
+    # paint of one such curve dominated every pan the owner tried.
+    pg.setConfigOptions(antialias=False, imageAxisOrder="col-major")
     application = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv[:1])
     application.setApplicationName("Echelle calibration bench")
     application.setWindowIcon(bench_window_icon())

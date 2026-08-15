@@ -1028,3 +1028,20 @@ def test_packaged_2025_watch_to_validated_snapshot_rehearsal(tmp_path):
     assert load_snapshot(snapshot.root).snapshot_id == "20250926_cmos-fixture"
     assert campaign.save_state is SaveState.VALIDATED
     assert hashlib.sha256(lamp_source.read_bytes()).hexdigest() == source_digest
+
+
+def test_the_lamp_pair_names_the_signal_and_its_own_background(tmp_path):
+    """F16 item 5: line fitting needs the signal, and the pair to subtract."""
+
+    sources = _real_2025_folder(tmp_path)
+    campaign = _ne_campaign(sources)
+    assert campaign.lamp_pair("Ne") == (None, None)
+    assert campaign.lamp_pair("") == (None, None)
+
+    _assign_real_2025_roles(campaign)
+    signal, background = campaign.lamp_pair("Ne")
+
+    assert signal is not None and signal.name.endswith("dimm-lines.sif")
+    assert background is not None and background.name.endswith("dimm-lines-bg.sif")
+    # A lamp nobody measured has no pair, and says so without raising.
+    assert campaign.lamp_pair("ThAr") == (None, None)

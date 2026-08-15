@@ -375,3 +375,118 @@ def test_packaged_fixture_loads_with_accepted_2025_pattern():
     assert session.fit_anchor_at(second.order_idx, second.center_pixel).accepted
     assert session.alignment_state is AlignmentState.ALIGNED
     assert session.rms_px is not None and np.isfinite(session.rms_px)
+
+
+def _background_frame(tmp_path: Path, level: float = 40.0) -> BenchFrame:
+    """A lineless hump: what a lamp background actually looks like."""
+
+    columns = 120
+    x = np.arange(columns, dtype=float)
+    hump = level + 0.02 * (x - 60.0) ** 2
+    spectra = tuple(np.array(hump) for _ in range(3))
+    images = np.tile(hump, (2, 64, 1))
+    return BenchFrame(
+        tmp_path / "Ne_bg.sif",
+        images,
+        images.mean(axis=0),
+        spectra,
+        {"ExposureTime": 0.1},
+    )
+
+
+def test_the_fit_measures_the_signal_minus_its_assigned_background(tmp_path):
+    """F16 item 5: what echelle-align measures is signal minus background."""
+
+    session = CalibrationBenchSession(_pattern(), (_line(0, 32.0, 585.2),))
+    session.accept_frame(_frame(tmp_path))
+    raw = session.active_order_spectra()[0].copy()
+    assert session.background_path is None
+    assert session.background_label() == "no background subtracted"
+
+    background = _background_frame(tmp_path)
+    session.use_background_frame(background)
+
+    assert session.background_path == background.path
+    assert "Ne_bg.sif" in session.background_label()
+    corrected = session.active_order_spectra()[0]
+    assert np.allclose(corrected, raw - background.order_spectra[0])
+    # The peak survives the subtraction; only the hump under it goes.
+    assert corrected.argmax() == raw.argmax()
+
+    # Dropping the pairing restores the raw signal.
+    session.use_background_frame(None)
+    assert np.allclose(session.active_order_spectra()[0], raw)
+
+
+def test_changing_the_background_drops_anchors_measured_without_it(tmp_path):
+    """A centroid belongs to the spectrum it was measured on."""
+
+    session = CalibrationBenchSession(
+        _pattern(), (_line(0, 32.0, 585.2), _line(1, 72.0, 640.1))
+    )
+    session.accept_frame(_frame(tmp_path))
+    assert session.fit_anchor_at(0, 32.0).accepted
+    assert session.fit_anchor_at(1, 72.0).accepted
+    assert session.alignment_state is AlignmentState.ALIGNED
+
+    session.use_background_frame(_background_frame(tmp_path))
+    assert not session.anchors
+    assert session.alignment_state is AlignmentState.EMPTY
+
+    # Re-declaring the same background is not a change and costs nothing.
+    assert session.fit_anchor_at(0, 32.0).accepted
+    session.use_background_frame(_background_frame(tmp_path))
+    assert session.anchors
+
+
+def test_a_new_acquisition_forgets_the_previous_pairing(tmp_path):
+    """A new frame may be another lamp; its background is re-established."""
+
+    session = CalibrationBenchSession(_pattern(), (_line(0, 32.0, 585.2),))
+    session.accept_frame(_frame(tmp_path))
+    session.use_background_frame(_background_frame(tmp_path))
+    assert session.background_path is not None
+
+    session.accept_frame(_frame(tmp_path))
+    assert session.background_path is None
+
+
+def test_a_background_of_the_wrong_shape_is_refused_not_applied(tmp_path):
+    session = CalibrationBenchSession(_pattern(), (_line(0, 32.0, 585.2),))
+    session.accept_frame(_frame(tmp_path))
+    wrong = _background_frame(tmp_path)
+    wrong = BenchFrame(
+        wrong.path,
+        wrong.images,
+        wrong.detector_image,
+        wrong.order_spectra[:2],
+        wrong.metadata,
+    )
+    with pytest.raises(ValueError, match="order counts"):
+        session.use_background_frame(wrong)
+    assert session.background_path is None
+
+
+def test_the_fit_lands_where_the_lamps_own_lines_are(tmp_path):
+    """F16 item 7: a lamp lives in a few orders out of twenty-nine."""
+
+    from echelle_spectra.calibration_campaign import lamp_reference_set
+
+    lines = (
+        _line(0, 32.0, 585.2),
+        _line(1, 40.0, 590.1),
+        _line(1, 72.0, 594.4),
+        _line(1, 92.0, 597.5),
+        _line(2, 50.0, 600.2),
+    )
+    session = CalibrationBenchSession(_pattern(), lines)
+    session.accept_frame(_frame(tmp_path))
+    # With no lamp assigned there is nothing to land on and nothing is claimed.
+    assert session.best_reference_order() is None
+
+    session.use_lamp_reference(lamp_reference_set("Ne", lines))
+    assert session.best_reference_order() == 1
+
+    # A lamp whose catalog this table never carries lands nowhere, quietly.
+    session.use_lamp_reference(lamp_reference_set("Hg", lines))
+    assert session.best_reference_order() is None

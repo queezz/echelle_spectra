@@ -350,6 +350,10 @@ class CalibrationBenchSession:
         #: Which frame of the acquisition is fitted.  ``None`` is the mean of
         #: every frame, which is what a 3-frame acquisition is shot for.
         self.selected_frame: int | None = None
+        #: The assigned lamp background subtracted from the fitted spectrum,
+        #: which is what ``echelle-align`` measures: signal minus background.
+        self.background_path: Path | None = None
+        self._background_spectra: tuple[np.ndarray, ...] = ()
         self.anchors: dict[tuple[int, float, float], Anchor] = {}
         self.transform: RigidTransform | None = None
         self.rms_px: float | None = None
@@ -377,6 +381,10 @@ class CalibrationBenchSession:
         self.file_state = FileLoadState.LOADED
         self.selected_order = min(self.selected_order, len(frame.order_spectra) - 1)
         self.selected_frame = None
+        # A new acquisition may belong to another lamp, so the background it is
+        # paired with is re-established by the caller rather than carried over.
+        self.background_path = None
+        self._background_spectra = ()
         self.anchors.clear()
         self.transform = None
         self.rms_px = None
@@ -439,14 +447,68 @@ class CalibrationBenchSession:
             self.anchors.clear()
             self._recompute_alignment()
 
+    def use_background_frame(self, frame: BenchFrame | None) -> None:
+        """Subtract the assigned lamp's background from the fitted spectrum.
+
+        This is what ``echelle-align`` measures — signal minus background — and
+        it is the difference between fitting a line and fitting a line sitting
+        on the lamp housing's own glow.  Anchors are dropped when the pairing
+        changes, because a centroid belongs to the spectrum it was measured on.
+        """
+
+        if frame is None:
+            changed = bool(self._background_spectra)
+            self.background_path = None
+            self._background_spectra = ()
+        else:
+            if len(frame.order_spectra) != self.pattern.shape[1]:
+                raise ValueError(
+                    "background frame and pattern have different order counts"
+                )
+            changed = Path(frame.path) != self.background_path
+            self.background_path = Path(frame.path)
+            self._background_spectra = tuple(
+                np.asarray(row, dtype=float) for row in frame.order_spectra
+            )
+        if changed and self.anchors:
+            self.anchors.clear()
+            self._recompute_alignment()
+
+    def background_label(self) -> str:
+        """Say plainly whether a background is being subtracted, and which."""
+
+        if self.background_path is None:
+            return "no background subtracted"
+        return f"minus {self.background_path.name}"
+
     def active_order_spectra(self) -> tuple[np.ndarray, ...]:
         """The extracted spectra a click is currently fitted against."""
 
         if self.frame is None:
             return ()
         if self.selected_frame is None or not self.frame.frame_order_spectra:
-            return tuple(self.frame.order_spectra)
-        return tuple(self.frame.frame_order_spectra[self.selected_frame])
+            spectra = tuple(self.frame.order_spectra)
+        else:
+            spectra = tuple(self.frame.frame_order_spectra[self.selected_frame])
+        if not self._background_spectra:
+            return spectra
+        return tuple(
+            self._subtract_background(signal, index)
+            for index, signal in enumerate(spectra)
+        )
+
+    def _subtract_background(self, signal: np.ndarray, order_idx: int) -> np.ndarray:
+        """Subtract one order's background over the samples the two share."""
+
+        if order_idx >= len(self._background_spectra):
+            return signal
+        background = self._background_spectra[order_idx]
+        shared = min(signal.size, background.size)
+        if not shared:
+            return signal
+        corrected = np.array(signal, dtype=float)
+        corrected[:shared] = corrected[:shared] - background[:shared]
+        return corrected
 
     def active_images(self) -> np.ndarray:
         """The raw detector data the per-anchor saturation check reads.
@@ -500,6 +562,21 @@ class CalibrationBenchSession:
         if self.reference is None:
             return self.lines
         return tuple(self.reference.lines)
+
+    def best_reference_order(self) -> int | None:
+        """The order carrying most of the assigned lamp's own rows.
+
+        A neon lamp's curated lines live in a handful of orders out of
+        twenty-nine.  Opening the fit on order 0 and leaving the operator to
+        hunt for them is the empty room again, one tab further along.
+        """
+
+        if self.reference is None or not self.reference.lines:
+            return None
+        counts: dict[int, int] = {}
+        for line in self.reference.lines:
+            counts[line.order_idx] = counts.get(line.order_idx, 0) + 1
+        return max(counts, key=lambda order: (counts[order], -order))
 
     def lines_for_order(self, order_idx: int | None = None) -> tuple[CalibrationTableLine, ...]:
         selected = self.selected_order if order_idx is None else int(order_idx)
