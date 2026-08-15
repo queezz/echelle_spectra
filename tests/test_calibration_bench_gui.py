@@ -13,18 +13,24 @@ import pyqtgraph as pg
 import pytest
 from PyQt5 import QtCore, QtGui, QtWidgets
 
+from echelle_spectra import calibration_bench_gui as bench_gui
 from echelle_spectra.calibration_bench import BenchFrame, CalibrationBenchSession
 from echelle_spectra.calibration_bench_gui import (
+    _MINIMUM_WINDOW_SIZE,
     _PACKAGE_DIR,
     _SUGGESTED_BADGE,
+    BENCH_APP_USER_MODEL_ID,
     BENCH_BODY_POINT_SIZE,
     BENCH_HEADLINE_POINT_SIZE,
     BENCH_TOOLTIP_LIMIT,
     CalibrationBenchWindow,
     _build_parser,
+    _ElidingLabel,
+    apply_windows_taskbar_identity,
     bench_default_geometry,
     bench_point_sizes,
     bench_window_icon,
+    forget_session_layout,
     one_line,
     role_combo_minimum_width,
 )
@@ -783,11 +789,24 @@ def test_the_role_control_can_never_elide_its_state(qt_app, tmp_path):
 
 
 def test_the_default_geometry_lays_out_legibly(qt_app, tmp_path):
-    """F16 item 2: every visible word readable at the size it opens at."""
+    """F16 item 2: every visible word readable at the size it opens at.
 
-    # The default never exceeds the screen it will open on.
-    assert bench_default_geometry(QtCore.QSize(1280, 800)) == (1200, 680)
+    F18 item 3 supersedes F16's floor.  The old minimum (1020x660, and a
+    1280x800 screen clamped to 1200x680) drew without clipping but was not
+    *usable*: the file table, the bench readings and the expected-line list
+    could not be on screen together.  "If it is unusable at that size, why
+    open it that small" — so the floor is now the smallest layout that holds
+    all four, and a small screen gets a window that overhangs rather than a
+    window that lies about fitting.
+    """
+
+    # The default fits the screen it opens on wherever the usable floor allows.
+    assert bench_default_geometry(QtCore.QSize(1280, 800)) == _MINIMUM_WINDOW_SIZE
     assert bench_default_geometry(QtCore.QSize(6000, 6000)) == (1500, 920)
+    assert bench_default_geometry(QtCore.QSize(1920, 1080)) == (1500, 920)
+    # The floor is the usable one, and it is a floor: a smaller screen gets a
+    # window that overhangs rather than one that lies about fitting.
+    assert _MINIMUM_WINDOW_SIZE == (1300, 880)
 
     window, _paths = _real_folder_window(qt_app, tmp_path)
     window.resize(*bench_default_geometry())
@@ -842,6 +861,10 @@ def _label_is_clipped(label) -> bool:
 
     text = label.text()
     if not text or label.width() <= 0:
+        return False
+    if isinstance(label, _ElidingLabel):
+        # It shortens on purpose, in the middle, with the whole reading in its
+        # tooltip. That is a decision, not a clip (F18 item 3).
         return False
     if label.wordWrap():
         return label.heightForWidth(label.width()) > label.height()
@@ -1055,11 +1078,18 @@ def test_order_scrolling_never_touches_the_detector_image(qt_app, tmp_path):
     window.close()
 
 
-def test_the_factor_curves_are_downsampled_clipped_and_reused(qt_app, tmp_path):
-    """F16 item 4: one PlotDataItem per curve, drawn only where it is seen.
+def test_the_factor_curves_are_downsampled_and_reused(qt_app, tmp_path):
+    """F16 item 4: one PlotDataItem per curve, downsampled to the view.
 
     Painting 42k antialiased samples per curve cost 1.3 s per pan step; the
-    same data downsampled to the view and clipped to it paints in tens of ms.
+    same data downsampled to the view paints in tens of ms.
+
+    F18 item 5 supersedes the clipping half of F16's answer.  Clipping to the
+    view finds the visible slice by binary search, which needs an ascending x;
+    a factor curve is the echelle orders laid end to end and its wavelength
+    axis runs backwards at nearly every sample, so the search returned about
+    one point and the curve vanished at every zoom.  Downsampling is where the
+    speed was: dropping the clip costs about a tenth of a millisecond a frame.
     """
 
     window = _campaign_window(tmp_path)
@@ -1082,7 +1112,7 @@ def test_the_factor_curves_are_downsampled_clipped_and_reused(qt_app, tmp_path):
     assert len(plotted) == 2, "the factors plot accumulated duplicate curves"
     for curve in curves:
         assert curve.opts["autoDownsample"] is True
-        assert curve.opts["clipToView"] is True
+        assert curve.opts["clipToView"] is False
         assert curve.opts["antialias"] is False
         # Order gaps stay gaps rather than being bridged by a long diagonal.
         assert curve.opts["connect"] == "finite"
@@ -1382,4 +1412,414 @@ def test_the_why_dock_changes_only_when_asked(qt_app, tmp_path):
     assert "root-mean-square" in window.details_view.toPlainText()
     assert "\n" not in window.rms_value.toolTip()
     assert len(window.rms_value.toolTip()) <= BENCH_TOOLTIP_LIMIT
+    window.close()
+
+
+# ----------------------------------------------------------------------
+# Packet F18 — geometry round 4
+# ----------------------------------------------------------------------
+
+
+def test_the_real_entry_point_opens_a_window_wearing_the_icon(qt_app, tmp_path, monkeypatch):
+    """F18 item 1: the icon test now covers the path the console script takes.
+
+    The old test built a window directly, so it stayed green through every
+    report that the icon was gone: it never ran ``main`` and never asked
+    whether the process had claimed a shell identity to hang the icon on.
+    """
+
+    claimed: list[str] = []
+    monkeypatch.setattr(
+        bench_gui,
+        "apply_windows_taskbar_identity",
+        lambda *args, **kwargs: claimed.append(BENCH_APP_USER_MODEL_ID),
+    )
+
+    def bench_windows():
+        application = QtWidgets.QApplication.instance()
+        return {
+            id(widget): widget
+            for widget in application.topLevelWidgets()
+            if isinstance(widget, CalibrationBenchWindow)
+        }
+
+    # Earlier tests leave windows alive, so the one this test is about is the
+    # one that was not there a moment ago.
+    before = set(bench_windows())
+    seen: dict = {}
+
+    def fake_exec(self=None):
+        application = QtWidgets.QApplication.instance()
+        opened = [
+            widget
+            for key, widget in bench_windows().items()
+            if key not in before
+        ]
+        seen["windows"] = opened
+        seen["app_icon"] = application.windowIcon()
+        if opened:
+            seen["icon"] = opened[0].windowIcon()
+            opened[0].close()
+        return 0
+
+    monkeypatch.setattr(QtWidgets.QApplication, "exec_", fake_exec)
+
+    folder = tmp_path / "acquisition"
+    folder.mkdir()
+    assert bench_gui.main([str(folder)]) == 0
+
+    assert claimed == [BENCH_APP_USER_MODEL_ID], "main never claimed a taskbar identity"
+    assert len(seen["windows"]) == 1
+    icon = seen["icon"]
+    assert not icon.isNull(), "the window the console script opens carries no icon"
+    assert not seen["app_icon"].isNull()
+    # A title bar asks for 16 px.  Handing it a real pixmap at that size is
+    # what stops the icon reading as a smudge, which is "gone" to a human.
+    for edge in (16, 32, 64):
+        pixmap = icon.pixmap(edge, edge)
+        assert not pixmap.isNull(), f"no {edge} px icon"
+        assert pixmap.width() == edge
+    assert {(size.width(), size.height()) for size in icon.availableSizes()} >= {
+        (16, 16),
+        (32, 32),
+    }
+
+
+def test_the_bench_taskbar_identity_is_its_own(qt_app):
+    """F18 item 1: two windows of one program, two taskbar groups.
+
+    The main GUI has claimed ``echelle_spectra-<version>`` since it was
+    written; the bench claimed nothing, so Windows filed it under whatever
+    launched it and showed the launcher's icon.  The ids must differ, or the
+    two windows collapse into one taskbar button again (F14 item 5).
+    """
+
+    from echelle_spectra import __version__
+
+    assert BENCH_APP_USER_MODEL_ID != f"echelle_spectra-{__version__}"
+    assert __version__ in BENCH_APP_USER_MODEL_ID
+    assert "calibration_bench" in BENCH_APP_USER_MODEL_ID
+    # Advisory everywhere: it never raises, and off Windows it simply declines.
+    result = apply_windows_taskbar_identity(BENCH_APP_USER_MODEL_ID)
+    assert result in (None, BENCH_APP_USER_MODEL_ID)
+
+
+def test_the_default_size_is_the_smallest_usable_one(qt_app, tmp_path):
+    """F18 items 2 and 3: everything the owner listed, in view, at once.
+
+    The four surfaces the owner named — the file table, the bench readings,
+    the factors line and the expected-line table — are all on screen at the
+    default geometry of a 1080p-class screen, and the controls column does
+    not need a scrollbar to reach any of them.
+    """
+
+    window, _paths = _real_folder_window(qt_app, tmp_path)
+    window.resize(*bench_default_geometry(QtCore.QSize(1920, 1080)))
+    window.show()
+    qt_app.processEvents()
+    window._relayout_wrapped_text()
+    qt_app.processEvents()
+
+    # All four surfaces are visible without opening anything or scrolling.
+    assert window.file_table.isVisible()
+    assert window.bench_state_group.isVisible()
+    assert window.sphere_factors_group.isVisible()
+    assert window.line_help_table.isVisible()
+
+    # The expected-line table is a working surface, not a corner box.
+    row_height = window.line_help_table.verticalHeader().defaultSectionSize()
+    visible_rows = window.line_help_table.viewport().height() // max(1, row_height)
+    assert visible_rows >= CalibrationBenchWindow.EXPECTED_LINE_ROWS, (
+        f"only {visible_rows} expected-line rows fit; "
+        f"{CalibrationBenchWindow.EXPECTED_LINE_ROWS} is the floor"
+    )
+
+    # The controls column reaches everything it holds without a scrollbar.
+    files_tab = window.control_tabs.widget(0)
+    assert isinstance(files_tab, QtWidgets.QScrollArea)
+    assert files_tab.verticalScrollBar().maximum() == 0, (
+        "the file controls need scrolling at the size the bench opens at"
+    )
+
+    # The readings are tab-independent: they never hide behind another tab.
+    for index in range(window.control_tabs.count()):
+        window.control_tabs.setCurrentIndex(index)
+        qt_app.processEvents()
+        assert window.bench_state_group.isVisible()
+        assert window.sphere_factors_group.isVisible()
+    window.close()
+
+
+def test_the_minimum_geometry_is_the_usable_floor(qt_app, tmp_path):
+    """F18 item 3: the bench never opens at a size it cannot be used at."""
+
+    window, _paths = _real_folder_window(qt_app, tmp_path)
+    window.resize(*_MINIMUM_WINDOW_SIZE)
+    window.show()
+    qt_app.processEvents()
+    window._relayout_wrapped_text()
+    qt_app.processEvents()
+
+    assert window.minimumSize().width() == _MINIMUM_WINDOW_SIZE[0]
+    assert window.minimumSize().height() == _MINIMUM_WINDOW_SIZE[1]
+
+    row_height = window.line_help_table.verticalHeader().defaultSectionSize()
+    visible_rows = window.line_help_table.viewport().height() // max(1, row_height)
+    assert visible_rows >= CalibrationBenchWindow.EXPECTED_LINE_ROWS
+    assert window.control_tabs.widget(0).verticalScrollBar().maximum() == 0
+
+    clipped = [
+        widget.objectName() or widget.text()
+        for widget in window.findChildren(QtWidgets.QLabel)
+        if widget.isVisible() and _label_is_clipped(widget)
+    ]
+    assert not clipped, f"labels clip at the minimum size: {clipped}"
+    assert not _overlapping_siblings(window)
+    window.close()
+
+
+def test_the_columns_are_draggable_and_the_cut_survives_the_session(qt_app, tmp_path):
+    """F18 item 2: three splitters, honest defaults, and the drag is kept."""
+
+    forget_session_layout()
+    window = _campaign_window(tmp_path)
+    window.resize(*bench_default_geometry(QtCore.QSize(1920, 1080)))
+    window.show()
+    qt_app.processEvents()
+    window._relayout_wrapped_text()
+    qt_app.processEvents()
+
+    for splitter in (window.root_splitter, window.controls_splitter, window.view_splitter):
+        assert not splitter.childrenCollapsible()
+        assert splitter.handle(1) is not None
+        assert splitter.handle(1).isEnabled(), "the operator cannot drag this handle"
+    assert window.view_splitter.orientation() == QtCore.Qt.Vertical
+    assert window.view_splitter.indexOf(window.status_band) == 0
+    assert window.view_splitter.indexOf(window.view_tabs) == 1
+
+    # The plots keep the bulk of the view column; the readings are a strip.
+    band_height, plots_height = window.view_splitter.sizes()
+    assert plots_height > 2 * band_height, (band_height, plots_height)
+
+    # A drag is remembered, and the next window of this session opens with it.
+    window.controls_splitter.setSizes([300, 500])
+    window.controls_splitter.splitterMoved.emit(300, 1)
+    qt_app.processEvents()
+    remembered = window.controls_splitter.sizes()
+    assert remembered[0] < remembered[1], "the drag did not take"
+    window.close()
+
+    second = _campaign_window(tmp_path)
+    second.show()
+    qt_app.processEvents()
+    # The cut comes back as a proportion, which is what survives a window of
+    # a different height.
+    restored = second.controls_splitter.sizes()
+    assert restored[0] / sum(restored) == pytest.approx(
+        remembered[0] / sum(remembered), abs=0.02
+    ), (restored, remembered)
+    second.close()
+    forget_session_layout()
+
+
+def test_the_readings_strip_folds_instead_of_squeezing_its_button(qt_app, tmp_path):
+    """F18 item 3: panels collapse deliberately; controls are never shaved."""
+
+    forget_session_layout()
+    window = _campaign_window(tmp_path)
+    window.resize(*bench_default_geometry(QtCore.QSize(1920, 1080)))
+    window.show()
+    qt_app.processEvents()
+    window._relayout_wrapped_text()
+    qt_app.processEvents()
+
+    wide = window._status_band_columns(1400)
+    narrow = window._status_band_columns(320)
+    assert wide == len(window._status_panels), "a wide band should stand in one row"
+    assert narrow == 1, "a narrow band must fold, not squeeze"
+
+    # Whatever the fold, the compute button keeps its whole label.
+    for width in (1400, 900, 640, 320):
+        window._reflow_status_band(window._status_band_columns(width))
+        qt_app.processEvents()
+        assert window.compare_button.sizeHint().width() <= (
+            window.sphere_factors_group.minimumWidth()
+        )
+    window.close()
+    forget_session_layout()
+
+
+def test_a_bench_reading_shortens_rather_than_wrapping_the_strip_taller(qt_app, tmp_path):
+    """F18 item 3: the readings strip stays a strip."""
+
+    window = _campaign_window(tmp_path)
+    window.show()
+    qt_app.processEvents()
+
+    assert isinstance(window.file_value, _ElidingLabel)
+    assert isinstance(window.watch_value, _ElidingLabel)
+    long_name = "Ne-0.02s-x3-bright-lines-with-a-very-long-descriptive-tail.sif"
+    window.file_value.setText(long_name)
+    window.file_value.resize(120, 20)
+    qt_app.processEvents()
+
+    # The reading is whole to anything that asks, and whole in the tooltip;
+    # only the painting is shortened, and in the middle.
+    assert window.file_value.text() == long_name
+    assert window.file_value.toolTip() == long_name
+    painted = QtWidgets.QLabel.text(window.file_value)
+    assert painted != long_name
+    assert "…" in painted
+    window.close()
+
+
+def test_the_procedure_rows_span_the_list_and_hang_their_indents(qt_app, tmp_path):
+    """F18 item 4: no phantom second column, and a real hanging indent.
+
+    Every row label was pinned to ``max(280, viewport - 18)`` measured before
+    the tab had ever been laid out, so it stayed 280 px wide in a pane twice
+    that.  The untouched list background beside it — carrying the selected
+    row's highlight — is the empty second column in the owner's screenshot.
+    """
+
+    window = _campaign_window(tmp_path)
+    window.resize(*bench_default_geometry(QtCore.QSize(1920, 1080)))
+    window.show()
+    window.control_tabs.setCurrentIndex(1)
+    qt_app.processEvents()
+    window._relayout_wrapped_text()
+    qt_app.processEvents()
+
+    tree = window.checklist_tree
+    assert tree.count() >= 9
+    viewport_width = tree.viewport().width()
+    assert viewport_width > 300
+
+    for row in range(tree.count()):
+        item = tree.item(row)
+        label = tree.itemWidget(item)
+        assert label is not None
+        # One column, as wide as the list: nothing of the row is left bare.
+        assert label.width() >= viewport_width - 2 * tree.frameWidth() - 1, (
+            f"row {row} leaves {viewport_width - label.width()} px of bare "
+            "list background beside it — the phantom second column"
+        )
+        assert item.sizeHint().width() >= viewport_width - 2 * tree.frameWidth() - 1
+        assert item.sizeHint().height() >= label.heightForWidth(label.width())
+        # The indents are structure, not spaces someone counted out by hand.
+        text = label.text()
+        assert label.textFormat() == QtCore.Qt.RichText
+        assert "\n" not in text
+        assert "     " not in text, "an indent made of spaces is not an indent"
+        assert "<td" in text, "the glyph and the text must be separate cells"
+
+    # A row that says what unblocks it puts that on its own indented line.
+    with_unblock = [
+        tree.itemWidget(tree.item(row)).text()
+        for row in range(tree.count())
+        if "unblocked by:" in tree.itemWidget(tree.item(row)).text()
+    ]
+    assert with_unblock, "no checklist row named what would unblock it"
+    for text in with_unblock:
+        assert "margin-left" in text, "the sub-line needs a real indent"
+
+    # Selecting a row is meaningful: it writes that row into the Why dock.
+    tree.setCurrentRow(0)
+    qt_app.processEvents()
+    assert window.details_view.toPlainText().strip()
+    window.close()
+
+
+def test_a_long_checklist_row_still_spans_one_column(qt_app, tmp_path):
+    """F18 item 4: the fix has to hold for a row that wraps several times."""
+
+    window = _campaign_window(tmp_path)
+    window.resize(*bench_default_geometry(QtCore.QSize(1920, 1080)))
+    window.show()
+    window.control_tabs.setCurrentIndex(1)
+    qt_app.processEvents()
+
+    tree = window.checklist_tree
+    item = QtWidgets.QListWidgetItem()
+    label = QtWidgets.QLabel(
+        CalibrationBenchWindow._checklist_row_html(
+            "!",
+            "A very long row — " + "measured evidence about this step, " * 12,
+            "assign the sphere signal and its background before anything else",
+        )
+    )
+    label.setTextFormat(QtCore.Qt.RichText)
+    label.setWordWrap(True)
+    tree.addItem(item)
+    tree.setItemWidget(item, label)
+    window._relayout_wrapped_text()
+    qt_app.processEvents()
+
+    width = tree.viewport().width() - 2 * tree.frameWidth()
+    assert label.width() >= width - 1
+    assert item.sizeHint().height() >= label.heightForWidth(label.width())
+    # It wrapped many times, and every one of those lines is inside the row.
+    assert label.heightForWidth(label.width()) > 3 * label.fontMetrics().height()
+    window.close()
+
+
+def test_both_factor_curves_survive_every_view_range(qt_app, tmp_path):
+    """F18 item 5: the previous-campaign curve stops vanishing on zoom.
+
+    A factor curve is the echelle orders end to end, so its wavelength axis
+    is not ascending.  Clipping to the view searched it as if it were and
+    returned a slice of about one point, which is a curve the legend still
+    names and the eye cannot find.
+    """
+
+    window = _window(tmp_path)
+    window.show()
+    qt_app.processEvents()
+
+    # Two order segments laid end to end: x runs backwards at the seam, which
+    # is what the real curves do at every order boundary.
+    first = np.linspace(700.0, 640.0, 400)
+    second = np.linspace(660.0, 600.0, 400)
+    wavelengths = np.concatenate([first, [np.nan], second])
+    window._set_factor_curve(
+        window.candidate_curve,
+        AbsoluteCalibrationResult(
+            wavelengths,
+            np.concatenate([np.full(400, 1e-5), [np.nan], np.full(400, 1.2e-5)]),
+        ),
+    )
+    window._set_factor_curve(
+        window.previous_curve,
+        AbsoluteCalibrationResult(
+            wavelengths,
+            np.concatenate([np.full(400, 4e-7), [np.nan], np.full(400, 5e-7)]),
+        ),
+    )
+    qt_app.processEvents()
+
+    assert not np.all(np.diff(wavelengths[np.isfinite(wavelengths)]) > 0), (
+        "this fixture must not be sorted, or it tests nothing"
+    )
+
+    view_box = window.sphere_plot.getPlotItem().getViewBox()
+    ranges = {
+        "everything": ((595.0, 705.0), (np.log10(1e-7), np.log10(5e-5))),
+        "the new curve's band": ((640.0, 700.0), (np.log10(5e-6), np.log10(3e-5))),
+        "the previous curve's band": ((640.0, 700.0), (np.log10(2e-7), np.log10(9e-7))),
+        "across the order seam": ((650.0, 670.0), (np.log10(1e-7), np.log10(5e-5))),
+    }
+    for name, (x_range, y_range) in ranges.items():
+        view_box.setXRange(*x_range, padding=0)
+        view_box.setYRange(*y_range, padding=0)
+        qt_app.processEvents()
+        for label, curve in (
+            ("new measured pair", window.candidate_curve),
+            ("previous campaign", window.previous_curve),
+        ):
+            _x, drawn = curve.curve.getData()
+            finite = 0 if drawn is None else int(np.isfinite(drawn).sum())
+            assert finite > 10, (
+                f"the {label} curve has {finite} drawable points at {name} — "
+                "the legend names a curve nobody can see"
+            )
     window.close()

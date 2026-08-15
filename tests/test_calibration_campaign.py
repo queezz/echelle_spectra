@@ -353,7 +353,7 @@ def test_every_unfinished_step_names_what_unblocks_it(tmp_path):
         sources["sphere-0.1s-x3-bg.sif"], MeasurementRole.SPHERE_BACKGROUND
     )
     after = {item.key: item for item in campaign.checklist(alignment)}
-    assert "Compute and compare factors" in after["sphere-comparison"].unblocked_by
+    assert "Compute factors" in after["sphere-comparison"].unblocked_by
 
 
 @pytest.mark.parametrize("lamp", ["Kr", "Xe-2", "ne", "TH-AR"])

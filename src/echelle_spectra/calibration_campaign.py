@@ -1846,7 +1846,7 @@ class CalibrationCampaignSession:
                 unblocked_by=""
                 if comparison_done
                 else (
-                    "press Compute and compare factors — the sphere pair is enough"
+                    "press Compute factors — the sphere pair is enough"
                     if pair_ready
                     else "assign the sphere signal and its background; no lamp is needed"
                 ),

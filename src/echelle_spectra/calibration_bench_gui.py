@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import argparse
+import html
+import platform
 import sys
 from collections.abc import Sequence
 from datetime import date
@@ -12,6 +14,7 @@ import numpy as np
 import pyqtgraph as pg
 from PyQt5 import QtCore, QtGui, QtWidgets
 
+from . import __version__
 from .calibration_bench import (
     AlignmentState,
     BenchFrame,
@@ -153,8 +156,15 @@ def bench_default_geometry(
 
 #: What the bench asks for, and the floor it stays legible at.  The floor is
 #: what the layout is actually built to satisfy; the preference is a comfort.
+#: The floor is the *smallest usable* geometry, not the smallest drawable one
+#: (F18 item 3): at it, the file table, the bench-state readings, the factors
+#: line and six rows of expected lines are all in view at once.
 _PREFERRED_WINDOW_SIZE = (1500, 920)
-_MINIMUM_WINDOW_SIZE = (1020, 660)
+_MINIMUM_WINDOW_SIZE = (1300, 880)
+
+#: The narrowest a reading panel is ever asked to be before the band folds it
+#: onto its own row instead.  Prose wraps happily at this width.
+_STATUS_PANEL_FLOOR = 210
 
 
 def one_line(text: str, limit: int = BENCH_TOOLTIP_LIMIT) -> str:
@@ -201,6 +211,41 @@ def _emphasise(widget, point_size: float, *, bold: bool = True) -> None:
     font.setPointSizeF(float(point_size))
     font.setBold(bold)
     widget.setFont(font)
+
+
+#: The bench's own Windows shell identity.  The main GUI has claimed one since
+#: it was written (``echelle_spectra-<version>``); the bench never did, which is
+#: the whole of the "the icon is gone" report: a Windows process with no
+#: explicit AppUserModelID is filed under whatever launched it, so the taskbar
+#: button showed the console-script stub's generic icon no matter what
+#: ``setWindowIcon`` said.  A *different* id from the main GUI is also what
+#: keeps the two windows in two taskbar groups (F14 item 5).
+BENCH_APP_USER_MODEL_ID = f"echelle_spectra.calibration_bench-{__version__}"
+
+#: Sizes Windows and X11 actually ask an icon for.  Handing the shell a real
+#: pixmap at each one is what stops the 16 px title-bar copy from being a smear
+#: of a 128 px drawing — a smear reads, at a glance, as no icon at all.
+_ICON_SIZES = (16, 20, 24, 32, 48, 64, 128, 256)
+
+
+def apply_windows_taskbar_identity(app_id: str = BENCH_APP_USER_MODEL_ID) -> str | None:
+    """Claim this process's own Windows taskbar identity.
+
+    Must run *before* the first window exists, which is why it is the first
+    thing :func:`main` does.  Returns the id claimed, or ``None`` where there
+    is no Windows shell to tell — the call is advisory everywhere else and
+    never a reason for the bench not to start.
+    """
+
+    if platform.system() != "Windows":
+        return None
+    try:
+        import ctypes
+
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(app_id)
+    except (OSError, AttributeError):  # pragma: no cover - shell refusing is not fatal
+        return None
+    return app_id
 
 
 def bench_window_icon(
@@ -263,10 +308,72 @@ def bench_window_icon(
     painter.end()
 
     icon = QtGui.QIcon(tint)
-    icon.addPixmap(
-        tint.scaled(32, 32, QtCore.Qt.KeepAspectRatio, QtCore.Qt.SmoothTransformation)
-    )
+    for edge in _ICON_SIZES:
+        if edge >= tint.width():
+            continue
+        icon.addPixmap(
+            tint.scaled(
+                edge, edge, QtCore.Qt.KeepAspectRatio, QtCore.Qt.SmoothTransformation
+            )
+        )
     return icon
+
+
+#: Splitter cuts the operator made, kept for as long as this process lives.
+#: Session state rather than a settings file on purpose: a dragged handle is a
+#: working preference for this sitting, not a decision to write to disk.
+_SESSION_SPLITTER_SIZES: dict[str, list[int]] = {}
+
+
+def forget_session_layout() -> None:
+    """Drop every remembered splitter cut (used by tests and by a fresh run)."""
+
+    _SESSION_SPLITTER_SIZES.clear()
+
+
+class _ElidingLabel(QtWidgets.QLabel):
+    """A one-line reading that shortens itself instead of wrapping or clipping.
+
+    ``setText`` keeps the whole string; the widget only ever *draws* as much of
+    it as its current width allows, shortened in the middle and offered in full
+    as the tooltip.  Nothing here carries state the operator must read exactly
+    — those controls are sized to their content instead (F16 item 1).
+    """
+
+    def __init__(self, text: str = "", parent=None) -> None:
+        super().__init__(parent)
+        self._full_text = ""
+        self.setText(text)
+
+    def setText(self, text: str) -> None:  # noqa: N802 - Qt naming
+        self._full_text = str(text)
+        self.setToolTip(self._full_text)
+        self._redraw_elided()
+
+    def text(self) -> str:
+        """The whole reading, not the shortened one currently drawn.
+
+        Everything that asks a label what it says wants the reading; only the
+        painting is shortened.
+        """
+
+        return self._full_text
+
+    def resizeEvent(self, event) -> None:  # noqa: N802 - Qt naming
+        super().resizeEvent(event)
+        self._redraw_elided()
+
+    def minimumSizeHint(self) -> QtCore.QSize:  # noqa: N802 - Qt naming
+        hint = super().minimumSizeHint()
+        return QtCore.QSize(0, hint.height())
+
+    def _redraw_elided(self) -> None:
+        width = max(24, self.width() - 2)
+        super().setText(
+            self.fontMetrics().elidedText(
+                self._full_text, QtCore.Qt.ElideMiddle, width
+            )
+        )
 
 
 class FrameLoadThread(QtCore.QThread):
@@ -418,16 +525,23 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         self._build_expected_lines_panel()
         self.controls_splitter.setStretchFactor(0, 3)
         self.controls_splitter.setStretchFactor(1, 2)
-        # Both halves start with real height; the handle is the operator's.
-        self.controls_splitter.setSizes([420, 300])
         controls_layout.addWidget(self.controls_splitter, 1)
         root.addWidget(controls)
 
+        view_column = QtWidgets.QSplitter(QtCore.Qt.Vertical)
+        view_column.setChildrenCollapsible(False)
+        view_column.setHandleWidth(8)
+        self.view_splitter = view_column
+        self._build_status_band()
+        view_column.addWidget(self.status_band)
         self.view_tabs = QtWidgets.QTabWidget()
         self._build_triage_view()
         self._build_lamp_fit_view()
         self._build_sphere_view()
-        root.addWidget(self.view_tabs)
+        view_column.addWidget(self.view_tabs)
+        view_column.setStretchFactor(0, 0)
+        view_column.setStretchFactor(1, 1)
+        root.addWidget(view_column)
         root.setStretchFactor(0, 0)
         root.setStretchFactor(1, 1)
         root.splitterMoved.connect(lambda *_args: self._relayout_wrapped_text())
@@ -503,7 +617,69 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         _emphasise(self.triage_headline, headline)
         _emphasise(self.exposure_value, body, bold=False)
         controls.setMinimumWidth(self._controls_minimum_width())
-        self.root_splitter.setSizes([controls.minimumWidth() + 60, 980])
+        self.expected_lines_panel.setMinimumHeight(self._expected_lines_minimum_height())
+        self._measure_status_band()
+        self._distribute_space()
+
+    #: What "workable" means for the expected-lines table, in rows rather than
+    #: in a pixel guess that a larger platform font would quietly invalidate.
+    #: Below this the panel is the corner box the owner was handed, not the
+    #: working surface of line identification.
+    EXPECTED_LINE_ROWS = 6
+
+    def _expected_lines_minimum_height(self) -> int:
+        """The height at which the expected-line table shows real work.
+
+        Derived from the table's own metrics, so the floor moves with the
+        platform font instead of pinning six rows to one designer's display.
+        """
+
+        table = self.line_help_table
+        layout = self.expected_lines_panel.layout()
+        margins = layout.contentsMargins()
+        return int(
+            self.EXPECTED_LINE_ROWS * table.verticalHeader().defaultSectionSize()
+            + table.horizontalHeader().sizeHint().height()
+            + 2 * table.frameWidth()
+            + self.line_panel_header.sizeHint().height()
+            + margins.top()
+            + margins.bottom()
+            + layout.spacing()
+            # The group box's title sits in its own top margin.
+            + QtGui.QFontMetrics(self.font()).height()
+            + 12
+        )
+
+    def _distribute_space(self) -> None:
+        """Hand each column a share it can work in, and let the user re-cut it.
+
+        Three splitters, three honest defaults: the controls get the width
+        their own content needs and the plots get the rest; the left column is
+        split so the expected-line table has a real share rather than the
+        leftovers; the view column spends a fixed strip on the always-visible
+        readings and gives everything else to the plots.  Whatever the operator
+        drags is what they get back for the rest of the session.
+        """
+
+        controls_width = self.root_splitter.widget(0).minimumWidth() + 60
+        self._apply_splitter_sizes(
+            self.root_splitter, "root", [controls_width, max(760, 1500 - controls_width)]
+        )
+        # Not 40/60 by decree: the table's floor is content-derived and the
+        # proportion only decides what the extra room does.
+        self._apply_splitter_sizes(self.controls_splitter, "controls", [560, 440])
+        band = max(self.status_band.sizeHint().height(), 1)
+        self._apply_splitter_sizes(self.view_splitter, "view", [band, max(420, 900 - band)])
+
+    def _apply_splitter_sizes(self, splitter, key: str, default: list[int]) -> None:
+        """Restore this splitter's remembered cut, or lay down the default."""
+
+        splitter.setSizes(_SESSION_SPLITTER_SIZES.get(key, default))
+        splitter.splitterMoved.connect(
+            lambda *_args, _s=splitter, _k=key: _SESSION_SPLITTER_SIZES.__setitem__(
+                _k, _s.sizes()
+            )
+        )
 
     def _controls_minimum_width(self) -> int:
         """Widen the left pane until its own controls stop clipping.
@@ -547,7 +723,10 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         dock.setAllowedAreas(QtCore.Qt.BottomDockWidgetArea | QtCore.Qt.RightDockWidgetArea)
         self.details_view = QtWidgets.QTextBrowser()
         self.details_view.setOpenExternalLinks(False)
-        self.details_view.setMinimumHeight(110)
+        # A dock that explains things on request had claimed 213 px of a 920 px
+        # window whether or not anything had been asked.  It reads calmly in
+        # four lines and drags taller the moment it needs to.
+        self.details_view.setMinimumHeight(64)
         self.details_view.setPlaceholderText(
             "Click any verdict, checklist row, file, or anchor and the whole "
             "explanation is written here. It changes only when asked."
@@ -555,6 +734,7 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         dock.setWidget(self.details_view)
         self.details_dock = dock
         self.addDockWidget(QtCore.Qt.BottomDockWidgetArea, dock)
+        self.resizeDocks([dock], [110], QtCore.Qt.Vertical)
         self.explain(
             "Exposure triage is the front door",
             "Drop any SIF and the bench judges the exposure before any role "
@@ -631,23 +811,46 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
 
         if getattr(self, "checklist_tree", None) is None:
             return
-        width = max(280, self.checklist_tree.viewport().width() - 18)
+        if getattr(self, "status_band", None) is not None:
+            # Ask the column, not the strip: the splitter has its width before
+            # the strip inside it does, so reading the strip on the first pass
+            # folds the band against a width it is about to grow out of.
+            self._reflow_status_band(
+                self._status_band_columns(self.view_splitter.width())
+            )
+        width = self._checklist_row_width()
         for row in range(self.checklist_tree.count()):
             item = self.checklist_tree.item(row)
             label = self.checklist_tree.itemWidget(item)
             if label is None:
                 continue
-            label.setFixedWidth(width)
-            item.setSizeHint(QtCore.QSize(0, label.sizeHint().height() + 8))
+            self._fit_checklist_row(item, label, width)
         for label in self.findChildren(QtWidgets.QLabel):
-            if not label.wordWrap() or label.width() <= 0:
-                continue
-            if label.parent() is self.checklist_tree.viewport():
+            if self._sizes_itself(label):
                 continue
             needed = label.heightForWidth(label.width())
             if needed > 0 and label.minimumHeight() != needed:
                 label.setMinimumHeight(needed)
         self.file_table.resizeRowsToContents()
+        if getattr(self, "status_band", None) is not None:
+            # The wrapping readings have just been given their real heights, so
+            # this is the first moment the strip's true cost is known.
+            self._pin_status_band_height()
+
+    def _sizes_itself(self, label) -> bool:
+        """Whether *label* is one this pass must keep its hands off.
+
+        Two surfaces size their own labels: the checklist gives each row the
+        height of its own item, and the readings strip works through its size
+        policy.  Writing a minimum onto either would feed the next pass its
+        own output, and the layout would walk itself taller every resize.
+        """
+
+        if not label.wordWrap() or label.width() <= 0:
+            return True
+        if label.parent() is self.checklist_tree.viewport():
+            return True
+        return self.status_band.isAncestorOf(label)
 
     def _build_procedure_tab(self) -> None:
         tab = QtWidgets.QWidget()
@@ -668,8 +871,64 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         self.checklist_tree = QtWidgets.QListWidget()
         self.checklist_tree.setAlternatingRowColors(True)
         self.checklist_tree.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
+        # A row is one reading across the whole width.  Selecting it is
+        # meaningful — it writes the row's explanation into the Why dock — so
+        # selection stays on, but it must never paint a highlight over bare
+        # background beside the text (F18 item 4).
+        self.checklist_tree.setSelectionMode(QtWidgets.QAbstractItemView.SingleSelection)
+        self.checklist_tree.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
         layout.addWidget(self.checklist_tree, 1)
         self.control_tabs.addTab(self._scrollable(tab), "Procedure")
+
+    def _checklist_row_width(self) -> int:
+        """The width one checklist row is allowed — the whole viewport.
+
+        The old code pinned every row label to ``max(280, viewport - 18)``,
+        computed once while the tab had never been laid out.  The label then
+        stayed 280 px wide inside a pane twice that, and the strip of untouched
+        list background to its right — complete with the selected row's
+        highlight — is the "phantom empty second column" in the owner's
+        screenshot.  There is one column, and it is as wide as the viewport.
+        """
+
+        tree = self.checklist_tree
+        # The viewport already excludes a scrollbar when one is shown, so there
+        # is nothing further to reserve — the old ``- 18`` was reserving it a
+        # second time and leaving that strip bare.
+        return max(1, tree.viewport().width() - 2 * tree.frameWidth())
+
+    def _fit_checklist_row(self, item, label, width: int) -> None:
+        """Give one row the full width and exactly the height its text needs."""
+
+        label.setMinimumWidth(width)
+        label.setMaximumWidth(width)
+        needed = label.heightForWidth(width)
+        if needed <= 0:
+            needed = label.sizeHint().height()
+        item.setSizeHint(QtCore.QSize(width, max(needed, label.sizeHint().height()) + 4))
+
+    @staticmethod
+    def _checklist_row_html(symbol: str, headline: str, unblocked_by: str) -> str:
+        """One row as a hanging-indented block.
+
+        A two-cell table is what makes a wrapped line start under the first
+        character of the text rather than under the status glyph, and the
+        sub-line is indented by a real margin instead of by leading spaces that
+        a proportional font renders at some arbitrary width.
+        """
+
+        body = html.escape(headline)
+        if unblocked_by:
+            body += (
+                '<div style="margin-top:3px; margin-left:14px;">'
+                f"unblocked by: {html.escape(unblocked_by)}</div>"
+            )
+        return (
+            '<table cellspacing="0" cellpadding="0" style="margin:0;">'
+            '<tr><td style="padding-right:8px;" valign="top">'
+            f"{html.escape(symbol)}</td>"
+            f'<td valign="top">{body}</td></tr></table>'
+        )
 
     @staticmethod
     def _scrollable(widget) -> QtWidgets.QScrollArea:
@@ -758,28 +1017,44 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
 
         self.show_frame_button = QtWidgets.QPushButton("Open selected file for lamp fitting")
         layout.addWidget(self.show_frame_button)
+        self.control_tabs.addTab(self._scrollable(tab), "Files")
+
+    def _build_status_band(self) -> None:
+        """The readings that must never be behind a tab or a scrollbar.
+
+        Bench state and the factors line used to be stacked below the file
+        table *inside* the scrolling Files tab, which cost the left column some
+        three hundred pixels it did not have and still left both invisible from
+        every other tab.  They are readings, not controls, so they live across
+        the top of the view column — where the space actually was — and they
+        are in view whatever the operator is doing (F18 items 2 and 3).
+        """
+
+        band = QtWidgets.QWidget()
+        band_layout = QtWidgets.QGridLayout(band)
+        band_layout.setContentsMargins(10, 6, 10, 6)
+        band_layout.setSpacing(10)
 
         status_group = QtWidgets.QGroupBox("Bench state")
         status_form = self._form_layout(status_group)
-        self.watch_value = QtWidgets.QLabel("manual — drag and drop or Add files")
-        self.watch_value.setWordWrap(True)
-        self.file_value = QtWidgets.QLabel("no file open")
-        self.file_value.setWordWrap(True)
+        # These two are one-line facts — an input mode and a filename — and a
+        # readings strip is the wrong place for either of them to grow to four
+        # wrapped lines and push the plots down the window.  They shorten in
+        # the middle, where a SIF name is least informative, and the whole name
+        # stays one hover away.
+        self.watch_value = _ElidingLabel("manual — drag and drop or Add files")
+        self.file_value = _ElidingLabel("no file open")
         self.file_state_value = QtWidgets.QLabel("WAITING")
         self.file_state_value.setObjectName("stateBadge")
         status_form.addRow("Input", self.watch_value)
         status_form.addRow("Open frame", self.file_value)
         status_form.addRow("File state", self.file_state_value)
-        layout.addWidget(status_group)
+        self.bench_state_group = status_group
 
-        self.exposure_value = QtWidgets.QLabel(
-            "Exposure guidance for the selected file appears here."
-        )
-        self.exposure_value.setWordWrap(True)
-        self.exposure_value.setObjectName("messagePanel")
-        layout.addWidget(self.exposure_value)
-
-        comparison_group = QtWidgets.QGroupBox("Integrating-sphere factors")
+        # "Sphere factors" is what the view tab has always called this, and a
+        # group box's title cannot wrap or elide: the long form was the single
+        # widest thing on the readings strip and folded it for no reason.
+        comparison_group = QtWidgets.QGroupBox("Sphere factors")
         comparison_layout = QtWidgets.QVBoxLayout(comparison_group)
         self.comparison_value = QtWidgets.QLabel(
             "NOT RUN — the sphere pair alone unblocks this."
@@ -797,11 +1072,132 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
             "either real ageing or an exposure-normalisation mismatch worth "
             "chasing before the trip. Only the sphere pair is needed — no lamp.",
         )
-        self.compare_button = QtWidgets.QPushButton("Compute and compare factors")
+        self.compare_button = QtWidgets.QPushButton("Compute factors")
         comparison_layout.addWidget(self.comparison_value)
         comparison_layout.addWidget(self.compare_button)
-        layout.addWidget(comparison_group)
-        self.control_tabs.addTab(self._scrollable(tab), "Files")
+        self.sphere_factors_group = comparison_group
+
+        band.setSizePolicy(
+            QtWidgets.QSizePolicy.Preferred, QtWidgets.QSizePolicy.Maximum
+        )
+        # Wrapping readings ask Qt for the height their own text costs at the
+        # width they are given.  Doing it through the size policy rather than
+        # through a manual minimum is what keeps a reflowing band stable: a
+        # hand-set minimum computed at one width becomes the input to the next
+        # reflow, and the strip walks itself taller every pass.
+        for label in band.findChildren(QtWidgets.QLabel):
+            if not label.wordWrap():
+                continue
+            policy = label.sizePolicy()
+            policy.setHeightForWidth(True)
+            label.setSizePolicy(policy)
+        self.status_band = band
+        self.status_band_layout = band_layout
+        #: Two readings, not three.  Each keeps the width its own longest
+        #: control needs and the band never shaves them.  Exposure guidance is
+        #: prose that runs to several lines and belongs with the triage it
+        #: explains; a strip that has to hold it is a strip that pushes the
+        #: plots off the window.
+        self._status_panels = (status_group, comparison_group)
+        self._status_columns = 0
+        self._reflow_status_band(len(self._status_panels))
+
+    def _measure_status_band(self) -> None:
+        """Record what each reading panel needs, once the real font is on it.
+
+        Measured at the end of ``_build_ui`` rather than while building: the
+        bench sets its body font last, and a width measured before that is the
+        designer's font, not the operator's.
+        """
+
+        for panel in self._status_panels:
+            # Wrapping prose can be narrow; a button cannot. The demand is the
+            # widest thing in the panel that has no other way to fit, never the
+            # panel's full sizeHint — that hint is one long unwrapped line and
+            # would fold the band into a column for no reason.
+            demand = _STATUS_PANEL_FLOOR
+            layout = panel.layout()
+            margins = layout.contentsMargins() if layout is not None else None
+            padding = (margins.left() + margins.right()) if margins is not None else 0
+            for child in panel.findChildren(
+                (QtWidgets.QPushButton, QtWidgets.QComboBox)
+            ):
+                demand = max(demand, child.sizeHint().width() + padding + 10)
+            if isinstance(panel, QtWidgets.QGroupBox):
+                # A group box's own title is drawn in its frame and cannot
+                # wrap, shrink or elide: it is a demand like any button's.
+                metrics = QtGui.QFontMetrics(panel.font())
+                demand = max(demand, metrics.horizontalAdvance(panel.title()) + 40)
+            panel.setMinimumWidth(int(demand))
+
+    def _reflow_status_band(self, columns: int) -> None:
+        """Re-lay the always-visible readings into *columns* columns.
+
+        The owner's law applied to a row of panels: rather than shave the three
+        panels until the compute button no longer fits its own label, the band
+        folds onto a second and third row.  Narrower is fewer columns, never a
+        squeezed control.
+        """
+
+        columns = max(1, min(columns, len(self._status_panels)))
+        if columns == self._status_columns:
+            return
+        self._status_columns = columns
+        layout = self.status_band_layout
+        for panel in self._status_panels:
+            layout.removeWidget(panel)
+        for index in range(layout.columnCount()):
+            layout.setColumnStretch(index, 0)
+        for index, panel in enumerate(self._status_panels):
+            row, column = divmod(index, columns)
+            span = 1
+            # A lone trailing panel takes the whole width rather than leaving a
+            # hole beside itself.
+            if index == len(self._status_panels) - 1 and column == 0:
+                span = columns
+            layout.addWidget(panel, row, column, 1, span)
+        for index in range(columns):
+            layout.setColumnStretch(index, 1)
+        self._pin_status_band_height()
+
+    def _pin_status_band_height(self) -> None:
+        """Give the readings strip exactly the height it needs, once.
+
+        Left to the splitter's proportions the band grew to a third of the
+        window and squeezed the plots — the same hoarding, pointed the other
+        way.  It is a strip: it takes what its content costs and the plots keep
+        everything else, until the operator drags the handle and takes over.
+        """
+
+        band = self.status_band
+        layout = band.layout()
+        layout.activate()
+        needed = max(layout.minimumSize().height(), layout.sizeHint().height())
+        if layout.hasHeightForWidth() and band.width() > 0:
+            needed = max(needed, layout.heightForWidth(band.width()))
+        band.setMinimumHeight(needed)
+        if "view" in _SESSION_SPLITTER_SIZES:
+            return  # the operator has cut this column themselves
+        sizes = self.view_splitter.sizes()
+        if len(sizes) == 2 and sizes[0] != needed and sum(sizes) > needed:
+            self.view_splitter.setSizes([needed, sum(sizes) - needed])
+
+    def _status_band_columns(self, width: int) -> int:
+        """How many columns of readings *width* can hold without squeezing."""
+
+        spacing = self.status_band_layout.spacing()
+        margins = self.status_band_layout.contentsMargins()
+        usable = width - margins.left() - margins.right()
+        demands = [panel.minimumWidth() for panel in self._status_panels]
+        for columns in range(len(demands), 1, -1):
+            # A grid column is as wide as the widest panel that lands in it.
+            per_column = [0] * columns
+            for index, demand in enumerate(demands):
+                column = index % columns
+                per_column[column] = max(per_column[column], demand)
+            if sum(per_column) + spacing * (columns - 1) <= usable:
+                return columns
+        return 1
 
     def _build_lamp_tab(self) -> None:
         tab = QtWidgets.QWidget()
@@ -1025,6 +1421,16 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         self.triage_next_value.setObjectName("messagePanel")
         layout.addWidget(self.triage_next_value)
 
+        # Exposure guidance explains this view's verdict, so it reads here,
+        # beside the histograms it is derived from, rather than in the file
+        # list where it used to take four wrapped lines of the controls column.
+        self.exposure_value = QtWidgets.QLabel(
+            "Exposure guidance for the selected file appears here."
+        )
+        self.exposure_value.setWordWrap(True)
+        self.exposure_value.setObjectName("messagePanel")
+        layout.addWidget(self.exposure_value)
+
         graphics = pg.GraphicsLayoutWidget()
         graphics.setBackground("#10151b")
         self.histogram_plot = graphics.addPlot(row=0, col=0, title="Raw counts histogram")
@@ -1197,11 +1603,20 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         # same curve pans at interactive speed.
         self.candidate_curve = self._factor_curve("#70d6ae", 1.6, "new measured pair")
         self.previous_curve = self._factor_curve("#f5b95f", 1.2, "previous campaign")
-        # Downsampling and clipping are set on the plot, not on the curves:
-        # PlotItem pushes its own control-panel state onto every item whenever
-        # the log mode changes, which silently undoes a per-curve setting.
+        # Downsampling is set on the plot, not on the curves: PlotItem pushes
+        # its own control-panel state onto every item whenever the log mode
+        # changes, which silently undoes a per-curve setting.
         self.sphere_plot.setDownsampling(auto=True, mode="peak")
-        self.sphere_plot.setClipToView(True)
+        # No clipToView here, and it is not a matter of taste.  Clipping finds
+        # the visible slice with a binary search, which assumes x ascends.  A
+        # factor curve is the echelle orders laid end to end, so its wavelength
+        # axis walks *backwards* at nearly every sample (42459 of 42739 steps on
+        # the real previous-campaign pair).  The search then returns a slice of
+        # about one point and the whole curve disappears at any zoom, while the
+        # legend still names it — the owner's vanishing orange curve.  The
+        # speed came from downsampling anyway: on that data clipping is worth
+        # about a tenth of a millisecond per pan frame (F18 item 5).
+        self.sphere_plot.setClipToView(False)
         self.sphere_plot.setLogMode(y=True)
         layout.addWidget(self.sphere_plot)
         self.view_tabs.addTab(widget, "Sphere factors")
@@ -2385,11 +2800,8 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
             ChecklistState.ATTENTION: QtGui.QColor("#ffb86b"),
             ChecklistState.SUGGESTION: QtGui.QColor("#8fd9ff"),
         }
-        width = max(280, self.checklist_tree.viewport().width() - 18)
+        width = self._checklist_row_width()
         for item in self.campaign.checklist(self.session):
-            text = f"{symbols[item.state]}  {item.label} — {item.detail}"
-            if item.unblocked_by:
-                text += f"\n     unblocked by: {item.unblocked_by}"
             row = QtWidgets.QListWidgetItem()
             explanation = item.detail
             if item.unblocked_by:
@@ -2397,17 +2809,23 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
             if not item.blocking:
                 explanation += "\n\nThis row is advice. It never blocks anything."
             row.setToolTip(one_line(item.detail))
-            label = QtWidgets.QLabel(text)
+            label = QtWidgets.QLabel(
+                self._checklist_row_html(
+                    symbols[item.state],
+                    f"{item.label} — {item.detail}",
+                    item.unblocked_by or "",
+                )
+            )
+            label.setTextFormat(QtCore.Qt.RichText)
             label.setWordWrap(True)
             label.setContentsMargins(8, 6, 8, 6)
             label.setStyleSheet(f"color: {colors[item.state].name()};")
             _emphasise(label, self.body_pt, bold=item.state is ChecklistState.ATTENTION)
-            label.setFixedWidth(width)
             self._explainable(label, item.label, explanation)
             self._checklist_labels.append(label)
-            row.setSizeHint(QtCore.QSize(0, label.sizeHint().height() + 8))
             self.checklist_tree.addItem(row)
             self.checklist_tree.setItemWidget(row, label)
+            self._fit_checklist_row(row, label, width)
 
     def _refresh_sphere_plot(self) -> None:
         """Feed the two persistent factor curves; never rebuild the plot.
@@ -2814,6 +3232,10 @@ def _build_parser() -> argparse.ArgumentParser:
 def main(argv: Sequence[str] | None = None) -> int:
     """Launch the calibration bench."""
 
+    # Before any window exists, and before Qt asks the shell for one: an
+    # explicit identity is what makes Windows show *this* icon on the taskbar
+    # button rather than the launcher stub's.
+    apply_windows_taskbar_identity()
     args = _build_parser().parse_args(argv)
     if not args.folder.is_dir():
         raise SystemExit(f"folder not found: {args.folder}")

@@ -71,7 +71,31 @@ full-screen window without leaning in:
 
 The bench window carries its own icon, derived at run time from the same
 `echelle.png` the main GUI uses — tinted and badged rather than redrawn — so the
-two windows are tellable apart in a taskbar without a second artwork file.
+two windows are tellable apart in a taskbar without a second artwork file. It is
+built at every size a shell asks for, down to the 16 px the title bar uses, and
+on Windows `echelle-calib` claims its own **AppUserModelID** before opening the
+window. Without that claim the shell files the process under whatever launched
+it and shows the launcher's icon on the taskbar however the window is dressed —
+which is why the bench icon kept "disappearing" while the main GUI, which has
+always made the claim, kept its own.
+
+## How the window spends its space
+
+The bench opens at the smallest size it is actually usable at, never smaller.
+At the default geometry the **file table**, the **Bench state** readings, the
+**Sphere factors** line and at least six rows of the **Expected lines** table
+are all on screen at once, and the controls column reaches every one of them
+without a scrollbar. Three splitters divide the surface and every one of them
+is draggable; whatever you drag is what the rest of the session opens with:
+
+- **controls | views** across the window;
+- **control tabs | Expected lines** down the left column, so the line table
+  keeps a real share of the height instead of the leftovers;
+- **readings | plots** down the right column. Bench state and the factors line
+  live in a strip across the top of the view column rather than stacked below
+  the file table, so they are in view whichever control tab is open. On a
+  narrow window the strip folds onto a second row rather than shaving the
+  controls inside it.
 
 ## Getting files onto the bench
 
@@ -204,8 +228,8 @@ rather than leaving stale green checks.
 
 ## Exposure guidance for a classified frame
 
-Once a file carries a role, its guidance panel restates the triage verdict as a
-next acquisition action. When SIF metadata carries an exposure time, the advice
+Once a file carries a role, the guidance line under the **Exposure triage**
+histograms restates the triage verdict as a next acquisition action. When SIF metadata carries an exposure time, the advice
 includes an approximate next exposure targeting 70% of the configured saturation
 level. Background frames instead tell the operator to keep the paired signal at
 the same exposure. A saturated lamp frame is never told to lower its exposure:
@@ -296,7 +320,7 @@ travels with the checklist:
 
 ## Sphere factors and `insufficient data`
 
-After the sphere pair is explicit, **Compute and compare factors** runs the
+After the sphere pair is explicit, **Compute factors** runs the
 existing extraction and absolute-calibration engine twice: once for the measured
 pair and once for the previous pair. The **Sphere factors** view overlays both
 curves and reports the median and 5–95% range of their finite positive ratio.
