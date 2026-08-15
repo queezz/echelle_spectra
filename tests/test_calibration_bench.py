@@ -194,7 +194,11 @@ def test_saturated_and_low_signal_clicks_are_refused_then_recover(tmp_path):
     session.accept_frame(_frame(tmp_path, saturated=(0, 32)))
     saturated = session.fit_anchor_at(0, 32.0)
     assert not saturated.accepted
-    assert "lower exposure" in saturated.reason
+    # The rejection names the line rather than ordering a reshoot: a dim-series
+    # lamp frame is *meant* to saturate its strong lines (F14 item 2).
+    assert "saturated on the raw detector" in saturated.reason
+    assert "600.000 nm" in saturated.reason
+    assert "lower exposure" not in saturated.reason.casefold()
     assert not session.anchors
 
     dim = _frame(tmp_path, centers=(115.0, 115.0, 115.0))
@@ -207,6 +211,94 @@ def test_saturated_and_low_signal_clicks_are_refused_then_recover(tmp_path):
     assert session.fit_anchor_at(0, 32.0).accepted
     assert session.fit_anchor_at(1, 72.0).accepted
     assert session.alignment_state is AlignmentState.ALIGNED
+
+
+def _dim_series_frame(tmp_path: Path, frames: int = 3) -> BenchFrame:
+    """A dim-series lamp acquisition: strong line clipped, weak lines clean.
+
+    This is the exposure the owner shoots on purpose — the bright/dim pair
+    exists so the strong lines saturate while the weak ones finally emerge.
+    """
+
+    columns = 120
+    x = np.arange(columns, dtype=float)
+    pattern = _pattern(columns)
+    strong = 10.0 + 90000.0 * np.exp(-0.5 * ((x - 32.0) / 1.6) ** 2)
+    weak_a = 10.0 + 900.0 * np.exp(-0.5 * ((x - 72.0) / 1.6) ** 2)
+    weak_b = 10.0 + 700.0 * np.exp(-0.5 * ((x - 92.0) / 1.6) ** 2)
+    spectra = (np.minimum(strong, 65535.0), weak_a, weak_b)
+    images = np.zeros((frames, 64, columns), dtype=float)
+    for order, spectrum in enumerate(spectra):
+        for column, value in enumerate(spectrum):
+            images[:, int(pattern[column, order]), column] = value
+    per_frame = tuple(tuple(np.array(row, dtype=float) for row in spectra) for _ in range(frames))
+    return BenchFrame(
+        path=tmp_path / "Ne-0.1s-x3-dimm-lines.sif",
+        images=images,
+        detector_image=images.mean(axis=0),
+        order_spectra=spectra,
+        metadata={"NumberOfFrames": frames},
+        frame_order_spectra=per_frame,
+    )
+
+
+def test_per_anchor_saturation_rejects_only_the_saturated_lines(tmp_path):
+    """F14 item 2: a dim-series frame still yields its unsaturated anchors.
+
+    The frame as a whole is saturated, which is the point of shooting it. The
+    fit is guarded line by line, so the clipped strong line is refused while
+    the weak lines it was shot for fit and solve the alignment.
+    """
+
+    lines = (_line(0, 30.0, 600.0), _line(1, 70.0, 610.0), _line(2, 90.0, 620.0))
+    session = CalibrationBenchSession(_pattern(), lines, minimum_snr=3.0)
+    session.accept_frame(_dim_series_frame(tmp_path))
+
+    clipped = session.fit_anchor_at(0, 32.0)
+    assert not clipped.accepted
+    assert "saturated on the raw detector" in clipped.reason
+    assert not session.anchors
+
+    assert session.fit_anchor_at(1, 72.0).accepted
+    assert session.fit_anchor_at(2, 92.0).accepted
+    assert session.alignment_state is AlignmentState.ALIGNED
+    assert len(session.anchors) == 2
+
+
+def test_a_three_frame_acquisition_fits_the_mean_or_one_frame(tmp_path):
+    """F14 item 4: the owner shoots three frames; both readings are offered."""
+
+    lines = (_line(0, 30.0, 600.0), _line(1, 70.0, 610.0), _line(2, 90.0, 620.0))
+    session = CalibrationBenchSession(_pattern(), lines, minimum_snr=3.0)
+    session.accept_frame(_dim_series_frame(tmp_path, frames=3))
+
+    assert session.frame_count == 3
+    assert session.selected_frame is None
+    assert session.frame_choice_label() == "mean of 3 frame(s)"
+    assert session.active_images().shape[0] == 3
+
+    assert session.fit_anchor_at(1, 72.0).accepted
+    assert session.fit_anchor_at(2, 92.0).accepted
+    assert session.alignment_state is AlignmentState.ALIGNED
+
+    # A centroid belongs to the spectrum it was measured on, so switching the
+    # reading drops the anchors instead of mixing two of them.
+    session.set_selected_frame(1)
+    assert session.frame_choice_label() == "frame 2 of 3"
+    assert session.active_images().shape[0] == 1
+    assert not session.anchors
+    assert session.alignment_state is AlignmentState.EMPTY
+
+    assert session.fit_anchor_at(1, 72.0).accepted
+    np.testing.assert_allclose(
+        session.active_order_spectra()[1], session.frame.frame_order_spectra[1][1]
+    )
+    with pytest.raises(IndexError):
+        session.set_selected_frame(7)
+
+    session.set_selected_frame(None)
+    assert session.selected_frame is None
+    assert not session.anchors
 
 
 def test_alignment_failure_keeps_anchors_and_recovers_after_mutation(tmp_path):

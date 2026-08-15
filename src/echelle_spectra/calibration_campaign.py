@@ -65,6 +65,7 @@ __all__ = [
     "MeasurementRecord",
     "MeasurementRole",
     "ReferenceState",
+    "RoleTriageVerdict",
     "SaturationClusters",
     "SaveState",
     "TomlState",
@@ -81,6 +82,7 @@ __all__ = [
     "normalize_lamp_name",
     "suggest_file_roles",
     "triage_exposure",
+    "triage_for_role",
     "write_corrected_wavelength_table",
 ]
 
@@ -263,6 +265,36 @@ class ExposureTriage:
         """Whether lines may be fitted on this frame at all."""
 
         return self.state in {ExposureState.GOOD, ExposureState.DIM}
+
+
+@dataclass(frozen=True)
+class RoleTriageVerdict:
+    """How one frame's exposure reads once its measurement role is known.
+
+    The front-door triage judges a file before any role exists and never
+    changes.  This is the second reading, taken once the operator has said what
+    the frame is for: a lamp frame is *supposed* to saturate its strong lines —
+    that is precisely why bright/dim pairs are shot — so clustered saturation on
+    a lamp frame is information, not a failure.  A sphere frame keeps the hard
+    verdict, because a saturated sphere frame cannot produce absolute factors.
+    """
+
+    role: MeasurementRole | None
+    state: ExposureState
+    #: Short badge for the files table.
+    label: str
+    #: The single line the operator reads beside the file.
+    headline: str
+    #: Whether this verdict refuses the frame the purpose it was given.
+    blocking: bool
+    #: The longer explanation, for a tooltip or the details dock.
+    advice: str
+
+    @property
+    def is_usable(self) -> bool:
+        """Whether this frame may still serve the role it was given."""
+
+        return not self.blocking
 
 
 @dataclass(frozen=True)
@@ -914,6 +946,71 @@ def evaluate_exposure(
     )
 
 
+#: What a lamp frame is told when its strong lines are clustered-saturated.
+LAMP_SATURATION_ADVICE = (
+    "A dim-series lamp exposure is meant to saturate its strong lines so the "
+    "weak ones emerge; that is what the bright/dim pair is for. Nothing here "
+    "is refused: every anchor is saturation-checked on the raw detector "
+    "window of its own line, so a click on a saturated line is rejected while "
+    "the unsaturated lines beside it fit normally."
+)
+
+#: Why a saturated sphere frame is still a hard failure.
+SPHERE_SATURATION_ADVICE = (
+    "Absolute factors divide the sphere signal by a known radiance, so a "
+    "clipped sphere pixel is an unknown number rather than a bright one. "
+    "Lower the exposure and reacquire both sphere frames together."
+)
+
+
+def triage_for_role(
+    triage: ExposureTriage, role: MeasurementRole | None
+) -> RoleTriageVerdict:
+    """Read one already-triaged frame again, in the light of its role.
+
+    Saturation is the only verdict a role changes, and it changes in one
+    direction only: a lamp frame is never failed for saturating the strong
+    lines it was shot to saturate.  Every other state, and every sphere frame,
+    reads exactly as the front-door triage read it.
+    """
+
+    clusters = triage.saturation
+    if triage.state is ExposureState.SATURATED and role in LAMP_ROLES:
+        headline = (
+            f"saturated in {clusters.cluster_count} cluster(s) — fit "
+            "unsaturated lines only"
+        )
+        return RoleTriageVerdict(
+            role,
+            triage.state,
+            "saturated lines (expected)",
+            headline,
+            False,
+            f"{clusters.cluster_pixels} full-scale pixel(s) in "
+            f"{clusters.cluster_count} connected cluster(s), largest "
+            f"{clusters.largest_cluster_pixels}. {LAMP_SATURATION_ADVICE}",
+        )
+    if triage.state is ExposureState.SATURATED:
+        return RoleTriageVerdict(
+            role,
+            triage.state,
+            "saturated",
+            triage.headline,
+            True,
+            f"{triage.headline} {SPHERE_SATURATION_ADVICE}"
+            if role in {MeasurementRole.SPHERE, MeasurementRole.SPHERE_BACKGROUND}
+            else triage.headline,
+        )
+    return RoleTriageVerdict(
+        role,
+        triage.state,
+        triage.state.value,
+        triage.headline,
+        triage.state is ExposureState.NO_DATA,
+        "\n".join(triage.details),
+    )
+
+
 def catalog_lines_for_order(
     calibration_rows: Sequence[CalibrationTableLine],
     order_idx: int,
@@ -1142,6 +1239,66 @@ class CalibrationCampaignSession:
         removed = self.loaded.pop(source, None) is not None
         return self.remove_classification(source) or removed
 
+    def role_triage(self, path: str | Path) -> RoleTriageVerdict | None:
+        """Read one loaded file's exposure in the light of the role it carries."""
+
+        source = Path(path)
+        record = self.loaded.get(source)
+        if record is None:
+            return None
+        measurement = self.measurements.get(source)
+        return triage_for_role(
+            record.triage, measurement.role if measurement is not None else None
+        )
+
+    def unconfirmed_suggestions(self) -> tuple[tuple[Path, MeasurementRole], ...]:
+        """Files whose filename proposes one role that nobody has confirmed.
+
+        A pre-filled control is help, not an assignment.  The bench states which
+        files are in that in-between state so the surface can never show a role
+        the campaign has not actually been given.
+        """
+
+        pending = []
+        for path in self.loaded:
+            if path in self.measurements:
+                continue
+            suggestion = self.observed.get(path)
+            if suggestion is None or not suggestion.is_unambiguous:
+                continue
+            pending.append((path, suggestion.roles[0]))
+        return tuple(sorted(pending, key=lambda item: item[0].name.casefold()))
+
+    def confirm_suggested_roles(
+        self, *, saturation_level: float = 0.98 * FULL_SCALE_COUNTS
+    ) -> tuple[MeasurementRecord, ...]:
+        """Assign every unconfirmed filename suggestion in one explicit step.
+
+        This is still a manual act — the operator asks for it — but it makes
+        confirming a whole folder one deliberate press instead of one popup pick
+        per row, which is the interaction that silently produced no assignment
+        at all.
+        """
+
+        confirmed = []
+        for path, role in self.unconfirmed_suggestions():
+            suggestion = self.observed.get(path)
+            lamp = suggestion.lamp_name if suggestion is not None else ""
+            try:
+                confirmed.append(
+                    self.classify_file(
+                        path,
+                        role,
+                        lamp_family=lamp,
+                        saturation_level=saturation_level,
+                    )
+                )
+            except (FileNotFoundError, ValueError):
+                # A lamp suggestion with no readable lamp name stays the
+                # operator's to make; the rest of the folder still confirms.
+                continue
+        return tuple(confirmed)
+
     @property
     def assigned_lamps(self) -> tuple[str, ...]:
         """Lamp names the operator actually assigned, in a stable order."""
@@ -1209,16 +1366,39 @@ class CalibrationCampaignSession:
             if frame is not None
             else (loaded.exposure if loaded is not None else None)
         )
+        action = ""
         if exposure is not None and role in {
             MeasurementRole.SPHERE_BACKGROUND,
             MeasurementRole.LAMP_BACKGROUND,
         }:
-            if exposure.state is ExposureState.SATURATED:
+            if exposure.state is ExposureState.SATURATED and role in LAMP_ROLES:
+                # A lamp background is judged like its lamp: saturation there is
+                # reported, never a reason to reshoot the pair.
+                action = (
+                    f"Saturated in {exposure.saturated_pixels} pixel(s) — expected "
+                    "beside a dim-series lamp exposure; keep the paired signal at "
+                    "this same exposure."
+                )
+            elif exposure.state is ExposureState.SATURATED:
                 action = "Lower the exposure for both this background and its paired signal."
             else:
                 action = (
                     "Keep the paired signal at this same exposure; acquire the signal next."
                 )
+        elif (
+            exposure is not None
+            and role is MeasurementRole.LAMP
+            and exposure.state is ExposureState.SATURATED
+        ):
+            # The owner's own words: of course the dim series saturates the
+            # strong lines — that is the point of shooting a bright/dim pair.
+            action = (
+                "Saturated strong lines are expected on a dim-series lamp frame; "
+                "fit the unsaturated lines only. Every anchor is saturation-checked "
+                "on its own detector window."
+            )
+        if action:
+            assert exposure is not None
             exposure = ExposureGuidance(
                 exposure.state,
                 exposure.peak_value,
@@ -1294,10 +1474,26 @@ class CalibrationCampaignSession:
         sphere = self._one(MeasurementRole.SPHERE)
         background = self._one(MeasurementRole.SPHERE_BACKGROUND)
         if sphere is None or background is None:
-            self.comparison = SphereComparison(
-                ComparisonState.FAILED,
-                "classify both sphere signal and sphere background first",
-            )
+            missing = [
+                name
+                for name, record in (
+                    ("sphere signal", sphere),
+                    ("sphere background", background),
+                )
+                if record is None
+            ]
+            reason = f"classify the {' and '.join(missing)} first"
+            pending = [
+                path.name
+                for path, role in self.unconfirmed_suggestions()
+                if role in {MeasurementRole.SPHERE, MeasurementRole.SPHERE_BACKGROUND}
+            ]
+            if pending:
+                reason += (
+                    f" — {', '.join(pending)} only shows a filename suggestion; "
+                    "confirm the role in the Role column"
+                )
+            self.comparison = SphereComparison(ComparisonState.FAILED, reason)
             return self.comparison
         try:
             candidate = calculator(
@@ -1391,13 +1587,32 @@ class CalibrationCampaignSession:
         saturated = sum(
             1 for record in loaded if record.triage.state is ExposureState.SATURATED
         )
+        # Saturation on a lamp frame is expected, so it is counted apart from
+        # the saturation that actually refuses a frame its purpose.
+        blocking = sum(
+            1
+            for path in self.loaded
+            if (verdict := self.role_triage(path)) is not None
+            and verdict.state is ExposureState.SATURATED
+            and verdict.blocking
+        )
+        pending = self.unconfirmed_suggestions()
         on_bench = set(self.loaded) | set(self.measurements)
         detail = "drop SIF files on the bench or use Add files"
         if on_bench:
+            expected = saturated - blocking
+            saturation_note = f"{blocking} saturated"
+            if expected:
+                saturation_note += f" ({expected} saturated on purpose, on lamp frames)"
             detail = (
                 f"{len(on_bench)} file(s) on the bench, {len(loaded)} file(s) triaged, "
-                f"{saturated} saturated"
+                f"{saturation_note}"
             )
+            if pending:
+                detail += (
+                    f"; {len(pending)} file(s) show only a filename suggestion and "
+                    "carry no role yet"
+                )
         return (
             ChecklistItem(
                 "references",
@@ -1416,6 +1631,7 @@ class CalibrationCampaignSession:
 
     def _sphere_items(self) -> tuple[ChecklistItem, ...]:
         items = []
+        pending = dict(self.unconfirmed_suggestions())
         for role, key, label in (
             (MeasurementRole.SPHERE, "sphere", "Integrating-sphere signal"),
             (
@@ -1425,15 +1641,32 @@ class CalibrationCampaignSession:
             ),
         ):
             record = self._one(role)
+            # A file the filename already points at is not the same as no file
+            # at all, and saying so is what stops a pre-filled control from
+            # reading as an assignment nobody made.
+            suggested = [path.name for path, proposed in pending.items() if proposed is role]
+            if record:
+                detail = record.path.name
+                unblocked = ""
+            elif suggested:
+                detail = (
+                    f"{', '.join(suggested)} is only suggested by its filename; "
+                    "no file carries this role yet"
+                )
+                unblocked = (
+                    f"confirm the {label.casefold()} role on {suggested[0]} — pick it "
+                    "in the Role column or press Confirm suggested roles"
+                )
+            else:
+                detail = "no file carries this role yet"
+                unblocked = f"assign the {label.casefold()} role to a loaded file"
             items.append(
                 ChecklistItem(
                     key,
                     label,
                     ChecklistState.DONE if record else ChecklistState.WAITING,
-                    record.path.name if record else "no file carries this role yet",
-                    unblocked_by=""
-                    if record
-                    else f"assign the {label.casefold()} role to a loaded file",
+                    detail,
+                    unblocked_by=unblocked,
                 )
             )
         comparison_done = self.comparison.state in {

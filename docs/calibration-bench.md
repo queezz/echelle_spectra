@@ -51,6 +51,28 @@ echelle-calib path/to/calibration-folder --file path/to/lamp.sif --watch
 Run `echelle-calib --help` for polling, stability, saturation, SNR, campaign,
 configuration, and snapshot controls.
 
+## Reading the bench
+
+Text here is data, not decoration, and the bench is built to be read across a
+full-screen window without leaning in:
+
+- readings are sized in **points relative to the platform font**, with floors,
+  so a lower-resolution display scales the surface rather than shrinking it.
+  Verdict headlines, RMS, anchor counts, save/alignment states, and the factor
+  result are rendered larger and bolder than the prose around them;
+- the pane divider is a **real splitter with no width ceiling**: drag the
+  controls as wide as the reading needs. Triage lines, advice, checklist rows,
+  and file cells **wrap**; nothing important is ellipsized;
+- every verdict and parameter carries its **full explanation as a tooltip**, and
+  clicking one — or any checklist row, file row, or anchor — writes that
+  explanation into the **Why this reading** dock at the bottom. The whys live
+  behind a hover or a click, once, rather than standing permanently between the
+  operator and the numbers.
+
+The bench window carries its own icon, derived at run time from the same
+`echelle.png` the main GUI uses — tinted and badged rather than redrawn — so the
+two windows are tellable apart in a taskbar without a second artwork file.
+
 ## Getting files onto the bench
 
 Primary input is manual, because at acquisition time files are misnamed,
@@ -89,7 +111,7 @@ glance, adjust the lamp, shoot again.
 Saturation is judged by clustering alone:
 
 - a **connected cluster of two or more full-scale pixels** (four-connectivity
-  inside one frame) is real saturation and fails the frame;
+  inside one frame) is real saturation;
 - an **isolated full-scale pixel is an anomaly** — a cosmic ray or a hot pixel —
   counted and reported, never held against the exposure. A pixel that saturates
   in every frame of a stack stays a repeated anomaly, because clusters are never
@@ -109,6 +131,23 @@ The verdict states:
 The noise floor is a robust median/MAD estimate over a strided pixel sample of
 the frame. The verdict is acquisition guidance, not a camera-timing validation.
 
+### Saturation reads differently once a frame has a role
+
+Triage is the front door and knows nothing about roles. Once a file carries
+one, the same measurement is read again in the light of it, and saturation is
+the only verdict a role can change:
+
+- a **lamp signal or lamp background** is never failed for saturating. A
+  bright/dim pair is shot precisely so the strong lines clip in the dim series
+  while the weak ones emerge, so the frame reads
+  `saturated in N cluster(s) — fit unsaturated lines only` and stays usable.
+  The fit is guarded per anchor instead: a click on a line whose own raw
+  detector window holds full-scale pixels is refused by name, and the
+  unsaturated lines beside it fit normally;
+- a **sphere signal or sphere background** keeps the hard verdict, because a
+  clipped sphere pixel is an unknown number rather than a bright one and no
+  absolute factor can be computed from it.
+
 ## Roles are assigned by hand, one control per file
 
 Each row of the **Files** table carries its own role control and its own lamp
@@ -119,8 +158,16 @@ type — the known list is convenience, never a permitted set.
 
 Filename patterns only **pre-fill** these controls. `Ne-0.02s-x3-bright-lines_bg.sif`
 pre-selects a Ne lamp background; `IMG_0042.sif` pre-selects nothing and still
-takes any role you pick. A pre-filled row shows `no role yet` until you confirm
-it in the control, so a filename can never complete the procedure by itself.
+takes any role you pick. A filename can never complete the procedure by itself.
+
+Because a pre-filled control is a guess and not an assignment, it says so. An
+unconfirmed row reads `Sphere signal · SUGGESTED` in amber, its file cell reads
+`SUGGESTED ONLY — no role assigned`, and the Procedure tab names the file rather
+than claiming nothing exists: "sphere-0.1s-x3.sif is only suggested by its
+filename". Confirm one row by picking its role in the control — picking the
+entry already shown counts — or press **Confirm N suggested role(s)** to assign
+every unconfirmed suggestion of the folder in one deliberate step. Any of them
+can then be changed freely.
 
 ## On-screen procedure
 
@@ -158,13 +205,24 @@ Once a file carries a role, its guidance panel restates the triage verdict as a
 next acquisition action. When SIF metadata carries an exposure time, the advice
 includes an approximate next exposure targeting 70% of the configured saturation
 level. Background frames instead tell the operator to keep the paired signal at
-the same exposure.
+the same exposure. A saturated lamp frame is never told to lower its exposure:
+it is told that the clipped strong lines are expected and that the unsaturated
+lines are the ones to fit.
 
 ## Line identification and live alignment
 
+The lamp-fit tab carries an explicit **Order** control — a spin box with ◀/▶
+step buttons and the highest order beside it — and a **Fit on** selector that
+chooses between the mean of the acquisition and any one of its frames. A 3-frame
+acquisition therefore fits on the quieter mean by default and drops to a single
+frame when one frame is spoiled or when a line clips in one frame and not the
+others; saturation is checked on the raw pixels of whichever frame is being
+fitted. Changing the selection clears the collected anchors, because a centroid
+belongs to the spectrum it was measured on.
+
 The lamp-fit view retains the Packet 4 interaction:
 
-1. choose an order;
+1. choose an order and which frame to fit;
 2. read the blue shared-catalog sticks and the dedicated **Line identification**
    table for ThAr, Ne, Hg, or Fulcher H2 provenance and approximate pixel
    positions;
@@ -345,3 +403,13 @@ pixel, where the lamp-blind lookup gave 125 anchors at RMS 9.372 px with 47
 within 2 px. The solved shift is +0.024 px, which says the packaged table was
 already aligned to this data and the old 9 px scatter was an artefact of
 measuring neon against thorium.
+
+The same folder has since been driven again through the Files-table role
+controls themselves rather than through the domain functions. Every dropped file
+pre-fills correctly and every control reports `SUGGESTED` until confirmed;
+confirming the sphere pair in the Role column computes real absolute factors,
+`READY · new/previous median 0.422; 5–95% 0.242–0.484 (42471 samples)`. On the
+real `Ne-0.1s-x3-dimm-lines.sif`, which saturates in 33 clusters by design, the
+frame stays usable and the per-anchor guard refuses 11 clicks by line name while
+accepting 28 unsaturated ones, solving at RMS 0.565 px; fitting frame 2 of that
+3-frame acquisition alone accepts 29 and solves at RMS 0.559 px.

@@ -32,6 +32,7 @@ from echelle_spectra.calibration_campaign import (
     normalize_lamp_name,
     suggest_file_roles,
     triage_exposure,
+    triage_for_role,
 )
 from echelle_spectra.calibration_registry import (
     CalibrationSourceIdentity,
@@ -438,6 +439,115 @@ def test_role_suggestions_are_help_not_automatic_classification(tmp_path):
     source.touch()
     suggestion = suggest_file_roles(source)
     assert suggestion.roles == (MeasurementRole.SPHERE_BACKGROUND,)
+
+
+def test_a_suggested_role_is_reported_as_unconfirmed_not_as_assigned(tmp_path):
+    """F14 item 1: the whole real folder pre-fills, and none of it is assigned.
+
+    This is what the owner saw: every Role control read correctly while the
+    campaign held nothing, so the procedure said "no file carries this role
+    yet" and the factor computation failed. The campaign now names that
+    in-between state instead of leaving the surface to imply an assignment.
+    """
+
+    sources = _real_2025_folder(tmp_path)
+    campaign = _ne_campaign(sources)
+    for name in _REAL_2025_NAMES:
+        campaign.record_frame(
+            _triage_frame(sources[name].parent, name, _bright_line)
+        )
+
+    pending = dict(campaign.unconfirmed_suggestions())
+    assert not campaign.measurements
+    assert pending[sources["sphere-0.1s-x3.sif"]] is MeasurementRole.SPHERE
+    assert (
+        pending[sources["sphere-0.1s-x3-bg.sif"]] is MeasurementRole.SPHERE_BACKGROUND
+    )
+
+    checklist = {item.key: item for item in campaign.checklist(_aligned_session(tmp_path))}
+    assert checklist["sphere"].state is ChecklistState.WAITING
+    assert "only suggested by its filename" in checklist["sphere"].detail
+    assert "sphere-0.1s-x3.sif" in checklist["sphere"].detail
+    assert "Confirm suggested roles" in checklist["sphere"].unblocked_by
+    assert "carry no role yet" in checklist["files"].detail
+
+    comparison = campaign.compute_sphere_comparison(lambda **_values: None)
+    assert comparison.state is ComparisonState.FAILED
+    assert "only shows a filename suggestion" in comparison.reason
+
+    confirmed = campaign.confirm_suggested_roles()
+
+    assert {record.path.name for record in confirmed} == set(_REAL_2025_NAMES)
+    assert campaign.unconfirmed_suggestions() == ()
+    assert campaign.measurements[sources["sphere-0.1s-x3.sif"]].role is (
+        MeasurementRole.SPHERE
+    )
+    assert campaign.assigned_lamps == ("Ne",)
+    checklist = {item.key: item for item in campaign.checklist(_aligned_session(tmp_path))}
+    assert checklist["sphere"].state is ChecklistState.DONE
+    assert checklist["sphere"].detail == "sphere-0.1s-x3.sif"
+
+
+def test_saturation_never_fails_a_lamp_frame_but_still_fails_a_sphere(tmp_path):
+    """F14 item 2, in the owner's words: of course the dim series saturates."""
+
+    triage = triage_exposure(_triage_frame(tmp_path, "Ne-dim.sif", _saturated_cluster))
+    assert triage.state is ExposureState.SATURATED
+
+    for role in (MeasurementRole.LAMP, MeasurementRole.LAMP_BACKGROUND):
+        verdict = triage_for_role(triage, role)
+        assert verdict.state is ExposureState.SATURATED
+        assert not verdict.blocking
+        assert verdict.is_usable
+        assert "fit unsaturated lines only" in verdict.headline
+        assert "cluster(s)" in verdict.headline
+        assert "FAILED" not in verdict.headline.upper()
+        assert "lower the exposure" not in verdict.advice.casefold()
+
+    for role in (MeasurementRole.SPHERE, MeasurementRole.SPHERE_BACKGROUND):
+        verdict = triage_for_role(triage, role)
+        assert verdict.blocking
+        assert not verdict.is_usable
+        assert "SATURATED" in verdict.headline
+
+    # A frame with no role yet keeps the front-door verdict untouched: triage
+    # is the front door and needs nothing but a file.
+    unassigned = triage_for_role(triage, None)
+    assert unassigned.blocking
+    assert unassigned.headline == triage.headline
+
+    healthy = triage_exposure(_triage_frame(tmp_path, "Ne.sif", _healthy))
+    assert not triage_for_role(healthy, MeasurementRole.LAMP).blocking
+    assert not triage_for_role(healthy, MeasurementRole.SPHERE).blocking
+
+
+def test_a_classified_lamp_frame_is_never_told_to_lower_its_exposure(tmp_path):
+    """The next-action line follows the same law as the verdict."""
+
+    sources = _real_2025_folder(tmp_path)
+    campaign = _ne_campaign(sources)
+    folder = sources["Ne-0.1s-x3-dimm-lines.sif"].parent
+    for name in ("Ne-0.1s-x3-dimm-lines.sif", "sphere-0.1s-x3.sif"):
+        campaign.record_frame(_triage_frame(folder, name, _saturated_cluster))
+
+    lamp = campaign.classify_file(
+        sources["Ne-0.1s-x3-dimm-lines.sif"], MeasurementRole.LAMP, lamp_family="Ne"
+    )
+    sphere = campaign.classify_file(
+        sources["sphere-0.1s-x3.sif"], MeasurementRole.SPHERE
+    )
+
+    assert lamp.exposure is not None and sphere.exposure is not None
+    assert "expected" in lamp.exposure.next_action
+    assert "unsaturated lines only" in lamp.exposure.next_action
+    assert "Lower exposure" not in lamp.exposure.next_action
+    assert "Lower exposure" in sphere.exposure.next_action
+
+    checklist = {item.key: item for item in campaign.checklist(_aligned_session(tmp_path))}
+    # One frame is saturated on purpose; only the sphere frame counts against us.
+    assert "1 saturated (1 saturated on purpose, on lamp frames)" in (
+        checklist["files"].detail
+    )
 
 
 def _triage_frame(tmp_path: Path, name: str, painter) -> BenchFrame:

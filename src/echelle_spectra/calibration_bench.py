@@ -205,13 +205,21 @@ class StableSifWatcher:
 
 @dataclass(frozen=True)
 class BenchFrame:
-    """Detector and extracted-order data consumed by the state machine."""
+    """Detector and extracted-order data consumed by the state machine.
+
+    ``order_spectra`` is the mean over the acquisition's frames, which is what
+    a 3-frame acquisition is shot for.  ``frame_order_spectra`` keeps each
+    frame's own extraction beside it so a single frame can be fitted instead —
+    empty for callers that only ever supply a mean.
+    """
 
     path: Path
     images: np.ndarray
     detector_image: np.ndarray
     order_spectra: tuple[np.ndarray, ...]
     metadata: dict[str, object]
+    #: Per-frame extractions, outer index frame, inner index order.
+    frame_order_spectra: tuple[tuple[np.ndarray, ...], ...] = ()
 
 
 class FrameLoader:
@@ -249,12 +257,15 @@ class FrameLoader:
         image.calculate_order_spectra()
 
         order_spectra = []
+        per_frame: list[list[np.ndarray]] = [[] for _ in range(images.shape[0])]
         for order_idx in range(self.pattern.shape[1]):
             frames = [
                 np.asarray(image.order_spectra[frame_idx][order_idx], dtype=float).reshape(-1)
                 for frame_idx in range(images.shape[0])
             ]
             common_size = min(frame.size for frame in frames)
+            for frame_idx, frame in enumerate(frames):
+                per_frame[frame_idx].append(frame[:common_size])
             with np.errstate(invalid="ignore"):
                 order_spectra.append(
                     np.nanmean(np.vstack([frame[:common_size] for frame in frames]), axis=0)
@@ -267,6 +278,7 @@ class FrameLoader:
             detector_image=detector_image,
             order_spectra=tuple(order_spectra),
             metadata=dict(image.info),
+            frame_order_spectra=tuple(tuple(rows) for rows in per_frame),
         )
 
 
@@ -335,6 +347,9 @@ class CalibrationBenchSession:
         self.loading_path: Path | None = None
         self.frame: BenchFrame | None = None
         self.selected_order = 0
+        #: Which frame of the acquisition is fitted.  ``None`` is the mean of
+        #: every frame, which is what a 3-frame acquisition is shot for.
+        self.selected_frame: int | None = None
         self.anchors: dict[tuple[int, float, float], Anchor] = {}
         self.transform: RigidTransform | None = None
         self.rms_px: float | None = None
@@ -361,6 +376,7 @@ class CalibrationBenchSession:
         self.loading_path = None
         self.file_state = FileLoadState.LOADED
         self.selected_order = min(self.selected_order, len(frame.order_spectra) - 1)
+        self.selected_frame = None
         self.anchors.clear()
         self.transform = None
         self.rms_px = None
@@ -392,6 +408,70 @@ class CalibrationBenchSession:
         if order_idx < 0 or order_idx >= self.pattern.shape[1]:
             raise IndexError(f"order {order_idx} is outside the loaded pattern")
         self.selected_order = int(order_idx)
+
+    @property
+    def frame_count(self) -> int:
+        """How many single frames the open acquisition offers, if any."""
+
+        if self.frame is None:
+            return 0
+        if self.frame.frame_order_spectra:
+            return len(self.frame.frame_order_spectra)
+        return int(np.asarray(self.frame.images).shape[0])
+
+    def set_selected_frame(self, frame_idx: int | None) -> None:
+        """Fit the mean of the acquisition (``None``) or one single frame.
+
+        Anchors are centroids measured on one particular spectrum, so switching
+        which spectrum is on screen drops them rather than carrying numbers
+        from the mean into a single-frame solution.
+        """
+
+        if frame_idx is not None:
+            index = int(frame_idx)
+            if index < 0 or index >= self.frame_count:
+                raise IndexError(f"frame {frame_idx} is outside the open acquisition")
+            frame_idx = index
+        if frame_idx == self.selected_frame:
+            return
+        self.selected_frame = frame_idx
+        if self.anchors:
+            self.anchors.clear()
+            self._recompute_alignment()
+
+    def active_order_spectra(self) -> tuple[np.ndarray, ...]:
+        """The extracted spectra a click is currently fitted against."""
+
+        if self.frame is None:
+            return ()
+        if self.selected_frame is None or not self.frame.frame_order_spectra:
+            return tuple(self.frame.order_spectra)
+        return tuple(self.frame.frame_order_spectra[self.selected_frame])
+
+    def active_images(self) -> np.ndarray:
+        """The raw detector data the per-anchor saturation check reads.
+
+        Single-frame fitting is judged on that frame's own raw pixels, so a
+        line saturated only in one frame of the acquisition is rejected there
+        and still fits on the frames that kept it in range.
+        """
+
+        if self.frame is None:
+            raise ValueError("no frame is open")
+        images = np.asarray(self.frame.images)
+        if self.selected_frame is None or images.ndim != 3:
+            return images
+        return images[self.selected_frame : self.selected_frame + 1]
+
+    def frame_choice_label(self) -> str:
+        """Say plainly which spectrum the fit is measuring."""
+
+        count = self.frame_count
+        if self.frame is None:
+            return "no acquisition open"
+        if self.selected_frame is None:
+            return f"mean of {count} frame(s)" if count > 1 else "single frame"
+        return f"frame {self.selected_frame + 1} of {count}"
 
     def use_lamp_reference(self, reference: LampReferenceSet | None) -> None:
         """Scope click-to-fit to the rows one assigned lamp's own catalog holds.
@@ -460,7 +540,7 @@ class CalibrationBenchSession:
             line.comment,
         )
         detector_qc = measure_detector_window_saturation(
-            self.frame.images,
+            self.active_images(),
             self.pattern,
             [probe_line],
             x_radius_px=self.fit_window_radius_px,
@@ -478,12 +558,15 @@ class CalibrationBenchSession:
         if detector_qc.is_saturated:
             return AnchorFitResult(
                 False,
-                "raw detector pixels are saturated; lower exposure before fitting",
+                f"{line.species} {line.wavelength_nm:.3f} nm is saturated on the raw "
+                f"detector ({detector_qc.saturated_pixels} full-scale pixel(s) in its "
+                "window) — fit an unsaturated line instead, or the same line on the "
+                "bright frame of the pair",
                 saturation_state=SaturationState.SATURATED,
             )
 
         success, center, sigma, amplitude, baseline, snr, reason = fit_single_gaussian_centroid(
-            self.frame.order_spectra[order_idx],
+            self.active_order_spectra()[order_idx],
             expected_center_px=float(clicked_pixel),
             window_radius_px=self.fit_window_radius_px,
             min_snr=self.minimum_snr,
