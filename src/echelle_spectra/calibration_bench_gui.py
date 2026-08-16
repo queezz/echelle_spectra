@@ -1618,6 +1618,35 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         )
         layout.addWidget(order_group)
 
+        # The fit's own action stands with the fit's own controls.  It is not a
+        # table operation the way Remove and Clear are — those act on a selected
+        # row, this one measures the frame — and a third button in the anchor
+        # panel costs that table a visible row, which is the working surface
+        # F18 and F20 spent two packets widening.  Bare rather than in a group
+        # box for the same reason in this column: a frame and a title around
+        # one button cost more height than the tab has spare, and the label and
+        # its caption already say what a title would have.
+        self.auto_anchor_button = QtWidgets.QPushButton("Auto-anchor lines")
+        self._explainable(
+            self.auto_anchor_button,
+            "Anchoring the lines the calibration already trusts",
+            "The curated wavelength table marks the rows vetted during the BH "
+            "paper's own calibration — tried and tested for the Balmer and "
+            "Fulcher analysis, which is the pedigree that makes them "
+            "trustworthy, not their brightness. This measures every one of "
+            "them, in every order, with the same centroid fit and the same "
+            "raw-detector saturation guard a click uses, and anchors the ones "
+            "that pass. It is what echelle-align has always done headlessly. "
+            "Anything it declines is listed with its reason, anchors you "
+            "placed by hand are kept, and any anchor it places comes off with "
+            "a right-click on the spectrum.",
+        )
+        layout.addWidget(self.auto_anchor_button)
+        self.auto_anchor_value = QtWidgets.QLabel("no acquisition open")
+        self.auto_anchor_value.setWordWrap(True)
+        self.auto_anchor_value.setObjectName("benchHelp")
+        layout.addWidget(self.auto_anchor_value)
+
         # The anchor table and the alignment readings it produces live in the
         # right rail (F20).  Stacked here they were the single heaviest thing
         # in the controls column, which is what made this tab scroll at every
@@ -1948,6 +1977,7 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         self.frame_combo.currentIndexChanged.connect(self._frame_choice_changed)
         self.line_family_combo.currentTextChanged.connect(self._line_family_changed)
         self.order_plot.scene().sigMouseClicked.connect(self._order_plot_clicked)
+        self.auto_anchor_button.clicked.connect(self._auto_anchor)
         self.remove_button.clicked.connect(self._remove_selected_anchor)
         self.clear_button.clicked.connect(self._clear_anchors)
         self.add_files_button.clicked.connect(self._pick_files)
@@ -2699,6 +2729,58 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         self.message_value.setText(result.reason)
         self.refresh()
 
+    def _auto_anchor(self) -> None:
+        """Anchor every trusted line of the assigned lamp in one pass."""
+
+        before = set(self.session.anchors)
+        result = self.session.auto_anchor()
+        if not result.ran:
+            self.refresh()
+            self.message_value.setText(f"Nothing was auto-anchored: {result.reason}")
+            return
+
+        placed = len(result.accepted)
+        sentences = [
+            f"Auto-anchor measured {result.considered} trusted "
+            f"{self._reference_label()} line(s) across all orders and anchored "
+            f"{placed}."
+        ]
+        if self.session.rms_px is not None:
+            sentences.append(f"The solved alignment reads RMS {self.session.rms_px:.3f} px.")
+        if result.rejected:
+            sentences.append(
+                f"Declined {len(result.rejected)}: {self._decline_summary(result)}."
+            )
+        kept = len(before - {anchor.key for anchor in result.accepted})
+        if kept:
+            sentences.append(f"Your {kept} hand-placed anchor(s) were kept.")
+        sentences.append(
+            "Review the anchor table and right-click any line on the spectrum "
+            "to drop it."
+        )
+        # The refresh reports whatever state it finds; what the operator needs
+        # to read is the outcome of the press, so it is written last.
+        self.refresh()
+        self.message_value.setText(" ".join(sentences))
+
+    def _reference_label(self) -> str:
+        reference = self.session.reference
+        if reference is not None and reference.catalog_label:
+            return reference.catalog_label
+        return "curated"
+
+    @staticmethod
+    def _decline_summary(result) -> str:
+        """Group the declines by reason so the message stays one line long."""
+
+        counts: dict[str, int] = {}
+        for rejection in result.rejected:
+            head = rejection.reason.split("(")[0].strip()
+            counts[head] = counts.get(head, 0) + 1
+        return ", ".join(
+            f"{count} {reason}" for reason, count in sorted(counts.items())
+        )
+
     def _remove_selected_anchor(self) -> None:
         row = self.anchor_table.currentRow()
         anchors = self.session.anchor_rows()
@@ -3182,6 +3264,36 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         enabled = bool(anchors)
         self.remove_button.setEnabled(enabled)
         self.clear_button.setEnabled(enabled)
+        self._refresh_auto_anchor()
+
+    def _refresh_auto_anchor(self) -> None:
+        """Say what a press would measure, before it is pressed."""
+
+        # The auto pass needs a frame, not an anchor: it is what fills an empty
+        # table, so gating it on a non-empty one would be exactly backwards.
+        session = self.session
+        reference = session.reference
+        if session.frame is None:
+            self.auto_anchor_button.setEnabled(False)
+            self.auto_anchor_value.setText("no acquisition open")
+            return
+        if reference is not None and not reference.is_referenceable:
+            self.auto_anchor_button.setEnabled(False)
+            self.auto_anchor_value.setText(reference.message)
+            return
+        rows = session.trusted_rows()
+        self.auto_anchor_button.setEnabled(bool(rows))
+        if not rows:
+            self.auto_anchor_value.setText(
+                f"no {self._reference_label()} row in this table carries an OK "
+                "mark — click the lines you trust instead"
+            )
+            return
+        orders = len({line.order_idx for line in rows})
+        self.auto_anchor_value.setText(
+            f"{len(rows)} vetted {self._reference_label()} line(s) across "
+            f"{orders} order(s) are ready to be measured in one pass"
+        )
 
     def refresh_plots(self) -> None:
         frame = self.session.frame

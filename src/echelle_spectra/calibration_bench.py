@@ -29,12 +29,16 @@ from .tools.calibration_alignment import (
     fit_rigid_transform,
     fit_single_gaussian_centroid,
     measure_detector_window_saturation,
+    measure_line_centroids,
+    select_candidate_lines,
 )
 
 __all__ = [
     "AlignmentState",
     "Anchor",
     "AnchorFitResult",
+    "AutoAnchorRejection",
+    "AutoAnchorResult",
     "BenchFrame",
     "CalibrationBenchSession",
     "FileFingerprint",
@@ -317,6 +321,35 @@ class AnchorFitResult:
     saturation_state: SaturationState = SaturationState.UNAVAILABLE
 
 
+@dataclass(frozen=True)
+class AutoAnchorRejection:
+    """One trusted row the auto-anchor pass measured and declined."""
+
+    line: CalibrationTableLine
+    reason: str
+
+
+@dataclass(frozen=True)
+class AutoAnchorResult:
+    """What one auto-anchor pass considered, accepted, and declined.
+
+    ``ran`` is false when the pass never got as far as measuring anything —
+    no frame open, a lamp that cannot be referenced, or a table carrying no
+    trusted rows for it — and ``reason`` then says which.
+    """
+
+    ran: bool
+    reason: str = ""
+    accepted: tuple[Anchor, ...] = ()
+    rejected: tuple[AutoAnchorRejection, ...] = ()
+
+    @property
+    def considered(self) -> int:
+        """How many trusted rows the pass actually measured."""
+
+        return len(self.accepted) + len(self.rejected)
+
+
 class CalibrationBenchSession:
     """Explicit live-bench state transitions with no Qt dependency."""
 
@@ -329,6 +362,8 @@ class CalibrationBenchSession:
         minimum_snr: float = 5.0,
         fit_window_radius_px: int = 18,
         click_match_radius_px: float = 30.0,
+        min_line_width_px: float = 4.0,
+        max_line_width_px: float = 40.0,
     ) -> None:
         pattern_array = np.asarray(pattern, dtype=float)
         if pattern_array.ndim != 2 or not pattern_array.size:
@@ -342,6 +377,10 @@ class CalibrationBenchSession:
         self.minimum_snr = float(minimum_snr)
         self.fit_window_radius_px = int(fit_window_radius_px)
         self.click_match_radius_px = float(click_match_radius_px)
+        #: Interval widths the auto-anchor pass will consider, matching
+        #: ``echelle-align``'s own gates so both paths trust the same rows.
+        self.min_line_width_px = float(min_line_width_px)
+        self.max_line_width_px = float(max_line_width_px)
         self.file_state = FileLoadState.WAITING
         self.alignment_state = AlignmentState.WAITING_FOR_FRAME
         self.loading_path: Path | None = None
@@ -665,14 +704,120 @@ class CalibrationBenchSession:
         self.upsert_anchor(anchor)
         return AnchorFitResult(True, "anchor accepted", anchor, SaturationState.CLEAR)
 
-    def upsert_anchor(self, anchor: Anchor) -> None:
-        """Add or replace an anchor, then deterministically recompute alignment."""
+    def trusted_rows(self) -> tuple[CalibrationTableLine, ...]:
+        """The vetted rows an auto pass would measure, before any fitting.
+
+        Same gates ``echelle-align`` selects on: the assigned lamp's own rows,
+        carrying the curated table's ``OK`` mark, over an interval wide enough
+        to be a line and narrow enough to be only one.
+        """
+
+        return tuple(
+            select_candidate_lines(
+                self.reference_lines(),
+                species=None,
+                require_ok=True,
+                min_width_px=self.min_line_width_px,
+                max_width_px=self.max_line_width_px,
+            )
+        )
+
+    def auto_anchor(self) -> AutoAnchorResult:
+        """Fit every trusted row of the assigned lamp, across all orders.
+
+        This is the click-free half of :meth:`fit_anchor_at`: the same
+        centroid fit, the same raw-detector saturation guard, and the same
+        rigid solve, aimed at the rows ``echelle-align`` has always trusted
+        — the curated table's own ``OK`` marks — instead of at one pixel the
+        operator pointed to.  Anchors already collected survive unless this
+        pass measures the same row again, so an auto pass can follow manual
+        work without discarding it.  Every declined row comes back with its
+        reason: an auto-pass that fails silently is a worse instrument than
+        a manual one.
+        """
+
+        if self.frame is None:
+            return AutoAnchorResult(False, "no SIF frame loaded")
+        reference = self.reference
+        if reference is not None and not reference.is_referenceable:
+            return AutoAnchorResult(False, reference.message)
+
+        spectra = self.active_order_spectra()
+        candidates = [
+            line for line in self.trusted_rows() if 0 <= line.order_idx < len(spectra)
+        ]
+        if not candidates:
+            return AutoAnchorResult(False, self._no_trusted_rows_message())
+
+        saturation = measure_detector_window_saturation(
+            self.active_images(),
+            self.pattern,
+            candidates,
+            x_radius_px=self.fit_window_radius_px,
+            saturation_level=self.saturation_level,
+        )
+        fits = measure_line_centroids(
+            spectra,
+            candidates,
+            window_radius_px=self.fit_window_radius_px,
+            saturation_level=None,
+            min_snr=self.minimum_snr,
+        )
+
+        accepted: list[Anchor] = []
+        rejected: list[AutoAnchorRejection] = []
+        for line, fit, detector_qc in zip(candidates, fits, saturation):
+            if detector_qc.is_saturated:
+                rejected.append(
+                    AutoAnchorRejection(
+                        line,
+                        "saturated on the raw detector "
+                        f"({detector_qc.saturated_pixels} full-scale pixel(s))",
+                    )
+                )
+                continue
+            if not fit.success:
+                rejected.append(
+                    AutoAnchorRejection(line, fit.reason or "centroid fit failed")
+                )
+                continue
+            anchor = Anchor(line, fit, detector_qc)
+            self._accept_anchor(anchor)
+            accepted.append(anchor)
+
+        # One solve for the whole pass: recomputing per anchor would fit the
+        # transform dozens of times to reach the same answer.
+        self._recompute_alignment()
+        return AutoAnchorResult(True, "", tuple(accepted), tuple(rejected))
+
+    def _no_trusted_rows_message(self) -> str:
+        """Say why an auto pass found nothing it was willing to measure."""
+
+        reference = self.reference
+        rows = self.reference_lines()
+        catalog = (
+            f"{reference.catalog_label} rows"
+            if reference is not None and reference.catalog_label
+            else "curated rows"
+        )
+        return (
+            f"none of the {len(rows)} {catalog} in this table carry the OK marks "
+            "the auto-anchor trusts — click the lines you trust instead"
+        )
+
+    def _accept_anchor(self, anchor: Anchor) -> None:
+        """Store one validated anchor without resolving the alignment."""
 
         if not anchor.fit.success:
             raise ValueError("cannot add an unsuccessful centroid fit")
         if anchor.saturation.is_saturated:
             raise ValueError("cannot add a saturated anchor")
         self.anchors[anchor.key] = anchor
+
+    def upsert_anchor(self, anchor: Anchor) -> None:
+        """Add or replace an anchor, then deterministically recompute alignment."""
+
+        self._accept_anchor(anchor)
         self._recompute_alignment()
 
     def remove_anchor(self, key: tuple[int, float, float]) -> bool:
