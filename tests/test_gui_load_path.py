@@ -429,3 +429,66 @@ def test_broken_calibration_reports_instead_of_disabling_the_window(qt_app, dete
     finally:
         win.close()
         qt_app.processEvents()
+
+
+def test_overlay_toggle_marks_the_detector_image_where_the_spectrum_says(qt_app, window):
+    """Packet F15 — one toggle serves both views, and the image agrees with it.
+
+    The marks are placed by inverting each order's wavelength solution against
+    the raw detector column.  The stitched spectrum carries the same answer in
+    its ``detector_pixel``/``echelle_order`` coordinates — after ``Spectrum``
+    has flipped them, because this fixture's wavelength falls with column as
+    the black Echelle's does.  Agreement between the two is the flip
+    convention holding end to end.
+    """
+
+    _settle_calibrations(qt_app, window)
+    spy = LoadSpy(window)
+    _load(qt_app, window, "5006_cmos.SIF", spy, attempts=1)
+    assert spy.statuses == [gui.IMAGE_LOADED]
+
+    overlays = window.detector_line_overlays
+    assert overlays.geometry is not None
+    # Off by default, and costing nothing while it is off.
+    assert not any(overlays.is_family_visible(family) for family in window.line_overlay_checks)
+    assert all(overlays.item(family) is None for family in window.line_overlay_checks)
+
+    window.line_overlay_checks["balmer"].setChecked(True)
+
+    # One control, both views.
+    assert window.line_overlays.is_family_visible("balmer")
+    marks = overlays.marks("balmer")
+    assert marks
+    assert overlays.item("balmer").isVisible()
+    assert "on the detector image" in window.statusBar().currentMessage()
+
+    spectra = window.spectra
+    for mark in marks:
+        index = int(np.argmin(np.abs(spectra.wavelength - mark.wavelength_nm)))
+        assert spectra.wavelength[index] == pytest.approx(mark.wavelength_nm, abs=0.5)
+        assert int(spectra.echelle_order[index]) == mark.order
+        assert float(spectra.detector_pixel[index]) == pytest.approx(mark.column, abs=1.0)
+        # The row band comes from the pattern, not from the wavelength table.
+        column = int(round(mark.column))
+        assert mark.row == pytest.approx(
+            _order_centers(CMOS_SHAPE)[column, mark.order_index], abs=0.5
+        )
+
+    window.line_overlay_checks["balmer"].setChecked(False)
+    assert overlays.marks("balmer") == ()
+    assert not overlays.item("balmer").isVisible()
+    assert not window.line_overlays.is_family_visible("balmer")
+
+
+def test_failed_load_clears_the_detector_marks(qt_app, window):
+    """Marks must not outlive the frame they were placed for."""
+
+    _settle_calibrations(qt_app, window)
+    spy = LoadSpy(window)
+    _load(qt_app, window, "5007_cmos.SIF", spy, attempts=1)
+    window.line_overlay_checks["balmer"].setChecked(True)
+    assert window.detector_line_overlays.marks("balmer")
+
+    _load(qt_app, window, UNREADABLE_NAME, spy, attempts=2)
+    assert window.detector_line_overlays.geometry is None
+    assert window.detector_line_overlays.marks("balmer") == ()

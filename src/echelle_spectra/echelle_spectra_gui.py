@@ -14,6 +14,7 @@ from .resources import window_layout
 from .tools import echelle as ech
 from .tools import emissionbands as eb
 from .tools import emissiondata as ebd
+from .tools.image_line_overlay import DetectorLineOverlay
 from .tools.line_overlay import LineOverlayManager
 
 # What one camera's attempt at one file ended up seeing.  A single "it did not
@@ -95,6 +96,9 @@ class EchelleSpectraGUI(QMainWindow, window_layout.Ui_MainWindow):
         self.line_overlays = LineOverlayManager(max_labels=14)
         self.line_overlays.register_plot("counts", self.p2, labels=False)
         self.line_overlays.register_plot("calibrated", self.p3, labels=True)
+        # The same five toggles also drive the 2-D image: one control per
+        # family, both views.  Nothing is drawn until a family is switched on.
+        self.detector_line_overlays = DetectorLineOverlay(self.p1)
 
         # define initial class attributes
         self.config = config
@@ -175,10 +179,20 @@ class EchelleSpectraGUI(QMainWindow, window_layout.Ui_MainWindow):
             )
 
     def set_line_overlay(self, family, visible):
-        """Toggle one shared known-line family on the main spectrum plots."""
+        """Toggle one known-line family on both the spectra and the image."""
         self.line_overlays.set_family_visible(family, visible)
-        state = "shown" if visible else "hidden"
-        self.statusBar().showMessage(f"{self.line_overlay_checks[family].text()} lines {state}.")
+        marks = self.detector_line_overlays.set_family_visible(family, visible)
+        label = self.line_overlay_checks[family].text()
+        if not visible:
+            self.statusBar().showMessage(f"{label} lines hidden.")
+        elif self.detector_line_overlays.geometry is None:
+            self.statusBar().showMessage(
+                f"{label} lines shown; the detector image is marked once an image loads."
+            )
+        else:
+            self.statusBar().showMessage(
+                f"{label} lines shown — {marks} on the detector image."
+            )
 
     def update_paths(self):
         """Set-up file paths for calibration, data folder, output folder etc."""
@@ -545,6 +559,9 @@ class EchelleSpectraGUI(QMainWindow, window_layout.Ui_MainWindow):
     def _show_loaded_image(self):
         """Build the spectrum and paint every tab from the freshly loaded image"""
         self.spectra = ech.Spectrum(self.em)
+        # The calibration this frame was extracted with is the one that says
+        # where a wavelength lands on the sensor.
+        self.detector_line_overlays.set_geometry(getattr(self.em, "clbr", None))
 
         self._reset_frame()
         self._setup_frame()
@@ -575,6 +592,9 @@ class EchelleSpectraGUI(QMainWindow, window_layout.Ui_MainWindow):
             return
 
         self.em = None
+        # No image, no geometry: stale marks must not outlive the frame they
+        # were placed for.
+        self.detector_line_overlays.set_geometry(None)
         message = self._load_failure_text(outcome)
         self.image_info_bw.setText(
             '<font size = 4 color = "#d1451b">{}</font>'.format(message)

@@ -168,7 +168,9 @@ class Ui_MainWindow(object):
             checkbox = QtWidgets.QCheckBox(label)
             checkbox.setObjectName(f"overlay_{family}")
             checkbox.setToolTip(
-                "Show labeled wavelength markers from the shared, provenance-carrying line table"
+                "Show markers from the shared, provenance-carrying line table:\n"
+                "labeled wavelength lines on the spectra, and expected line\n"
+                "positions bracketed on the 2-D detector image"
             )
             self.line_overlay_checks[family] = checkbox
             self.w3.addWidget(checkbox, 13 + index // 2, index % 2)
