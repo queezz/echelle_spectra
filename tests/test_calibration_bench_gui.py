@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+from dataclasses import replace
 from datetime import date
 from pathlib import Path
 
@@ -45,7 +46,10 @@ from echelle_spectra.calibration_campaign import (
     CalibrationCampaignSession,
     ComparisonState,
     ExposureState,
+    MeasurementRecord,
     MeasurementRole,
+    triage_exposure,
+    triage_for_role,
 )
 from echelle_spectra.tools.calibration_alignment import CalibrationTableLine
 
@@ -2263,4 +2267,206 @@ def test_the_detector_view_can_be_squared_up_on_request(qt_app, tmp_path):
     window.equal_aspect_check.setChecked(False)
     qt_app.processEvents()
     assert window.detector_plot.getViewBox().state["aspectLocked"] is False
+    window.close()
+
+
+# ----------------------------------------------------------------------
+# Packet F22 — the review round: gating, scope, and routing
+# ----------------------------------------------------------------------
+
+
+def test_a_running_campaign_task_gates_the_handlers_that_share_its_state(
+    qt_app, tmp_path
+):
+    """Every synchronous handler mutates what the running task is reading.
+
+    The next-step button and Regenerate ran their handlers on the GUI thread
+    while a CampaignTaskThread held the same campaign and session, and neither
+    was in the gate the buttons beside them were.
+    """
+
+    window = _campaign_window(tmp_path)
+    window.show()
+    qt_app.processEvents()
+    assert window.next_step_button.isEnabled()
+
+    # A task is running; nothing that touches campaign state may fire.
+    window._campaign_thread = object()
+    window.refresh_campaign()
+
+    assert not window.next_step_button.isEnabled()
+    assert not window.regenerate_tomls_button.isEnabled()
+    assert not window.recompute_sphere_button.isEnabled()
+    assert not window.confirm_roles_button.isEnabled()
+    ran = []
+    window._next_action = lambda: ran.append("ran")
+    window._run_next_action()
+    assert ran == []
+    written = []
+    window._refused_identity = window.snapshot_id_edit.text().strip()
+    window.campaign.write_tomls = lambda *args, **values: written.append(args)
+    window._regenerate_tomls()
+    assert written == []
+
+    window._campaign_thread = None
+    window.close()
+
+
+def test_overwriting_is_offered_only_for_the_identity_that_was_refused(
+    qt_app, tmp_path
+):
+    """Regenerate is permission for one bundle, not for the id field.
+
+    Its visibility survived every edit of the snapshot identity while the
+    overwrite itself read that field at the moment of the press, so one press
+    could rewrite a bundle that had never refused anything.
+    """
+
+    window = _campaign_window(tmp_path)
+    window.config_root = tmp_path / "configs"
+    window.show()
+    assert window.session.fit_anchor_at(0, 26).accepted
+    assert window.session.fit_anchor_at(1, 56).accepted
+
+    window._generate_tomls()
+    assert window.regenerate_tomls_button.isHidden()
+    window._generate_tomls()
+    assert "already exists" in window.message_value.text()
+    assert not window.regenerate_tomls_button.isHidden()
+
+    # A second identity, published and then edited by hand.
+    window.snapshot_id_edit.setText("20250814_cmos")
+    assert window.regenerate_tomls_button.isHidden()
+    window._generate_tomls()
+    other = window.config_root / "20250814_cmos" / "campaign.toml"
+    other.write_text("# edited by hand\n", encoding="utf-8")
+
+    # The stale offer, pressed: the refusal was about the first identity.
+    window._refused_identity = "20250813_cmos"
+    window._regenerate_tomls()
+
+    assert other.read_text(encoding="utf-8") == "# edited by hand\n"
+    assert window.regenerate_tomls_button.isHidden()
+    assert "identity changed" in window.message_value.text()
+    window.close()
+
+
+def test_a_missing_reference_table_offers_no_button_that_could_satisfy_it(
+    qt_app, tmp_path
+):
+    """The picker adds SIFs; this row is about tables named at construction."""
+
+    window = _manual_window(tmp_path)
+    window.show()
+    window.campaign.pattern_source.unlink()
+    window.refresh_campaign()
+    qt_app.processEvents()
+
+    step = window.next_step_value.text()
+    assert "Pattern, wavelength" in step
+    assert "reopen the bench" in step
+    assert window.next_step_button.isHidden()
+    assert window._next_action is None
+    window.close()
+
+
+def test_the_sensitivity_can_be_measured_again_once_it_is_done(qt_app, tmp_path):
+    """F22 item 6: the only way to recompute was a checklist step that is over.
+
+    The comparison is read beside the curves, so the control that reruns it is
+    there too — and never on the readings strip, which stays button-free.
+    """
+
+    window = _campaign_window(tmp_path)
+    window.show()
+    qt_app.processEvents()
+
+    assert window.campaign.comparison.state is ComparisonState.READY
+    assert window.recompute_sphere_button.isEnabled()
+    assert not window.sphere_factors_group.findChildren(QtWidgets.QPushButton)
+
+    started = []
+    window._start_campaign_task = lambda operation: started.append(operation)
+    window.recompute_sphere_button.click()
+
+    assert started == [window.campaign.compute_sphere_comparison]
+    window.close()
+
+
+def test_a_background_is_routed_by_its_role_and_not_by_its_label(qt_app, tmp_path):
+    """Colour, marks and advice all keyed off ``label.startswith("background")``.
+
+    A badge is text to reword; the role is what the frame is. Rewording the
+    badge must not repaint the row, name the role twice, or send the panel
+    down the branch that tells a dark frame to expose longer.
+    """
+
+    dim = triage_exposure(_frame_for(tmp_path / "Ne-bg.sif", peak=400.0))
+    verdict = triage_for_role(dim, MeasurementRole.LAMP_BACKGROUND, 40000.0)
+    reworded = replace(verdict, label="shot with the light off")
+    measurement = MeasurementRecord(tmp_path / "Ne-bg.sif", MeasurementRole.LAMP_BACKGROUND, "Ne")
+
+    assert verdict.is_background and reworded.is_background
+    colour = CalibrationBenchWindow._verdict_colour(verdict, dim)
+    assert CalibrationBenchWindow._verdict_colour(reworded, dim) == colour
+    # And the colour is the role's, not the raw state's: a correct dark frame
+    # is DIM, and DIM alone would paint it amber.
+    assert colour != bench_gui._TRIAGE_COLORS[dim.state]
+    assert CalibrationBenchWindow._role_marks(measurement, reworded, False) == ["Ne"]
+
+    # The advice branch, on the one verdict where the two branches differ.
+    saturated = triage_exposure(_frame_for(tmp_path / "Ne-bg.sif", peak=65535.0))
+    blocked = triage_for_role(saturated, MeasurementRole.LAMP_BACKGROUND, 40000.0)
+    renamed = replace(blocked, label="not dark at all")
+
+    assert saturated.state is ExposureState.SATURATED
+    headline = CalibrationBenchWindow._short_verdict(
+        tmp_path / "Ne-bg.sif", saturated, renamed
+    )
+    assert headline == f"NOT DARK AT ALL · {blocked.headline}"
+    assert "cluster" not in headline
+
+
+def test_a_bench_without_campaign_memory_still_adds_files(qt_app, tmp_path, monkeypatch):
+    """F22 item 9: the button kept its caption and lost its verb.
+
+    With no campaign the next-step slot is never refreshed, so the caption the
+    button was built with is the action it must carry.
+    """
+
+    window = _window(tmp_path)
+    window.show()
+    qt_app.processEvents()
+    asked = []
+    monkeypatch.setattr(
+        QtWidgets.QFileDialog,
+        "getOpenFileNames",
+        lambda *args, **values: (asked.append(args) or ([], "")),
+    )
+
+    assert window.campaign is None
+    assert window.next_step_button.text() == "Add SIF files…"
+    window.next_step_button.click()
+
+    assert asked
+    window.close()
+
+
+def test_one_campaign_refresh_derives_the_procedure_once(qt_app, tmp_path):
+    """The checklist is O(files x measurements) and this runs per keystroke."""
+
+    window = _campaign_window(tmp_path)
+    window.show()
+    qt_app.processEvents()
+    derived = []
+    real_checklist = window.campaign.checklist
+
+    def counted(session):
+        derived.append(session)
+        return real_checklist(session)
+
+    window.campaign.checklist = counted
+    window.refresh_campaign()
+
+    assert len(derived) == 1
     window.close()

@@ -528,6 +528,15 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         self._load_thread: FrameLoadThread | None = None
         self._background_thread: FrameLoadThread | None = None
         self._campaign_thread: CampaignTaskThread | None = None
+        #: The verb the next-step button carries.  It is set from the checklist
+        #: on every refresh, but the button is built with a caption before any
+        #: refresh runs and a campaign-less bench never gets one — so the
+        #: caption's own action is what it starts with, never nothing.
+        self._next_action = self._pick_files
+        #: The snapshot identity an "already exists" refusal was about.  Only
+        #: that identity may be overwritten, and only while the id field still
+        #: names it.
+        self._refused_identity = ""
         self._pattern_items: list[pg.PlotDataItem] = []
         self._pattern_key: tuple[int, int] | None = None
         self._selected_trace: int | None = None
@@ -2113,7 +2122,27 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         )
         self.sphere_view_message.setWordWrap(True)
         self.sphere_view_message.setObjectName("messagePanel")
-        layout.addWidget(self.sphere_view_message)
+        header = QtWidgets.QHBoxLayout()
+        header.addWidget(self.sphere_view_message, 1)
+        # The next-step slot can only offer the measurement while its checklist
+        # row is the first blocking one: once the comparison is done, or a row
+        # above it is not, nothing on the bench could run it again.  It is read
+        # here, so the control that reruns it is here — beside the curves it
+        # redraws, and not on the readings strip, which stays button-free.
+        self.recompute_sphere_button = QtWidgets.QPushButton("Recompute")
+        self.recompute_sphere_button.setEnabled(False)
+        self._explainable(
+            self.recompute_sphere_button,
+            "Measuring the sensitivity again",
+            "Recomputes this campaign's absolute factors from the sphere pair "
+            "currently assigned and compares them with the previous campaign's "
+            "again. Use it after correcting which files carry the sphere roles, "
+            "or to repeat a comparison that has already been made — the "
+            "procedure's own next step offers this only while it is the step "
+            "you are on.",
+        )
+        header.addWidget(self.recompute_sphere_button)
+        layout.addLayout(header)
         self.sphere_plot = pg.PlotWidget(title="Absolute calibration factors")
         self.sphere_plot.setBackground("#10151b")
         self.sphere_plot.setLabel("bottom", "wavelength", units="nm")
@@ -2182,6 +2211,7 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         self.next_step_button.clicked.connect(self._run_next_action)
         self.generate_tomls_button.clicked.connect(lambda: self._generate_tomls())
         self.regenerate_tomls_button.clicked.connect(self._regenerate_tomls)
+        self.recompute_sphere_button.clicked.connect(self._start_sphere_comparison)
         self.save_snapshot_button.clicked.connect(self._save_snapshot)
         self.snapshot_id_edit.textChanged.connect(self.refresh_campaign)
         # Picking the work on the left brings its own view with it: one lamp
@@ -2716,6 +2746,14 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         self.refresh_campaign()
         thread.start()
 
+    def _sphere_pair_assigned(self) -> bool:
+        """Whether both halves of the sphere pair carry their role."""
+
+        if self.campaign is None:
+            return False
+        roles = {record.role for record in self.campaign.measurements.values()}
+        return {MeasurementRole.SPHERE, MeasurementRole.SPHERE_BACKGROUND} <= roles
+
     def _start_sphere_comparison(self) -> None:
         if self.campaign is None:
             return
@@ -2754,10 +2792,11 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
     def _generate_tomls(self, *, overwrite: bool = False) -> None:
         if self.campaign is None:
             return
+        snapshot_id = self.snapshot_id_edit.text().strip()
         try:
             paths = self.campaign.write_tomls(
                 self.config_root,
-                self.snapshot_id_edit.text().strip(),
+                snapshot_id,
                 self.session,
                 overwrite=overwrite,
             )
@@ -2765,8 +2804,13 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
             self.message_value.setText(f"Alignment settings were not saved: {exc}")
             # An existing bundle is a choice to offer, not a dead end: the
             # button that can get past it appears beside the one that refused.
-            self.regenerate_tomls_button.setVisible("already exists" in str(exc))
+            # The offer is recorded against the identity that was refused, so
+            # editing the id above cannot carry it to a different bundle.
+            refused = "already exists" in str(exc)
+            self._refused_identity = snapshot_id if refused else ""
+            self.regenerate_tomls_button.setVisible(refused)
         else:
+            self._refused_identity = ""
             self.regenerate_tomls_button.setVisible(False)
             self.message_value.setText(
                 "Saved the alignment settings, the campaign, and the export "
@@ -2783,6 +2827,18 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
     def _regenerate_tomls(self) -> None:
         """Rewrite settings files that already exist, on a deliberate press."""
 
+        if self._campaign_thread is not None:
+            return
+        if self._refused_identity != self.snapshot_id_edit.text().strip():
+            # Overwriting is permission for one identity, never for whatever the
+            # id field says at the moment of the press.
+            self._refused_identity = ""
+            self.regenerate_tomls_button.setVisible(False)
+            self.message_value.setText(
+                "The snapshot identity changed since the bench refused to "
+                "overwrite; press Save alignment settings again for this one."
+            )
+            return
         self._generate_tomls(overwrite=True)
 
     def _save_snapshot(self) -> None:
@@ -3027,7 +3083,7 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         headline, it is shouting.
         """
 
-        if verdict.label.startswith("background"):
+        if verdict.is_background:
             # A correct background says one word and stops. It was reading
             # "BACKGROUND · dark as it should be" in warning amber, which is a
             # bench explaining darkness to the person who shot it (owner: "I
@@ -3054,15 +3110,9 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         measurement = self.campaign.measurements.get(path)
         role = measurement.role if measurement is not None else None
         verdict = triage_for_role(triage, role, self.campaign.partner_peak(path, role))
-        color = _TRIAGE_COLORS[triage.state]
+        color = self._verdict_colour(verdict, triage)
         headline = triage.headline
-        if verdict.label.startswith("background"):
-            # Colour follows the ROLE's verdict, not the raw state: a dark
-            # background is DIM and DIM is amber, so a frame doing exactly its
-            # job was being painted in the colour that means attend to me.
-            color = _TRIAGE_COLORS[
-                ExposureState.SATURATED if verdict.blocking else ExposureState.GOOD
-            ]
+        if verdict.is_background:
             headline = verdict.headline or verdict.label
         elif triage.state is ExposureState.SATURATED and not verdict.blocking:
             # The bright/dim pair exists so the dim series saturates its strong
@@ -3091,7 +3141,7 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         # the action, and the role-blind guidance only speaks when the role has
         # nothing to add (owner, on a lamp background reading "increase toward
         # 19.98 s": "Background is dim. Wow, genius").
-        if verdict.label.startswith("background"):
+        if verdict.is_background:
             # A background that is dark needs no next action, so it gets no
             # panel — not a panel saying there is nothing to do. The role-blind
             # guidance must never be reached here: it would say "increase
@@ -3280,6 +3330,21 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         self._refresh_file_buttons()
         self.drop_hint.setVisible(not self._file_rows)
         self.generate_tomls_button.setEnabled(enabled and not busy)
+        # These run their handlers on the GUI thread, on the very campaign and
+        # session a running task is reading.  They belong in the same gate as
+        # the buttons beside them.
+        self.next_step_button.setEnabled(not busy)
+        self.regenerate_tomls_button.setEnabled(enabled and not busy)
+        self.recompute_sphere_button.setEnabled(
+            enabled and not busy and self._sphere_pair_assigned()
+        )
+        # An offer to overwrite belongs to the identity that was refused.  The
+        # id field is edited between the refusal and the press, and this runs on
+        # every keystroke in it, so a different identity withdraws the offer
+        # rather than inheriting it.
+        if self._refused_identity != self.snapshot_id_edit.text().strip():
+            self._refused_identity = ""
+            self.regenerate_tomls_button.setVisible(False)
         if not enabled:
             self.checklist_tree.clear()
             self.confirm_roles_button.setEnabled(False)
@@ -3327,9 +3392,13 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         A background is DIM by construction and DIM is amber, so every correct
         dark frame was painted in the colour that means attend to me.  A
         background earns green for being dark and red only for not being.
+
+        This is the one place that rule is written; the triage panel and the
+        files table both read it here, and it is keyed on the role the verdict
+        carries so that rewording a badge can never repaint a frame.
         """
 
-        if verdict is not None and verdict.label.startswith("background"):
+        if verdict is not None and verdict.is_background:
             return _TRIAGE_COLORS[
                 ExposureState.SATURATED if verdict.blocking else ExposureState.GOOD
             ]
@@ -3347,7 +3416,7 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
             # that counts them. A row says what it is; the colour says whether
             # anybody has confirmed it.
             return [_SUGGESTED_BADGE.lower() if is_suggested else "no role yet"]
-        if verdict is not None and verdict.label.startswith("background"):
+        if verdict is not None and verdict.is_background:
             # The verdict already said "background"; the role would say it a
             # second time, which is the duplication this table just lost.
             return [measurement.lamp_family] if measurement.lamp_family else []
@@ -3481,7 +3550,8 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
             ChecklistState.SUGGESTION: QtGui.QColor("#8fd9ff"),
         }
         width = self._checklist_row_width()
-        for item in self.campaign.checklist(self.session):
+        checklist = self.campaign.checklist(self.session)
+        for item in checklist:
             row = QtWidgets.QListWidgetItem()
             explanation = item.detail
             if item.unblocked_by:
@@ -3506,7 +3576,7 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
             self.checklist_tree.addItem(row)
             self.checklist_tree.setItemWidget(row, label)
             self._fit_checklist_row(row, label, width)
-        self._refresh_next_step()
+        self._refresh_next_step(checklist)
 
     def _next_action_for(self, step) -> tuple[str, object] | None:
         """The verb that performs one checklist step, and what performs it.
@@ -3517,12 +3587,17 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         """
 
         key = step.key
-        if key in {"files", "references"}:
+        if key == "references":
+            # The pattern, wavelength and integral tables are named when the
+            # bench is opened; no file the SIF picker can add would satisfy
+            # this row, so the row explains itself and offers no button.
+            return None
+        if key == "files":
             return ("Add SIF files…", self._pick_files)
-        if self.campaign is not None and self.campaign.unconfirmed_suggestions():
+        pending = () if self.campaign is None else self.campaign.unconfirmed_suggestions()
+        if pending:
             # Whatever the row is, nothing can be assigned until the roles are.
-            pending = len(self.campaign.unconfirmed_suggestions())
-            return (f"Confirm {pending} role(s)", self._confirm_suggested_roles)
+            return (f"Confirm {len(pending)} role(s)", self._confirm_suggested_roles)
         if key == "sphere-comparison":
             return ("Measure sensitivity", self._start_sphere_comparison)
         if key == "alignment":
@@ -3547,23 +3622,29 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         self.next_step_button.setVisible(True)
 
     def _run_next_action(self) -> None:
-        handler = getattr(self, "_next_action", None)
-        if handler is not None:
-            handler()
+        # The same gate the button's enabled state carries: a running campaign
+        # task reads the campaign and the session this handler would mutate.
+        if self._campaign_thread is not None:
+            return
+        if self._next_action is not None:
+            self._next_action()
 
-    def _refresh_next_step(self) -> None:
+    def _refresh_next_step(self, checklist) -> None:
         """The one line the checklist is usually consulted for.
 
         Not a copy of the procedure — the first row that is blocking and not
         yet done, with whatever the checklist says would unblock it.  That is
-        the question an operator crosses the room to ask.
+        the question an operator crosses the room to ask.  The rows come from
+        the caller, which has just built them: deriving the checklist is
+        O(files x measurements) and this runs on every keystroke in the
+        snapshot-id field.
         """
 
         if self.campaign is None:
             return
         pending = [
             item
-            for item in self.campaign.checklist(self.session)
+            for item in checklist
             if item.blocking and item.state is not ChecklistState.DONE
         ]
         if not pending:

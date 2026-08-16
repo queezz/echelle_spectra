@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import shutil
 from datetime import date
 from pathlib import Path
@@ -10,6 +11,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from echelle_spectra import calibration_campaign as campaign_module
 from echelle_spectra.calibration_bench import (
     BenchFrame,
     CalibrationBenchSession,
@@ -353,7 +355,9 @@ def test_every_unfinished_step_names_what_unblocks_it(tmp_path):
         sources["sphere-0.1s-x3-bg.sif"], MeasurementRole.SPHERE_BACKGROUND
     )
     after = {item.key: item for item in campaign.checklist(alignment)}
-    assert "Compute factors" in after["sphere-comparison"].unblocked_by
+    # The advice names the control the bench actually carries: the Compute
+    # factors button is gone, and the strip's verb for this step is this one.
+    assert "Measure sensitivity" in after["sphere-comparison"].unblocked_by
 
 
 @pytest.mark.parametrize("lamp", ["Kr", "Xe-2", "ne", "TH-AR"])
@@ -1273,12 +1277,97 @@ def test_existing_settings_can_be_deliberately_rewritten(tmp_path):
     assert [path.name for path in configs.iterdir()] == ["20250813_cmos"]
 
 
-def _peaked_frame(tmp_path, name, peak):
-    """A frame whose brightest raw pixel is *peak* counts."""
+def _overwrite_ready(tmp_path: Path):
+    """A campaign with one published bundle, ready to be rewritten."""
+
+    sources = _curated_sources(tmp_path)
+    alignment = _aligned_session(tmp_path)
+    campaign = _campaign(tmp_path, sources)
+    _classify_complete(campaign, sources, alignment.frame)
+    campaign.compute_sphere_comparison(_calculator)
+    configs = tmp_path / "configs"
+    published = campaign.write_tomls(configs, "20250813_cmos", alignment)
+    return campaign, alignment, configs, published
+
+
+def test_an_undoable_failed_overwrite_puts_the_old_bundle_back(tmp_path, monkeypatch):
+    campaign, alignment, configs, published = _overwrite_ready(tmp_path)
+    original = published["campaign"].read_text(encoding="utf-8")
+    real_replace = os.replace
+    moves = []
+
+    def fail_the_publish(source, destination):
+        # The first move parks the old bundle; the second publishes the new one.
+        moves.append(destination)
+        if len(moves) == 2:
+            raise OSError("publish denied")
+        return real_replace(source, destination)
+
+    monkeypatch.setattr(campaign_module.os, "replace", fail_the_publish)
+
+    with pytest.raises(OSError, match="publish denied"):
+        campaign.write_tomls(configs, "20250813_cmos", alignment, overwrite=True)
+    monkeypatch.undo()
+
+    assert campaign.toml_state is TomlState.FAILED
+    assert published["campaign"].read_text(encoding="utf-8") == original
+    # Both the staging tree and the empty parking directory are gone.
+    assert [path.name for path in configs.iterdir()] == ["20250813_cmos"]
+
+
+def test_a_failed_overwrite_never_deletes_the_bundle_it_moved_aside(
+    tmp_path, monkeypatch
+):
+    """The moved-aside bundle is the only copy of the old files.
+
+    Parked inside the staging tree, it was deleted by the very cleanup that
+    runs when publishing fails — so the one path that promised the old files
+    survived was the path that removed them.
+    """
+
+    campaign, alignment, configs, published = _overwrite_ready(tmp_path)
+    original = published["campaign"].read_text(encoding="utf-8")
+    destination = published["campaign"].parent
+    real_replace = os.replace
+
+    def refuse_the_destination(source, destination_path):
+        # Publishing fails, and putting the old bundle back fails with it.
+        if Path(destination_path) == destination:
+            raise OSError("destination is locked")
+        return real_replace(source, destination_path)
+
+    monkeypatch.setattr(campaign_module.os, "replace", refuse_the_destination)
+
+    with pytest.raises(SnapshotError) as failure:
+        campaign.write_tomls(configs, "20250813_cmos", alignment, overwrite=True)
+    monkeypatch.undo()
+
+    assert campaign.toml_state is TomlState.FAILED
+    rescued = Path(str(failure.value).rsplit("kept at ", 1)[1].strip())
+    assert rescued.is_absolute()
+    assert rescued.is_dir()
+    assert (rescued / "campaign.toml").read_text(encoding="utf-8") == original
+    # And nothing on any path deleted them: every generated file of the old
+    # bundle is still readable somewhere under the configuration root.
+    survivors = {
+        path.name
+        for path in configs.rglob("*.toml")
+        if path.parent.name == "20250813_cmos"
+    }
+    assert survivors == {"campaign.toml", "alignment.toml", "export.toml"}
+
+
+def _peaked_frame(tmp_path, name, peak, *, width: int = 1):
+    """A frame whose brightest raw pixel is *peak* counts.
+
+    ``width`` widens that peak into a connected cluster, which is what a
+    deliberately saturated frame carries: a lone full-scale pixel is read as a
+    cosmic ray and never becomes the frame's peak.
+    """
 
     columns = 60
     images = np.zeros((1, 20, columns), dtype=float)
-    images[0, 10, 30] = float(peak)
+    images[0, 10, 30 : 30 + width] = float(peak)
     spectra = (np.full(columns, float(peak) / 10.0),)
     return BenchFrame(tmp_path / name, images, images[0], spectra, {"ExposureTime": 0.1})
 
@@ -1370,6 +1459,46 @@ class TestABackgroundIsJudgedAsABackground:
         verdict = campaign.role_triage(dark.path)
         assert verdict.label == "background"
         assert not verdict.blocking
+
+    def test_a_background_is_judged_against_the_faintest_frame_it_serves(
+        self, tmp_path
+    ):
+        """A lamp family is shot bright and dim; the same background serves both.
+
+        Judged against the bright frame — deliberately at full scale — the leak
+        threshold sits an order of magnitude above the dim series, and a
+        background carrying most of the dim signal it is subtracted from passes
+        as dark.
+        """
+
+        campaign, _sources = self._campaign(tmp_path)
+        frames = {
+            "bright": _peaked_frame(tmp_path, "Ne-bright.sif", 65535, width=4),
+            "dim": _peaked_frame(tmp_path, "Ne-dim.sif", 3000),
+            "background": _peaked_frame(tmp_path, "Ne-bg.sif", 2500),
+        }
+        roles = {
+            "bright": MeasurementRole.LAMP,
+            "dim": MeasurementRole.LAMP,
+            "background": MeasurementRole.LAMP_BACKGROUND,
+        }
+        for key, frame in frames.items():
+            frame.path.write_bytes(b"sif\n")
+            campaign.record_frame(frame)
+            # Spelled as the operator would type it; the family is normalized
+            # on the way in and compared normalized on the way out.
+            campaign.classify_file(
+                frame.path, roles[key], lamp_family="ne", frame=frame
+            )
+
+        background = frames["background"].path
+        assert campaign.partner_peak(
+            background, MeasurementRole.LAMP_BACKGROUND
+        ) == pytest.approx(3000.0)
+        verdict = campaign.role_triage(background)
+        assert verdict.blocking
+        assert verdict.is_background
+        assert "83% of its lamp signal" in verdict.headline
 
     def test_without_a_partner_a_background_is_still_read_as_one(self, tmp_path):
         triage = triage_exposure(_peaked_frame(tmp_path, "bg.sif", 200))

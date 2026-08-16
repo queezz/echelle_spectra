@@ -325,6 +325,18 @@ class RoleTriageVerdict:
 
         return not self.blocking
 
+    @property
+    def is_background(self) -> bool:
+        """Whether this verdict is reading a frame shot with the light off.
+
+        The surface asks this, not the label: a label is a badge to reword and
+        the routing behind colour, marks and advice must not move when it is.
+        A frame with no data at all never reached the background reading, so it
+        is not one of these however it was classified.
+        """
+
+        return self.role in BACKGROUND_ROLES and self.state is not ExposureState.NO_DATA
+
 
 @dataclass(frozen=True)
 class MeasurementRecord:
@@ -1484,11 +1496,17 @@ class CalibrationCampaignSession:
     def partner_peak(
         self, path: str | Path, role: MeasurementRole | None
     ) -> float | None:
-        """The peak of the signal frame a background will be subtracted from.
+        """The peak of the faintest signal frame a background will be subtracted from.
 
         A lamp background belongs to its own lamp's signal; a sphere background
         to the sphere.  Absent a partner there is nothing to compare against,
         and the background is simply read as a background.
+
+        The faintest partner, not the brightest: a lamp family is shot as a
+        bright/dim pair, and the bright frame is deliberately at full scale.
+        Judged against that, the leak threshold sits an order of magnitude
+        above the dim series the same background is subtracted from, and a
+        background carrying most of that dim signal passes as dark.
         """
 
         partner_role = BACKGROUND_PARTNERS.get(role)
@@ -1497,15 +1515,11 @@ class CalibrationCampaignSession:
         measurement = self.measurements.get(Path(path))
         lamp = measurement.lamp_family if measurement is not None else ""
         peaks = []
-        for source, other in self.measurements.items():
-            if other.role is not partner_role:
-                continue
-            if partner_role is MeasurementRole.LAMP and other.lamp_family != lamp:
-                continue
-            record = self.loaded.get(source)
+        for other in self._records(partner_role, lamp):
+            record = self.loaded.get(other.path)
             if record is not None and record.triage.peak_counts is not None:
                 peaks.append(float(record.triage.peak_counts))
-        return max(peaks) if peaks else None
+        return min(peaks) if peaks else None
 
     def unconfirmed_suggestions(self) -> tuple[tuple[Path, MeasurementRole], ...]:
         """Files whose filename proposes one role that nobody has confirmed.
@@ -1892,6 +1906,13 @@ class CalibrationCampaignSession:
                 "Pattern, wavelength, and sphere reference",
                 ChecklistState.DONE if references_ready else ChecklistState.ATTENTION,
                 "loaded" if references_ready else "one or more reference files are missing",
+                unblocked_by=""
+                if references_ready
+                else (
+                    "these three tables are named when the bench is opened, not "
+                    "picked from the files list: reopen the bench pointing at "
+                    "tables that exist"
+                ),
             ),
             ChecklistItem(
                 "files",
@@ -1965,7 +1986,7 @@ class CalibrationCampaignSession:
                 unblocked_by=""
                 if comparison_done
                 else (
-                    "press Compute factors — the sphere pair is enough"
+                    "press Measure sensitivity — the sphere pair is enough"
                     if pair_ready
                     else "assign the sphere signal and its background; no lamp is needed"
                 ),
@@ -2104,7 +2125,7 @@ class CalibrationCampaignSession:
                 else "generate once the sphere pair, one lamp pair, and the fit are in",
                 unblocked_by=""
                 if self.toml_state is TomlState.GENERATED
-                else "complete the rows above, then press Generate commented TOMLs",
+                else "complete the rows above, then press Save alignment settings",
             ),
             ChecklistItem(
                 "snapshot",
@@ -2119,7 +2140,7 @@ class CalibrationCampaignSession:
                 self._saved_snapshot_detail(),
                 unblocked_by=""
                 if self.save_state is SaveState.VALIDATED
-                else "generate the TOMLs for this snapshot identity, then save",
+                else "press Save alignment settings for this snapshot identity, then save and validate",
             ),
         )
 
@@ -2322,6 +2343,8 @@ class CalibrationCampaignSession:
             self.toml_state = TomlState.FAILED
             self.last_error = f"configuration identity already exists: {destination}"
             raise SnapshotError(self.last_error)
+        superseded_parent = None
+        rescued = None
         try:
             texts = self.compose_tomls(snapshot_id, alignment)
             staging_parent = Path(
@@ -2338,21 +2361,42 @@ class CalibrationCampaignSession:
                 paths[name] = path
             if destination.exists():
                 # Every file is written and parsed by now, so the old bundle is
-                # only moved aside once the new one is known to be good.
-                superseded = staging_parent / f"{snapshot_id}.superseded"
+                # only moved aside once the new one is known to be good — and it
+                # is parked in its own directory beside the destination, never
+                # inside the staging tree, because the cleanup that follows a
+                # failed publish deletes that tree and the parked bundle is at
+                # that moment the only copy of the old files.
+                superseded_parent = Path(
+                    tempfile.mkdtemp(
+                        prefix=f".{snapshot_id}.superseded-", dir=destination_parent
+                    )
+                )
+                superseded = superseded_parent / snapshot_id
                 os.replace(destination, superseded)
                 try:
                     os.replace(staging, destination)
                 except Exception:
+                    rescued = superseded.resolve()
                     os.replace(superseded, destination)
+                    rescued = None
                     raise
             else:
                 os.replace(staging, destination)
             shutil.rmtree(staging_parent, ignore_errors=True)
+            self._discard_parking(superseded_parent)
         except Exception as exc:
             if "staging_parent" in locals():
                 shutil.rmtree(staging_parent, ignore_errors=True)
             self.toml_state = TomlState.FAILED
+            if rescued is not None:
+                # The old bundle could not be put back, so it stays parked and
+                # nothing here may delete it; the operator is told where it is.
+                self.last_error = (
+                    f"{destination} could not be written and its previous files "
+                    f"could not be put back: {exc}. The old bundle is kept at {rescued}"
+                )
+                raise SnapshotError(self.last_error) from exc
+            self._discard_parking(superseded_parent)
             self.last_error = str(exc)
             raise
         self.toml_paths = {
@@ -2363,6 +2407,13 @@ class CalibrationCampaignSession:
         self.last_error = ""
         self._update_save_state(alignment)
         return dict(self.toml_paths)
+
+    @staticmethod
+    def _discard_parking(parent: Path | None) -> None:
+        """Remove a superseded-bundle parking directory that is no longer needed."""
+
+        if parent is not None:
+            shutil.rmtree(parent, ignore_errors=True)
 
     def _update_save_state(self, alignment: CalibrationBenchSession | None) -> None:
         if self.save_state is SaveState.VALIDATED:
