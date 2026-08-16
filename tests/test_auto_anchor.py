@@ -387,7 +387,7 @@ class TestTheBenchOffersThePassAndSaysWhatItDid:
 
         # Six is what the pass will MEASURE, which is all it can honestly
         # promise: whether a line fits is not knowable until it is fitted.
-        assert "6 vetted Ne line(s)" in caption
+        assert "6 Ne line(s)" in caption
         assert "4 order(s)" in caption
         window.close()
 

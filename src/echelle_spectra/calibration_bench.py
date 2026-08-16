@@ -25,6 +25,7 @@ from .tools.calibration_alignment import (
     DetectorWindowSaturation,
     LineCentroidFit,
     RigidTransform,
+    TableVetting,
     detector_points_from_lines,
     fit_rigid_transform,
     fit_single_gaussian_centroid,
@@ -364,6 +365,7 @@ class CalibrationBenchSession:
         click_match_radius_px: float = 30.0,
         min_line_width_px: float = 4.0,
         max_line_width_px: float = 40.0,
+        vetting: TableVetting | None = None,
     ) -> None:
         pattern_array = np.asarray(pattern, dtype=float)
         if pattern_array.ndim != 2 or not pattern_array.size:
@@ -381,6 +383,9 @@ class CalibrationBenchSession:
         #: ``echelle-align``'s own gates so both paths trust the same rows.
         self.min_line_width_px = float(min_line_width_px)
         self.max_line_width_px = float(max_line_width_px)
+        #: Whose vetting the loaded table's ``OK`` marks carry.  ``None`` means
+        #: nobody asked the table, which is not the same as it having none.
+        self.vetting: TableVetting | None = vetting
         self.file_state = FileLoadState.WAITING
         self.alignment_state = AlignmentState.WAITING_FOR_FRAME
         self.loading_path: Path | None = None

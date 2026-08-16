@@ -1147,3 +1147,57 @@ def test_an_unreferenceable_lamp_lists_nothing_and_says_why():
         {row.order_idx for row in neon.lines},
         key=lambda order: len([r for r in neon.lines if r.order_idx == order]),
     )
+
+
+def test_the_snapshot_records_which_vetted_line_set_anchored_it(tmp_path):
+    """F19 rider: RMS says how self-consistent a fit was, never whose it is.
+
+    A later reader deciding whether to believe a snapshot needs to know which
+    lines were trusted and on whose authority, so the manifest carries the
+    vetted set by name — and carries its absence by name too, rather than
+    leaving a blank that reads like an oversight.
+    """
+
+    sources = _curated_sources(tmp_path)
+    alignment = _aligned_session(tmp_path)
+    _campaign_obj, snapshot = _saved_snapshot(tmp_path, sources, alignment)
+
+    manifest = tomllib.loads(
+        (snapshot.root / "snapshot.toml").read_text(encoding="utf-8")
+    )
+
+    # The fixture table is nobody's vetted set, and says so plainly.
+    assert manifest["alignment"]["vetted_set"] == ""
+    assert manifest["alignment"]["vetted_lineage"] == ["wavelength.txt"]
+
+
+def test_a_snapshot_anchored_on_the_bh_paper_set_names_it(tmp_path):
+    """The same manifest field, when the lineage really does reach the paper.
+
+    The lineage is a table's own header rather than its filename, so the
+    fixture declares the base it was derived from exactly as a real aligned
+    table does, and inherits the vetting the same way.
+    """
+
+    sources = _curated_sources(tmp_path)
+    sources["wavelength.txt"].write_text(
+        "# Adjusted wavelength calibration lookup table\n"
+        "# Base wavelength file: Th_wavelength_CMOS_20240305.txt\n"
+        + _CURATED_TABLE,
+        encoding="utf-8",
+    )
+    alignment = _aligned_session(tmp_path)
+    _campaign_obj, snapshot = _saved_snapshot(tmp_path, sources, alignment)
+
+    manifest = tomllib.loads(
+        (snapshot.root / "snapshot.toml").read_text(encoding="utf-8")
+    )
+
+    assert manifest["alignment"]["vetted_set"] == "BH paper"
+    assert manifest["alignment"]["vetted_set_source"] == (
+        "Th_wavelength_CMOS_20240305.txt"
+    )
+    assert manifest["alignment"]["vetted_lineage"] == [
+        "wavelength.txt",
+        "Th_wavelength_CMOS_20240305.txt",
+    ]

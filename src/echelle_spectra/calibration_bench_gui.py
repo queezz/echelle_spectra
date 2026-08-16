@@ -42,7 +42,7 @@ from .calibration_campaign import (
     triage_for_role,
 )
 from .snapshot import SnapshotError
-from .tools.calibration_alignment import load_wavelength_table
+from .tools.calibration_alignment import load_wavelength_table, table_vetting
 
 _PACKAGE_DIR = Path(__file__).parent
 _CALIBRATION_DIR = _PACKAGE_DIR / "resources" / "calibration_files"
@@ -2743,10 +2743,18 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
             return
 
         placed = len(result.accepted)
+        vetting = self.session.vetting
+        against = ""
+        if vetting is not None:
+            against = (
+                f" against the {vetting.vetted_set} vetted set"
+                if vetting.is_vetted
+                else " against OK marks carrying no recorded vetting"
+            )
         sentences = [
             f"Auto-anchor measured {result.considered} trusted "
-            f"{self._reference_label()} line(s) across all orders and anchored "
-            f"{placed}."
+            f"{self._reference_label()} line(s) across all orders{against} and "
+            f"anchored {placed}."
         ]
         if self.session.rms_px is not None:
             sentences.append(f"The solved alignment reads RMS {self.session.rms_px:.3f} px.")
@@ -3308,10 +3316,21 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
             )
             return
         orders = len({line.order_idx for line in rows})
-        self.auto_anchor_value.setText(
-            f"{len(rows)} vetted {self._reference_label()} line(s) across "
+        ready = (
+            f"{len(rows)} {self._reference_label()} line(s) across "
             f"{orders} order(s) are ready to be measured in one pass"
         )
+        # Whose vetting these OK marks carry is the whole reason to trust the
+        # pass, so its absence is stated exactly as loudly as its presence.
+        vetting = self.session.vetting
+        if vetting is None:
+            self.auto_anchor_value.setText(ready)
+        elif vetting.is_vetted:
+            self.auto_anchor_value.setText(
+                f"{ready}, carrying the {vetting.vetted_set} vetting"
+            )
+        else:
+            self.auto_anchor_value.setText(f"{ready}, but {vetting.message}")
 
     def refresh_plots(self) -> None:
         frame = self.session.frame
@@ -3689,6 +3708,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         lines,
         saturation_level=args.saturation_level,
         minimum_snr=args.minimum_snr,
+        # Read from the table itself, so an adjusted table inherits the vetting
+        # of the curated one it was derived from and a stranger inherits none.
+        vetting=table_vetting(args.wavelength, [_CALIBRATION_DIR]),
     )
     campaign = CalibrationCampaignSession(
         pattern_source=args.pattern,

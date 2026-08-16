@@ -42,6 +42,7 @@ from .tools.calibration_alignment import (
     apply_rigid_correction_to_lines,
     load_wavelength_table,
     save_alignment_settings,
+    table_vetting,
     write_wavelength_table,
 )
 from .tools.line_catalog import LINE_FAMILY_LABELS, SpectralLine, load_line_table
@@ -2297,6 +2298,22 @@ class CalibrationCampaignSession:
             ("Note", settings.notes),
         ]
 
+    def _vetting_record(self) -> dict[str, object]:
+        """Which vetted line set anchored this snapshot, read from its table.
+
+        A snapshot that records only its RMS says how self-consistent the fit
+        was.  Which lines were trusted, and on whose authority, is what lets a
+        later reader decide whether to believe it — so the manifest carries the
+        vetted set by name, and carries its absence by name too.
+        """
+
+        vetting = table_vetting(self.wavelength_source)
+        return {
+            "vetted_set": vetting.vetted_set,
+            "vetted_set_source": vetting.vetted_table,
+            "vetted_lineage": list(vetting.lineage),
+        }
+
     def save_snapshot(
         self,
         destination_root: str | Path,
@@ -2374,6 +2391,7 @@ class CalibrationCampaignSession:
                     "rms_px": alignment.rms_px,
                     "wavelength_correction_applied": correction.applied,
                     "wavelength_max_shift_px": correction.max_shift_px,
+                    **self._vetting_record(),
                 },
                 qc={
                     "lines_used": len(alignment.anchors),

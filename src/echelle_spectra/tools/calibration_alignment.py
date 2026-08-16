@@ -34,7 +34,11 @@ __all__ = [
     "AlignmentSettings",
     "AlignmentRunConfig",
     "AlignmentRunResult",
+    "TableVetting",
+    "BH_PAPER_WAVELENGTH_TABLE",
     "load_wavelength_table",
+    "read_table_metadata",
+    "table_vetting",
     "select_candidate_lines",
     "measure_line_window_stats",
     "measure_detector_window_saturation",
@@ -262,6 +266,128 @@ def load_wavelength_table(path: str | Path) -> List[CalibrationTableLine]:
                 )
             )
     return rows
+
+
+#: The curated table whose ``OK`` marks carry the BH paper's own vetting.
+#: That alignment was tried and tested for the paper's Balmer and Fulcher
+#: analysis, and it is the pedigree that makes "trusted" mean something: an
+#: ``OK`` beside a row is worth what the work behind it was worth, never
+#: merely what typing those two letters costs.
+BH_PAPER_WAVELENGTH_TABLE = "Th_wavelength_CMOS_20240305.txt"
+
+#: Vetted lineages this package can vouch for, by the table that established
+#: them.  A table outside this map is not accused of anything — it simply
+#: carries no vetting anybody here recorded, and says so rather than
+#: borrowing another table's authority.
+_VETTED_SETS: dict[str, Tuple[str, str]] = {
+    BH_PAPER_WAVELENGTH_TABLE: (
+        "BH paper",
+        "vetted during the BH-paper calibration and tried against that "
+        "paper's own Balmer and Fulcher analysis",
+    ),
+}
+
+#: How far a lineage is followed before the chain is called a cycle.
+_MAX_LINEAGE_DEPTH = 8
+
+
+@dataclass(frozen=True)
+class TableVetting:
+    """What one wavelength table's ``OK`` marks are worth, and on whose word.
+
+    An aligned table records the table it was derived from in its own header,
+    so a lineage can be walked from the file itself rather than assumed from
+    its name.  ``vetted_set`` is empty when nothing in that lineage is a set
+    this package can vouch for.
+    """
+
+    table: str
+    vetted_set: str
+    lineage: Tuple[str, ...]
+    description: str
+    vetted_table: str = ""
+
+    @property
+    def is_vetted(self) -> bool:
+        """Whether these ``OK`` marks carry a vetting anybody recorded."""
+
+        return bool(self.vetted_set)
+
+    @property
+    def message(self) -> str:
+        """One sentence an operator can act on, either way."""
+
+        if not self.is_vetted:
+            return (
+                f"the OK marks in {self.table} carry no recorded vetting — they "
+                "are this table's own, not the BH paper's"
+            )
+        through = (
+            f", inherited from {self.vetted_table}"
+            if self.vetted_table and self.vetted_table != self.table
+            else ""
+        )
+        return (
+            f"the OK marks in {self.table} carry the {self.vetted_set} vetting"
+            f"{through}: {self.description}"
+        )
+
+
+def read_table_metadata(path: str | Path) -> dict[str, str]:
+    """Return the ``# Key: value`` header a wavelength table opens with.
+
+    Only the leading comment block is read.  Curated tables also carry
+    commented-out data rows further down, and those are rows rather than
+    metadata however much they look alike.
+    """
+
+    metadata: dict[str, str] = {}
+    with Path(path).open() as fh:
+        for raw in fh:
+            if not raw.lstrip().startswith("#"):
+                break
+            key, sep, value = raw.lstrip().lstrip("#").strip().partition(":")
+            if sep:
+                metadata.setdefault(key.strip().casefold(), value.strip())
+    return metadata
+
+
+def table_vetting(
+    path: str | Path, search_dirs: Optional[Sequence[str | Path]] = None
+) -> TableVetting:
+    """Report which vetted set, if any, a wavelength table's OK marks carry.
+
+    The lineage is read from the tables themselves: an adjusted table names
+    its base in its header, so ``..._aligned_to_20250926.txt`` leads back to
+    the 20240305 curated table and inherits its vetting honestly.  A chain
+    that cannot be followed to a known set is reported as unvetted rather
+    than guessed at.
+    """
+
+    path = Path(path)
+    lineage = [path.name]
+    seen = {path.name}
+    current = path
+    for _ in range(_MAX_LINEAGE_DEPTH):
+        try:
+            metadata = read_table_metadata(current)
+        except OSError:
+            break
+        base = metadata.get("base wavelength file")
+        if not base or base in seen:
+            break
+        lineage.append(base)
+        seen.add(base)
+        roots = [current.parent, current.parent.parent, *(search_dirs or ())]
+        nxt = next((Path(root) / base for root in roots if (Path(root) / base).is_file()), None)
+        if nxt is None:
+            break
+        current = nxt
+    for name in lineage:
+        if name in _VETTED_SETS:
+            label, description = _VETTED_SETS[name]
+            return TableVetting(path.name, label, tuple(lineage), description, name)
+    return TableVetting(path.name, "", tuple(lineage), "")
 
 
 def select_candidate_lines(
