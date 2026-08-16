@@ -2765,6 +2765,14 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         kept = len(before - {anchor.key for anchor in result.accepted})
         if kept:
             sentences.append(f"Your {kept} hand-placed anchor(s) were kept.")
+        # RMS is the anchors agreeing with each other; this is the solution
+        # agreeing with physics, and it is the one the BH paper was held to.
+        validation = self.session.validate_science_lines()
+        sentences.append(
+            f"Science-line agreement: {validation.message}."
+            if validation.measured
+            else f"Not yet validated against science lines — {validation.message}."
+        )
         sentences.append(
             "Review the anchor table and right-click any line on the spectrum "
             "to drop it."

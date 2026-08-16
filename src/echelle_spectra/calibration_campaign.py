@@ -1944,12 +1944,28 @@ class CalibrationCampaignSession:
             next_step = "load a lamp frame and click two known lines in different orders"
         else:
             next_step = "assign a lamp role to any loaded file, then click two lines"
+        if not done:
+            return ChecklistItem(
+                "alignment",
+                "Lamp alignment solved and reviewed",
+                ChecklistState.WAITING,
+                detail,
+                unblocked_by=next_step,
+            )
+        # A solved fit is not a validated one.  RMS says the anchors agree with
+        # each other in pixels; the BH paper's standard was agreement with
+        # Fulcher-alpha in nanometres, so the row states which of the two it
+        # has (owner, F19 second rider) rather than going green on the easier
+        # number and letting the harder one go unasked.
+        validation = alignment.validate_science_lines()
         return ChecklistItem(
             "alignment",
             "Lamp alignment solved and reviewed",
-            ChecklistState.DONE if done else ChecklistState.WAITING,
-            detail,
-            unblocked_by="" if done else next_step,
+            ChecklistState.DONE,
+            f"{detail}; {validation.message}",
+            unblocked_by=""
+            if validation.measured
+            else "carry this to first plasma data and validate against Fulcher there",
         )
 
     def _output_items(self, alignment: CalibrationBenchSession) -> tuple[ChecklistItem, ...]:
@@ -2314,6 +2330,27 @@ class CalibrationCampaignSession:
             "vetted_lineage": list(vetting.lineage),
         }
 
+    @staticmethod
+    def _validation_record(alignment: CalibrationBenchSession) -> dict[str, object]:
+        """Both numbers, never just the flattering one.
+
+        ``rms_px`` beside it is anchor self-consistency.  This says whether the
+        solution was ever held against the lines physics knows, and when it was
+        not, the manifest says which — so a later reader never mistakes an
+        unvalidated snapshot for a validated one.
+        """
+
+        validation = alignment.validate_science_lines()
+        record: dict[str, object] = {
+            "science_validation": validation.state.value,
+            "science_validation_note": validation.message,
+        }
+        if validation.measured:
+            record["science_lines_validated"] = validation.line_count
+            record["science_residual_rms_nm"] = validation.rms_residual_nm
+            record["science_residual_median_nm"] = validation.median_residual_nm
+        return record
+
     def save_snapshot(
         self,
         destination_root: str | Path,
@@ -2392,6 +2429,7 @@ class CalibrationCampaignSession:
                     "wavelength_correction_applied": correction.applied,
                     "wavelength_max_shift_px": correction.max_shift_px,
                     **self._vetting_record(),
+                    **self._validation_record(alignment),
                 },
                 qc={
                     "lines_used": len(alignment.anchors),

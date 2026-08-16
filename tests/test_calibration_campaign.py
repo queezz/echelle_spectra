@@ -1201,3 +1201,31 @@ def test_a_snapshot_anchored_on_the_bh_paper_set_names_it(tmp_path):
         "wavelength.txt",
         "Th_wavelength_CMOS_20240305.txt",
     ]
+
+
+def test_the_snapshot_records_whether_science_lines_ever_agreed(tmp_path):
+    """F19 second rider: RMS and validation are different questions.
+
+    ``rms_px`` is the anchors agreeing with each other in pixels.  Whether the
+    solution agrees with the lines physics knows is the question the BH paper
+    was actually held to, and a manifest that carries only the first would let
+    an unvalidated snapshot read as a validated one.
+    """
+
+    sources = _curated_sources(tmp_path)
+    alignment = _aligned_session(tmp_path)
+    _campaign_obj, snapshot = _saved_snapshot(tmp_path, sources, alignment)
+
+    manifest = tomllib.loads(
+        (snapshot.root / "snapshot.toml").read_text(encoding="utf-8")
+    )
+    alignment_block = manifest["alignment"]
+
+    # The fixture is a thorium/argon table on a lamp that emits no hydrogen
+    # light, so the honest answer is that the question could not be asked —
+    # recorded as its own state rather than as a missing field.
+    assert alignment_block["science_validation"] == "no-frame"
+    assert "Balmer or Fulcher" in alignment_block["science_validation_note"]
+    assert "science_residual_rms_nm" not in alignment_block
+    # And the self-consistency number is still there beside it, unchanged.
+    assert isinstance(alignment_block["rms_px"], float)

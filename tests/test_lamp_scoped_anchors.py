@@ -279,7 +279,11 @@ class TestTheChecklistNamesItsCatalog:
 
         assert row.state is ChecklistState.DONE
         assert row.detail.startswith("2 anchors vs Ne catalog, RMS ")
-        assert row.detail.endswith(" px")
+        # F19's second rider deliberately supersedes the old "ends with px":
+        # a solved fit now has to say whether it was ever held against the
+        # science lines, and a neon frame honestly says it cannot be.
+        assert "emits no Balmer or Fulcher light" in row.detail
+        assert "validate against Fulcher" in row.unblocked_by
 
     def test_one_anchor_reads_as_one_anchor(self, tmp_path):
         campaign = _campaign(tmp_path)

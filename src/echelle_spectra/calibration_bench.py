@@ -26,6 +26,7 @@ from .tools.calibration_alignment import (
     LineCentroidFit,
     RigidTransform,
     TableVetting,
+    apply_rigid_correction_to_lines,
     detector_points_from_lines,
     fit_rigid_transform,
     fit_single_gaussian_centroid,
@@ -47,6 +48,8 @@ __all__ = [
     "FrameLoader",
     "Residual",
     "SaturationState",
+    "ScienceValidation",
+    "ScienceValidationState",
     "StableFileResult",
     "StableFileState",
     "StableSifWatcher",
@@ -320,6 +323,47 @@ class AnchorFitResult:
     reason: str
     anchor: Anchor | None = None
     saturation_state: SaturationState = SaturationState.UNAVAILABLE
+
+
+class ScienceValidationState(Enum):
+    """Whether the solved alignment has been checked against science lines."""
+
+    #: No transform yet, so there is nothing to validate.
+    NO_ALIGNMENT = "no-alignment"
+    #: Solved, but this bench holds no frame emitting Balmer or Fulcher light.
+    NO_FRAME = "no-frame"
+    #: A hydrogen frame is here, but no target could be fitted in it.
+    NO_LINES = "no-lines"
+    #: Science lines were measured against the solved wavelength solution.
+    MEASURED = "measured"
+
+
+@dataclass(frozen=True)
+class ScienceValidation:
+    """Agreement between the solved solution and the lines physics knows.
+
+    Anchor RMS is self-consistency: it says the anchors agree with each other
+    in pixels.  The BH paper's standard was agreement with Fulcher-alpha in
+    nanometres, which is a different question and the one that matters.  This
+    carries the answer, or states plainly why it cannot be answered here.
+    """
+
+    state: ScienceValidationState
+    message: str
+    results: tuple = ()
+    rms_residual_nm: float | None = None
+    median_residual_nm: float | None = None
+    worst_line: str = ""
+
+    @property
+    def measured(self) -> bool:
+        """Whether real numbers are in, as opposed to a stated reason."""
+
+        return self.state is ScienceValidationState.MEASURED
+
+    @property
+    def line_count(self) -> int:
+        return len(self.results)
 
 
 @dataclass(frozen=True)
@@ -882,6 +926,132 @@ class CalibrationBenchSession:
         self.residuals = tuple(residuals)
         self.alignment_state = AlignmentState.ALIGNED
         self.last_error = ""
+
+    def order_wavelengths(self) -> dict[int, np.ndarray]:
+        """The solved wavelength of every detector column, per order.
+
+        Built the way ``Calibrations`` builds it — a per-order polynomial
+        through the table's own (pixel, wavelength) pairs, straight for an
+        order carrying only a couple of rows and quadratic once it carries
+        enough to justify the curve — but through the rows *as this frame
+        shows them*, with the solved rigid correction already applied.  That
+        is what makes the result a wavelength axis for this detector today
+        rather than for the detector the table was written on.
+        """
+
+        if self.frame is None or self.transform is None:
+            return {}
+        corrected = apply_rigid_correction_to_lines(
+            list(self.lines), self.pattern, self.transform
+        )
+        columns = self.pattern.shape[0]
+        x = np.arange(columns, dtype=float)
+        by_order: dict[int, list[CalibrationTableLine]] = {}
+        for line in corrected:
+            by_order.setdefault(line.order_idx, []).append(line)
+        axes: dict[int, np.ndarray] = {}
+        for order_idx, rows in by_order.items():
+            if order_idx < 0 or order_idx >= self.pattern.shape[1] or len(rows) < 2:
+                continue
+            pixels = np.asarray([row.center_pixel for row in rows], dtype=float)
+            waves = np.asarray([row.wavelength_nm for row in rows], dtype=float)
+            degree = 1 if len(rows) < 3 else 2
+            try:
+                fit = np.polyfit(pixels, waves, degree)
+            except (np.linalg.LinAlgError, ValueError):
+                continue
+            axes[order_idx] = np.poly1d(fit)(x)
+        return axes
+
+    def validate_science_lines(
+        self, targets: Sequence[object] | None = None
+    ) -> ScienceValidation:
+        """Check the solved solution against the lines physics already knows.
+
+        The bench's own lamps cannot answer this: neon, thorium and mercury do
+        not emit Balmer or Fulcher light, so on a normal calibration evening
+        the honest result is that there is no frame to validate against, and
+        saying so is the point rather than a shortfall.  When a hydrogen frame
+        *is* on the bench, its Balmer and Fulcher targets are fitted against
+        the solved wavelength axis and the residuals are reported in
+        nanometres, which is the standard the BH paper actually held.
+        """
+
+        from .tools.line_validation import (
+            balmer_air_targets,
+            bundled_fulcher_h2_q_branch_targets,
+            summarize_validation,
+            validate_lines,
+        )
+
+        if self.transform is None:
+            return ScienceValidation(
+                ScienceValidationState.NO_ALIGNMENT,
+                "no transform is solved yet, so there is nothing to validate",
+            )
+        if not self._carries_science_lines():
+            return ScienceValidation(
+                ScienceValidationState.NO_FRAME,
+                self._no_science_frame_message(),
+            )
+        axes = self.order_wavelengths()
+        spectra = self.active_order_spectra()
+        if targets is None:
+            targets = [*balmer_air_targets(), *bundled_fulcher_h2_q_branch_targets()]
+
+        results: list[object] = []
+        for order_idx, axis in sorted(axes.items()):
+            if order_idx >= len(spectra):
+                continue
+            spectrum = np.asarray(spectra[order_idx], dtype=float)
+            shared = min(axis.size, spectrum.size)
+            if shared < 8:
+                continue
+            low, high = float(np.nanmin(axis[:shared])), float(np.nanmax(axis[:shared]))
+            in_range = [
+                target
+                for target in targets
+                if low <= float(target.wavelength_nm) <= high
+            ]
+            if not in_range:
+                continue
+            results.extend(
+                validate_lines(axis[:shared], spectrum[:shared], in_range)
+            )
+        if not results:
+            return ScienceValidation(
+                ScienceValidationState.NO_LINES,
+                "a hydrogen frame is on the bench, but no Balmer or Fulcher line "
+                "could be fitted in it — check the exposure before trusting the "
+                "alignment",
+            )
+        summary = summarize_validation(results)
+        worst = max(results, key=lambda item: abs(float(item.residual_nm)))
+        return ScienceValidation(
+            ScienceValidationState.MEASURED,
+            f"{len(results)} science line(s) agree to "
+            f"{summary.rms_residual_nm:.4f} nm RMS "
+            f"(median {abs(summary.median_residual_nm):.4f} nm)",
+            tuple(results),
+            float(summary.rms_residual_nm),
+            float(summary.median_residual_nm),
+            str(worst.line),
+        )
+
+    def _carries_science_lines(self) -> bool:
+        """Whether the assigned lamp emits the lines validation is made of."""
+
+        reference = self.reference
+        return reference is not None and reference.catalog_family == "fulcher"
+
+    def _no_science_frame_message(self) -> str:
+        reference = self.reference
+        lamp = reference.lamp if reference is not None and reference.lamp else "this lamp"
+        return (
+            f"{lamp} emits no Balmer or Fulcher light, so the alignment cannot be "
+            "checked against science lines here — validate against Fulcher when "
+            "the first plasma data exists"
+        )
 
     def anchor_rows(self) -> tuple[Anchor, ...]:
         return tuple(sorted(self.anchors.values(), key=lambda item: item.key))
