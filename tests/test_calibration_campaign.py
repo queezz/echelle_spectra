@@ -1507,3 +1507,216 @@ class TestABackgroundIsJudgedAsABackground:
 
         assert verdict.label == "background"
         assert not verdict.blocking
+
+
+# ---------------------------------------------------------------------------
+# Two sphere pairs of the SAME physical response, shot at different exposures.
+#
+# Spheres are not usually shot at a shared exposure time, so a factor path that
+# forgets to divide each sphere's counts by *its own* ExposureTime would report
+# the exposure ratio as if it were a change in the lamp.  The fixture below is
+# that whole claim in one frame set: identical count *rates*, exposures 0.1 s
+# and 0.3 s, counts scaled to match -- the comparison must read 1.0.
+# ---------------------------------------------------------------------------
+
+_SPHERE_DIMW = 60
+_SPHERE_DIMO = 55
+_SPHERE_DV = 8  # Calibrations default order half-width
+_SPHERE_ROWS = (20, 40)
+_PREVIOUS_EXPOSURE_S = 0.1
+_CANDIDATE_EXPOSURE_S = 0.3
+
+
+def _sphere_count_rates() -> tuple[np.ndarray, np.ndarray]:
+    """Two blaze-like humps that cross inside the orders' wavelength overlap."""
+
+    columns = np.arange(_SPHERE_DIMW, dtype=float)
+    lower = 1000.0 - 0.4 * (columns - 30.0) ** 2
+    upper = 1000.0 - 0.4 * (columns - 22.0) ** 2
+    return lower, upper
+
+
+def _paint_order(image: np.ndarray, row: int, values: np.ndarray) -> None:
+    rows = np.arange(row - _SPHERE_DV, row + _SPHERE_DV + 1)
+    image[np.ix_(rows, np.arange(_SPHERE_DIMW))] = values / (2 * _SPHERE_DV + 1)
+
+
+def _rate_frames() -> tuple[np.ndarray, np.ndarray]:
+    """Sphere and background count *rates* (counts per second), not counts."""
+
+    lower_rate, upper_rate = _sphere_count_rates()
+    sphere = np.zeros((_SPHERE_DIMO, _SPHERE_DIMW))
+    _paint_order(sphere, _SPHERE_ROWS[0], lower_rate)
+    _paint_order(sphere, _SPHERE_ROWS[1], upper_rate)
+
+    background = np.zeros((_SPHERE_DIMO, _SPHERE_DIMW))
+    _paint_order(background, _SPHERE_ROWS[0], np.full(_SPHERE_DIMW, 60.0))
+    _paint_order(background, _SPHERE_ROWS[1], np.full(_SPHERE_DIMW, 60.0))
+    return sphere, background
+
+
+@pytest.fixture
+def sphere_pairs_at_two_exposures(monkeypatch: pytest.MonkeyPatch):
+    """Serve both sphere pairs from one count-rate model at two exposures."""
+
+    from echelle_spectra.tools import echelle as echelle_module
+
+    sphere_rate, background_rate = _rate_frames()
+
+    def read_image(fpth, spec="black", crop=(0, -1), exptime=1):
+        name = Path(str(fpth)).name.casefold()
+        exposure = _CANDIDATE_EXPOSURE_S if "0.3s" in name else _PREVIOUS_EXPOSURE_S
+        rate = background_rate if "-bg" in name else sphere_rate
+        images = (rate * exposure)[np.newaxis]
+        info = {
+            "NumberOfFrames": 1,
+            "xbin": 1,
+            "ybin": 1,
+            "size": np.array([_SPHERE_DIMW, _SPHERE_DIMO]),
+            "ExposureTime": exposure,
+            "CycleTime": 1.0,
+        }
+        return images.copy(), info
+
+    monkeypatch.setattr(echelle_module, "read_image", read_image)
+    return read_image
+
+
+def _sphere_fixture_sources(tmp_path: Path) -> dict[str, Path]:
+    root = tmp_path / "campaign"
+    root.mkdir(parents=True, exist_ok=True)
+
+    pattern = root / "pattern.txt"
+    np.savetxt(
+        pattern,
+        np.column_stack(
+            [
+                np.full(_SPHERE_DIMW, _SPHERE_ROWS[0], dtype=int),
+                np.full(_SPHERE_DIMW, _SPHERE_ROWS[1], dtype=int),
+            ]
+        ),
+        fmt="%d",
+    )
+
+    rows = [(27, pixel, 436.0 - 0.05 * pixel) for pixel in (2, 15, 30, 45, 58)]
+    rows += [(28, pixel, 434.0 - 0.05 * pixel) for pixel in (2, 15, 30, 45, 58)]
+    wavelength = root / "wavelength.txt"
+    wavelength.write_text(
+        "# synthetic lamp identification\n"
+        "# order from to center wavelength\n"
+        + "".join(
+            f"{order:d} {pixel - 1:d} {pixel + 1:d} {pixel:d} {value:.6f}\n"
+            for order, pixel, value in rows
+        ),
+        encoding="utf-8",
+    )
+
+    integral = root / "integral.txt"
+    micrometres = np.linspace(0.425, 0.440, 9)
+    np.savetxt(
+        integral,
+        np.column_stack([micrometres, np.full(micrometres.size, 1.0e-2)]),
+        fmt="%.8f",
+    )
+
+    names = {
+        "sphere": "sphere-0.3s.sif",
+        "sphere_background": "sphere-0.3s-bg.sif",
+        "previous_sphere": "sphere-0.1s.sif",
+        "previous_sphere_background": "sphere-0.1s-bg.sif",
+    }
+    answer = {"pattern": pattern, "wavelength": wavelength, "integral": integral}
+    for role, name in names.items():
+        path = root / name
+        path.write_bytes(b"synthetic sphere frame\n")
+        answer[role] = path
+    return answer
+
+
+class TestSphereFactorsCarryEachSpheresOwnExposure:
+    """A reported sphere ratio must survive a pair that differs only in exposure."""
+
+    def _campaign(self, sources: dict[str, Path]) -> CalibrationCampaignSession:
+        campaign = CalibrationCampaignSession(
+            pattern_source=sources["pattern"],
+            wavelength_source=sources["wavelength"],
+            integral_source=sources["integral"],
+            previous_sphere=sources["previous_sphere"],
+            previous_sphere_background=sources["previous_sphere_background"],
+        )
+        campaign.classify_file(sources["sphere"], MeasurementRole.SPHERE)
+        campaign.classify_file(
+            sources["sphere_background"], MeasurementRole.SPHERE_BACKGROUND
+        )
+        return campaign
+
+    def test_same_response_at_0_3_s_and_0_1_s_compares_at_one(
+        self, tmp_path, sphere_pairs_at_two_exposures
+    ):
+        sources = _sphere_fixture_sources(tmp_path)
+        campaign = self._campaign(sources)
+
+        # The real engine, not a stub: this is the calculator the bench uses.
+        comparison = campaign.compute_sphere_comparison()
+
+        assert comparison.state is ComparisonState.READY, comparison.reason
+        assert comparison.sample_count >= 20
+        # Anything but 1.0 here is the 3x exposure ratio leaking into a number
+        # the operator would read as a change in the integrating sphere.
+        assert comparison.median_ratio == pytest.approx(1.0, rel=1e-12)
+        assert comparison.p05_ratio == pytest.approx(1.0, rel=1e-12)
+        assert comparison.p95_ratio == pytest.approx(1.0, rel=1e-12)
+
+    def test_the_two_factor_curves_agree_column_by_column(
+        self, tmp_path, sphere_pairs_at_two_exposures
+    ):
+        """The median agreeing is not enough; every shared column must agree."""
+
+        sources = _sphere_fixture_sources(tmp_path)
+        campaign = self._campaign(sources)
+
+        comparison = campaign.compute_sphere_comparison()
+
+        assert comparison.candidate is not None and comparison.previous is not None
+        # Same response, three times the counts: without each file's own
+        # exposure the candidate factor would come out three times small.
+        np.testing.assert_allclose(
+            comparison.candidate.factors_wmsr,
+            comparison.previous.factors_wmsr,
+            rtol=1e-12,
+        )
+
+    def test_a_shot_is_calibrated_by_its_own_exposure_too(
+        self, tmp_path, sphere_pairs_at_two_exposures
+    ):
+        """The applied-factor path divides by the shot's exposure, not the sphere's."""
+
+        from echelle_spectra.tools.loader import build_calibration, load_spectrum
+
+        sources = _sphere_fixture_sources(tmp_path)
+        calibration = build_calibration(
+            sources["pattern"].parent,
+            "CMOS",
+            calibration_files={
+                "orders": str(sources["pattern"]),
+                "wavelength": str(sources["wavelength"]),
+                "sphr": str(sources["sphere"]),
+                "bkgr": str(sources["sphere_background"]),
+                "integral": str(sources["integral"]),
+            },
+        )
+
+        # The same light, recorded once for 0.1 s and once for 0.3 s.
+        short = load_spectrum(sources["previous_sphere"], calibration=calibration)
+        long_ = load_spectrum(sources["sphere"], calibration=calibration)
+
+        assert short.info["ExposureTime"] == pytest.approx(_PREVIOUS_EXPOSURE_S)
+        assert long_.info["ExposureTime"] == pytest.approx(_CANDIDATE_EXPOSURE_S)
+        short_counts = np.asarray(short.counts, dtype=float)
+        long_counts = np.asarray(long_.counts, dtype=float)
+        assert not np.allclose(short_counts, long_counts)
+        np.testing.assert_allclose(
+            np.asarray(long_.wmsr, dtype=float),
+            np.asarray(short.wmsr, dtype=float),
+            rtol=1e-12,
+        )
