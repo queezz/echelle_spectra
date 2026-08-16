@@ -538,6 +538,9 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         #: one pool because there is one expected-line list (F17 item 2).
         self._line_pool: list[tuple[object, object]] = []
         self._anchor_scatter: pg.ScatterPlotItem | None = None
+        #: Each histogram plot's own curve and its two threshold lines, built
+        #: once and moved thereafter — the same pooling the order plot uses.
+        self._histogram_items: dict[int, tuple] = {}
         self._catalog_cache: dict[tuple, tuple] = {}
         self._catalog_rows: tuple = ()
         self._queue: list[Path] = []
@@ -2871,8 +2874,7 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
             f"{guidance.next_action}\n\n{verdict.advice}",
         )
 
-    @staticmethod
-    def _draw_histogram(plot, triage: ExposureTriage, histogram) -> None:
+    def _draw_histogram(self, plot, triage: ExposureTriage, histogram) -> None:
         """Draw one counts histogram as outlined bins on a log floor.
 
         The plot is in log mode, so the fill level has to be given in log
@@ -2880,27 +2882,43 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         zeros into a solid painted block.  Bins are floored just below one
         pixel and outlined, so a bin holding a handful of pixels is visible and
         a bin holding none draws nothing.
+
+        The curve and the two threshold lines are built once per plot and then
+        moved, never cleared and rebuilt.  ``clear()`` unparents an
+        ``InfiniteLine`` while Qt may still ask it to paint, and a removed line
+        answering ``boundingRect`` has no view box to measure itself against —
+        which raises inside a paint and aborts the whole process rather than
+        failing visibly.  Selecting each file in turn is enough to reach it.
         """
 
-        plot.clear()
         floor = 0.5
         counts = np.maximum(np.asarray(histogram.counts, dtype=float), floor)
-        plot.plot(
-            np.asarray(histogram.edges, dtype=float),
-            counts,
-            stepMode="center",
-            fillLevel=float(np.log10(floor)),
-            brush=pg.mkBrush("#1f4d63"),
-            pen=pg.mkPen("#76d6ff", width=1.4),
-        )
-        plot.addLine(
-            x=triage.saturation.saturation_level,
-            pen=pg.mkPen("#ffb86b", style=QtCore.Qt.DashLine),
-        )
-        plot.addLine(
-            x=triage.full_scale,
-            pen=pg.mkPen("#ff8f8f", style=QtCore.Qt.DashLine),
-        )
+        edges = np.asarray(histogram.edges, dtype=float)
+        curve, saturation_line, full_scale_line = self._histogram_furniture(plot, floor)
+        curve.setData(edges, counts, stepMode="center", fillLevel=float(np.log10(floor)))
+        saturation_line.setValue(triage.saturation.saturation_level)
+        full_scale_line.setValue(triage.full_scale)
+
+    def _histogram_furniture(self, plot, floor: float) -> tuple:
+        """The curve and threshold lines one histogram plot owns for its life."""
+
+        furniture = self._histogram_items.get(id(plot))
+        if furniture is None:
+            curve = plot.plot(
+                np.array([0.0, 1.0]),
+                np.array([floor]),
+                stepMode="center",
+                fillLevel=float(np.log10(floor)),
+                brush=pg.mkBrush("#1f4d63"),
+                pen=pg.mkPen("#76d6ff", width=1.4),
+            )
+            furniture = (
+                curve,
+                plot.addLine(x=0.0, pen=pg.mkPen("#ffb86b", style=QtCore.Qt.DashLine)),
+                plot.addLine(x=0.0, pen=pg.mkPen("#ff8f8f", style=QtCore.Qt.DashLine)),
+            )
+            self._histogram_items[id(plot)] = furniture
+        return furniture
 
     def _draw_top_histogram(self, triage: ExposureTriage) -> None:
         """Draw the top end, or say in words that nothing is up there.

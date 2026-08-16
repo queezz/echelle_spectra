@@ -2060,3 +2060,59 @@ def test_scaled_dpi_repeats_the_two_rail_checks(qt_app):
         "the two-rail layout breaks at 150% desktop scaling:\n"
         f"{completed.stdout}\n{completed.stderr}"
     )
+
+
+def test_selecting_file_after_file_never_orphans_a_threshold_line(qt_app, tmp_path):
+    """A removed InfiniteLine painting itself takes the whole process down.
+
+    Found while F19 was being built: the histograms cleared their plot and
+    added two fresh threshold lines for every file selected, and a cleared
+    ``InfiniteLine`` keeps a repaint scheduled while losing the view box it
+    measures itself against.  ``boundingRect`` then raises inside Qt's paint,
+    which is not an exception anybody can catch — it aborts.  It surfaced as a
+    crash in an unrelated test, which is exactly how a latent one behaves.
+
+    The lines are now built once per plot and moved, so the count of items on
+    the plot is flat no matter how many files are triaged, and every line still
+    has the view box it belongs to.
+    """
+
+    window = _manual_window(tmp_path, peak=65000.0)
+    window.show()
+    paths = []
+    for index in range(4):
+        path = tmp_path / f"Ne-0.0{index + 1}s-x3.sif"
+        path.write_bytes(b"sif\n")
+        paths.append(path)
+    _drop(window, paths)
+    _wait_for_loads(window, qt_app)
+
+    window.file_table.selectRow(0)
+    qt_app.processEvents()
+    drawn = [
+        item
+        for item in window.histogram_plot.items
+        if isinstance(item, pg.InfiniteLine)
+    ]
+    assert drawn, "the thresholds stopped being drawn"
+
+    # Select the other files, which is what redraws the histogram.
+    for row in range(1, len(paths)):
+        window.file_table.selectRow(row)
+        qt_app.processEvents()
+
+    # The lines captured before those redraws must still be the lines on the
+    # plot, and must still answer boundingRect.  Under clear()+addLine they are
+    # detached objects whose getViewBox() is None, and this call is the one Qt
+    # makes during a paint — where an exception aborts instead of failing.
+    for line in drawn:
+        assert line.getViewBox() is not None, (
+            "a threshold line was detached from its view box while still alive"
+        )
+        line.boundingRect()
+    assert drawn == [
+        item
+        for item in window.histogram_plot.items
+        if isinstance(item, pg.InfiniteLine)
+    ], "the thresholds were rebuilt per file instead of moved"
+    window.close()
