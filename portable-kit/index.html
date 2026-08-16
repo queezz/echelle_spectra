@@ -9,7 +9,7 @@
         <link rel="prev" href="../development/">
       
       
-        <link rel="next" href="../archaeology/report/">
+        <link rel="next" href="../harbor-candidate/">
       
       
         
@@ -251,7 +251,7 @@
     
     
       <li class="md-tabs__item">
-        <a href="../usage/" class="md-tabs__link">
+        <a href="../operator-cheat-sheet/" class="md-tabs__link">
           
   
   
@@ -539,6 +539,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../operator-cheat-sheet/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Operator cheat sheet
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../usage/" class="md-nav__link">
         
   
@@ -575,6 +603,34 @@
     
   
     Calibration snapshots
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../calibration-epoch-registry/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Calibration epoch registry
   
 
     
@@ -1101,6 +1157,62 @@
 
               
             
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../harbor-candidate/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Harbor Packets 9–13 candidate
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../harbor-reconciliation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Harbor reconciliation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
           </ul>
         </nav>
       
@@ -1262,15 +1374,13 @@ CPython archives, wheelhouses, caches, project distributions, extracted
 runtimes, virtual environments, and completed kits are generated only in an
 explicit external destination.</p>
 <h2 id="release-evidence-boundary">Release evidence boundary<a class="headerlink" href="#release-evidence-boundary" title="Permanent link">¶</a></h2>
-<p>The tooling can validate payload completeness, platform identity, checksums,
+<p>The tooling validates payload completeness, platform identity, checksums,
 offline resolvability, and byte-identical distribution output without changing
-the product interfaces. Packet 6 is nevertheless a field-gated release: local
-fixtures and cross-platform wheel downloads cannot substitute for execution on
-a clean Windows machine and a clean Mac, and an ordinary cached install cannot
-substitute for a network-disabled offline rehearsal.</p>
-<p>The current repository therefore remains version 1.4.0 while this internal seam
-is exercised. Version 1.5.0 is earned only when all platform and offline gates
-have durable evidence.</p>
+the product interfaces. The current 1.6.0 kit preserves the field-gated release
+contract established on clean Windows and native macOS machines, including
+network-disabled offline
+rehearsals. Future kit releases must repeat those gates; local fixtures and
+cross-platform wheel downloads are not substitutes.</p>
 
 
 

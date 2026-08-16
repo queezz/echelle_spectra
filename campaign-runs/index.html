@@ -6,7 +6,7 @@
       
       
       
-        <link rel="prev" href="../calibration-snapshots/">
+        <link rel="prev" href="../calibration-epoch-registry/">
       
       
         <link rel="next" href="../pattern-extraction/">
@@ -253,7 +253,7 @@
     
     
       <li class="md-tabs__item md-tabs__item--active">
-        <a href="../usage/" class="md-tabs__link">
+        <a href="../operator-cheat-sheet/" class="md-tabs__link">
           
   
   
@@ -544,6 +544,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../operator-cheat-sheet/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Operator cheat sheet
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../usage/" class="md-nav__link">
         
   
@@ -580,6 +608,34 @@
     
   
     Calibration snapshots
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../calibration-epoch-registry/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Calibration epoch registry
   
 
     
@@ -660,6 +716,17 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix="">
       
         <li class="md-nav__item">
+  <a href="#the-gate" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The gate
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#several-drives-at-once" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -686,6 +753,28 @@
     <span class="md-ellipsis">
       
         Interrupt and resume
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#drive-identity" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Drive identity
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#catalog-beside-the-cubes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Catalog beside the cubes
       
     </span>
   </a>
@@ -1134,6 +1223,62 @@
 
               
             
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../harbor-candidate/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Harbor Packets 9–13 candidate
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../harbor-reconciliation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Harbor reconciliation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
           </ul>
         </nav>
       
@@ -1253,6 +1398,17 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix="">
       
         <li class="md-nav__item">
+  <a href="#the-gate" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The gate
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#several-drives-at-once" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1279,6 +1435,28 @@
     <span class="md-ellipsis">
       
         Interrupt and resume
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#drive-identity" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Drive identity
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#catalog-beside-the-cubes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Catalog beside the cubes
       
     </span>
   </a>
@@ -1320,14 +1498,79 @@
 <p><code>echelle process</code> turns a folder of SIF files into SpectroCubes without making
 you keep the run state in your head. Every non-dry batch creates a durable run
 receipt under <code>local/runs/</code> by default.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="n">echelle</span> <span class="k">process</span> <span class="n">D</span><span class="p">:\</span><span class="n">nifs</span><span class="p">\</span><span class="n">shots</span> <span class="p">`</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>  <span class="n">-o</span> <span class="n">D</span><span class="p">:\</span><span class="n">nifs</span><span class="p">\</span><span class="n">spectrocubes</span> <span class="p">`</span>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>  <span class="p">-</span><span class="n">-snapshot-id</span> <span class="n">20260813_cmos</span> <span class="p">`</span>
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>  <span class="p">-</span><span class="n">-volume-label</span> <span class="n">NIFS-A</span>
+<p>A registry-backed drive takes three commands: sample the epoch, audit the
+sample, then process the drive under the verdict the audit wrote.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="c"># 1. Sample the first five resolved files. No verdict is needed yet, and every</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="c">#    produced cube is marked drift_sample.</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="n">echelle</span> <span class="k">process</span> <span class="n">D</span><span class="p">:\</span><span class="n">nifs</span><span class="p">\</span><span class="n">shots</span> <span class="p">`</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>  <span class="n">-o</span> <span class="n">D</span><span class="p">:\</span><span class="n">nifs</span><span class="p">\</span><span class="n">spectrocubes</span> <span class="p">`</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>  <span class="p">-</span><span class="n">-registry</span> <span class="n">D</span><span class="p">:\</span><span class="n">nifs</span><span class="p">\</span><span class="n">calibration_registry</span><span class="p">.</span><span class="n">toml</span> <span class="p">`</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>  <span class="p">-</span><span class="n">-calibrations</span> <span class="n">D</span><span class="p">:\</span><span class="n">nifs</span><span class="p">\</span><span class="n">calibrations</span> <span class="p">`</span>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>  <span class="p">-</span><span class="n">-volume-label</span> <span class="n">NIFS-A</span> <span class="p">`</span>
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>  <span class="p">-</span><span class="n">-sample</span> <span class="n">5</span>
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="c"># 2. Audit the sample into one immutable verdict file. The audit takes the</span>
+<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a><span class="c">#    cube folder itself, so the same line works in any shell.</span>
+<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a><span class="n">echelle</span> <span class="n">drift</span> <span class="n">audit</span> <span class="n">D</span><span class="p">:\</span><span class="n">nifs</span><span class="p">\</span><span class="n">spectrocubes</span> <span class="p">`</span>
+<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>  <span class="p">-</span><span class="n">-calibrations</span> <span class="n">D</span><span class="p">:\</span><span class="n">nifs</span><span class="p">\</span><span class="n">calibrations</span> <span class="p">`</span>
+<a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a>  <span class="n">-o</span> <span class="n">D</span><span class="p">:\</span><span class="n">nifs</span><span class="p">\</span><span class="n">epoch-drift</span><span class="p">.</span><span class="n">json</span>
+<a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a>
+<a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a><span class="c"># 3. Process the whole drive under that verdict.</span>
+<a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a><span class="n">echelle</span> <span class="k">process</span> <span class="n">D</span><span class="p">:\</span><span class="n">nifs</span><span class="p">\</span><span class="n">shots</span> <span class="p">`</span>
+<a id="__codelineno-0-18" name="__codelineno-0-18" href="#__codelineno-0-18"></a>  <span class="n">-o</span> <span class="n">D</span><span class="p">:\</span><span class="n">nifs</span><span class="p">\</span><span class="n">spectrocubes</span> <span class="p">`</span>
+<a id="__codelineno-0-19" name="__codelineno-0-19" href="#__codelineno-0-19"></a>  <span class="p">-</span><span class="n">-registry</span> <span class="n">D</span><span class="p">:\</span><span class="n">nifs</span><span class="p">\</span><span class="n">calibration_registry</span><span class="p">.</span><span class="n">toml</span> <span class="p">`</span>
+<a id="__codelineno-0-20" name="__codelineno-0-20" href="#__codelineno-0-20"></a>  <span class="p">-</span><span class="n">-calibrations</span> <span class="n">D</span><span class="p">:\</span><span class="n">nifs</span><span class="p">\</span><span class="n">calibrations</span> <span class="p">`</span>
+<a id="__codelineno-0-21" name="__codelineno-0-21" href="#__codelineno-0-21"></a>  <span class="p">-</span><span class="n">-volume-label</span> <span class="n">NIFS-A</span> <span class="p">`</span>
+<a id="__codelineno-0-22" name="__codelineno-0-22" href="#__codelineno-0-22"></a>  <span class="p">-</span><span class="n">-drift-verdict</span> <span class="n">D</span><span class="p">:\</span><span class="n">nifs</span><span class="p">\</span><span class="n">epoch-drift</span><span class="p">.</span><span class="n">json</span>
 </code></pre></div>
+<p>Step 3 resumes the receipt written by step 1: the sampled files are verified and
+skipped rather than exported twice.</p>
 <p>The terminal reports the current count, measured file rate, and estimated time
 remaining. An ordinary file failure is recorded and processing continues with
 the next source. The command exits nonzero after the run if any source failed.</p>
+<h2 id="the-gate">The gate<a class="headerlink" href="#the-gate" title="Permanent link">¶</a></h2>
+<p>Nothing reaches a registry-selected calibration without saying how it was
+authorized. Every run records one of three gates in its receipt:</p>
+<table>
+<thead>
+<tr>
+<th>Gate</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>verdict</code></td>
+<td><code>--drift-verdict</code> named sampled evidence that covers every snapshot this run selected. The receipt also stores the evidence path, its SHA-256, and the verdict word.</td>
+</tr>
+<tr>
+<td><code>sample</code></td>
+<td><code>--sample N</code> processed at most the first N resolved files (sorted by path) with no verdict at all. The receipt stores <code>sample = true</code> and the file count; every cube carries <code>drift_sample = 1</code>.</td>
+</tr>
+<tr>
+<td><code>ungated (no registry)</code></td>
+<td>The run used an explicit <code>--config</code>/<code>--snapshot-id</code>/<code>--camera</code> calibration. That is legal, and the receipt says forever that no sampled audit stood behind it.</td>
+</tr>
+</tbody>
+</table>
+<p><code>--sample</code> and <code>--drift-verdict</code> cannot be combined: one takes unverified
+evidence, the other spends it. <code>--sample</code> requires <code>--registry</code>.</p>
+<p>The gate covers every registry-backed form — a folder of one file, a folder of
+ten thousand, and the single-file path. A refusal names the commands that
+produce the missing evidence instead of only stating that it is missing.</p>
+<p>Aligned evidence authorizes the snapshots it audited. An accepted shifted
+verdict authorizes <strong>only</strong> the <code>-rN</code> refinement it created: while the registry
+still selects the condemned base snapshot, the gate refuses and tells you to
+repoint the registry's validity at the refinement.</p>
+<p>Every audited shot also carries an <code>isotope</code> tag: each Balmer window is judged
+against both the hydrogen and the deuterium reference and assigned to whichever
+is nearer in detector pixels, so a deuterium shot reads as aligned rather than
+shifted by the 0.178 nm isotope offset, drops the H2 Fulcher anchors it has no
+D2 table for, and is flagged where the bundled LHD deuterium calendar expects
+hydrogen instead.</p>
+<p>Receipts written before the gate existed remain readable. They report
+<code>unrecorded (pre-gate receipt)</code> rather than borrowing an authorization they
+never had.</p>
 <h2 id="several-drives-at-once">Several drives at once<a class="headerlink" href="#several-drives-at-once" title="Permanent link">¶</a></h2>
 <p>Pass one source folder per drive. Echelle runs one sequential reader for each
 source and processes those sources concurrently:</p>
@@ -1336,8 +1579,14 @@ source and processes those sources concurrently:</p>
 <a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>  <span class="p">-</span><span class="n">-runs-dir</span> <span class="n">F</span><span class="p">:\</span><span class="n">nifs-runs</span> <span class="p">`</span>
 <a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>  <span class="p">-</span><span class="n">-volume-label</span> <span class="n">NIFS-A</span> <span class="p">`</span>
 <a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>  <span class="p">-</span><span class="n">-volume-label</span> <span class="n">NIFS-B</span> <span class="p">`</span>
-<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>  <span class="p">-</span><span class="n">-snapshot-id</span> <span class="n">20260813_cmos</span>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>  <span class="p">-</span><span class="n">-registry</span> <span class="n">F</span><span class="p">:\</span><span class="n">nifs-calibration</span><span class="p">\</span><span class="n">calibration_registry</span><span class="p">.</span><span class="n">toml</span> <span class="p">`</span>
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>  <span class="p">-</span><span class="n">-calibrations</span> <span class="n">F</span><span class="p">:\</span><span class="n">nifs-calibration</span><span class="p">\</span><span class="n">calibrations</span> <span class="p">`</span>
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>  <span class="p">-</span><span class="n">-drift-verdict</span> <span class="n">F</span><span class="p">:\</span><span class="n">nifs-calibration</span><span class="p">\</span><span class="n">epoch-drift</span><span class="p">.</span><span class="n">json</span>
 </code></pre></div>
+<p>Each target is gated on its own. <code>--sample 5</code> samples each source folder
+separately, so one campaign command can produce the audit input for every drive
+at once; the verdict that covers all of their snapshots then authorizes the
+full multi-drive run.</p>
 <p><code>-o</code> is a destination root in this form. Each source receives its own named
 child directory, its own sequential calibration/export worker, and its own
 receipt tree under <code>--runs-dir</code>. Repeat <code>--volume-label</code> in the same order as
@@ -1353,10 +1602,13 @@ all workers stop before taking another source.</p>
 <p>Each run directory contains:</p>
 <ul>
 <li><code>run.toml</code> — atomic summary containing run state, roots, volume label,
-  snapshot ID, expected file count, and current status counts;</li>
+  calibration authority (<code>per-source-registry</code> for an epoch run), expected file
+  count, the gate that authorized the run with its evidence path, digest, and
+  verdict, and current status counts;</li>
 <li><code>records.jsonl</code> — an append-only, one-record-per-attempt ledger with source
   path, source size and SHA-256, output path, result, reason, timing, volume,
-  and snapshot. Successful exports also record output size and SHA-256.</li>
+  and the snapshot selected for that source. Successful exports also record
+  output size and SHA-256.</li>
 </ul>
 <p>These files belong beside local campaign data and must not be committed. A
 snapshot ID can be omitted for legacy work; receipts then say <code>unassigned</code>
@@ -1370,21 +1622,87 @@ with the same source and destination. Before skipping prior work it verifies:</p
 <ol>
 <li>the source path, size, and SHA-256 still match;</li>
 <li>the output path, size, and SHA-256 still match;</li>
-<li>the prior terminal record says the export completed.</li>
+<li>the prior terminal record says the export completed;</li>
+<li>for registry runs, the currently selected snapshot ID still matches the
+   recorded snapshot.</li>
 </ol>
 <p>Only then is the source recorded as skipped because its completed output was
-verified. Changed or missing output is not accepted as completed. To name the
-resume explicitly, use the path printed at interruption:</p>
+verified. A changed epoch selection, changed source, or changed/missing output
+is not accepted as completed. To name the resume explicitly, use the path
+printed at interruption:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="n">echelle</span> <span class="k">process</span> <span class="n">D</span><span class="p">:\</span><span class="n">nifs</span><span class="p">\</span><span class="n">shots</span> <span class="n">-o</span> <span class="n">D</span><span class="p">:\</span><span class="n">nifs</span><span class="p">\</span><span class="n">spectrocubes</span> <span class="p">`</span>
 <a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>  <span class="p">-</span><span class="n">-run-dir</span> <span class="n">local</span><span class="p">\</span><span class="n">runs</span><span class="p">\</span><span class="n">2026</span><span class="p">-</span><span class="n">08</span><span class="p">-</span><span class="n">13_12</span><span class="p">-</span><span class="n">00</span><span class="p">-</span><span class="n">00-shots</span>
 </code></pre></div>
 <p>Use <code>--new-run</code> when you intentionally want a separate receipt. Use
 <code>--overwrite</code> only when existing outputs should be replaced.</p>
-<h2 id="status">Status<a class="headerlink" href="#status" title="Permanent link">¶</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="n">echelle</span> <span class="n">status</span> <span class="p">-</span><span class="n">-runs</span> <span class="n">local</span><span class="p">\</span><span class="n">runs</span>
+<p>Repeat <code>--registry</code> and its <code>--drift-verdict</code> when resuming a registry-backed
+run. The gate is evaluated on every invocation, including a resume, and the
+receipt records the authorization of the run in front of it.</p>
+<h2 id="drive-identity">Drive identity<a class="headerlink" href="#drive-identity" title="Permanent link">¶</a></h2>
+<p>On the first processing of a source, the run writes a small
+<code>echelle-drive-id.toml</code> at the source root you named:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="n">schema</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"echelle-drive-id/v1"</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="k">[drive]</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="n">id</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"0b6c1e2f9a5b4c7d8e9f0a1b2c3d4e5f"</span>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="n">label</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"NIFS-A"</span>
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="n">created_at</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"2026-08-14T09:12:04.118Z"</span>
 </code></pre></div>
-<p>Status reports the newest run's state, accounted sources, result counts, and
-snapshot ID. When several source/output targets have receipts, it also reports
+<p>Later runs read it instead of writing a new one, and catalogs key on the <code>id</code>.
+A USB disk that returns as <code>F:</code> on Windows and under <code>/Volumes/NIFS-A</code> on macOS
+therefore stays one drive with one history. The <code>label</code> is display only: edit it
+freely, and never copy an <code>id</code> onto a second drive. <code>--volume-label</code> sets the
+label a run reports; it never changes an announced id.</p>
+<p>A source root that cannot be written — a read-only archive mount — is not an
+error. The run continues, keys that drive on its volume label alone, prints a
+warning, and records it as <code>drive_warning</code> in the receipt and in the catalog's
+<code>run</code> block, so a reader can see why the drive has no stable id.</p>
+<h2 id="catalog-beside-the-cubes">Catalog beside the cubes<a class="headerlink" href="#catalog-beside-the-cubes" title="Permanent link">¶</a></h2>
+<p>Every non-dry batch target writes <code>echelle-catalog.json</code> beside its cubes. Each
+cube row records its digest, size, snapshot ID, <code>t_start</code>, and the <code>gate</code> that
+authorized the run that produced it, so a sampled drive never reads as a
+verified one. Write or refresh one by hand with the same command the run uses:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="n">echelle</span> <span class="n">catalog</span> <span class="n">build</span> <span class="n">D</span><span class="p">:\</span><span class="n">nifs</span><span class="p">\</span><span class="n">spectrocubes</span> <span class="p">`</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>  <span class="p">-</span><span class="n">-volume-label</span> <span class="n">NIFS-A</span> <span class="p">`</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>  <span class="p">-</span><span class="n">-receipt-dir</span> <span class="n">local</span><span class="p">\</span><span class="n">runs</span><span class="p">\</span><span class="n">2026</span><span class="p">-</span><span class="n">08</span><span class="p">-</span><span class="n">13_12</span><span class="p">-</span><span class="n">00</span><span class="p">-</span><span class="n">00-shots</span>
+</code></pre></div>
+<p><code>--receipt-dir</code> is optional and adds the run's state, counts, calibration
+authority, and gate to the catalog. <code>--drive-id</code> is optional too: by default the
+catalog uses the id announced by the nearest <code>echelle-drive-id.toml</code> at or above
+the cube folder.</p>
+<p>Merge per-drive catalogs into a durable all-years index with
+<code>echelle catalog merge CATALOG [CATALOG ...] -o all-years.json</code>. Two rules make
+that merge safe to repeat:</p>
+<ul>
+<li><strong>Recency, never argument order.</strong> For each drive the row with the newest
+  <code>generated_at</code> wins, so merging a stale all-years index after a fresh
+  per-drive catalog can no longer revert that drive to older rows.</li>
+<li><strong>Portable locations.</strong> A merged row stores the catalog path <em>relative</em> to its
+  drive root plus the <code>drive_root</code> this machine last saw it at — the catalog
+  file's own folder. A drive that comes back at another letter or mount point is
+  relocated by merging its catalog again; nothing is marked permanently
+  unavailable by an absolute path written on a different operating system.</li>
+</ul>
+<p>Merge automatically after every completed target by naming the index on the run:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="n">echelle</span> <span class="k">process</span> <span class="n">D</span><span class="p">:\</span><span class="n">nifs</span><span class="p">\</span><span class="n">shots</span> <span class="n">-o</span> <span class="n">D</span><span class="p">:\</span><span class="n">nifs</span><span class="p">\</span><span class="n">spectrocubes</span> <span class="p">`</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>  <span class="p">-</span><span class="n">-volume-label</span> <span class="n">NIFS-A</span> <span class="p">`</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>  <span class="p">-</span><span class="n">-central-index</span> <span class="n">C</span><span class="p">:\</span><span class="n">nifs</span><span class="p">\</span><span class="n">all-years</span><span class="p">.</span><span class="n">json</span>
+</code></pre></div>
+<p>Only a completed target is folded in; an interrupted or partial run still writes
+its per-drive catalog but is not published into the index as though the drive
+were finished. Without <code>--central-index</code>, the merge stays manual.</p>
+<p><code>echelle recal-cube</code> refreshes the per-drive catalog beside its output when one
+exists: the revised cube's row gets the new digest and snapshot ID, and the
+catalog's <code>generated_at</code> is bumped. That bump is what makes the drive outrank
+whatever the all-years index still remembers, so the next auto or manual merge
+propagates the correction without rebuilding the index.</p>
+<h2 id="status">Status<a class="headerlink" href="#status" title="Permanent link">¶</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="n">echelle</span> <span class="n">status</span> <span class="p">-</span><span class="n">-runs</span> <span class="n">local</span><span class="p">\</span><span class="n">runs</span>
+</code></pre></div>
+<p>Status reports the newest run's state, accounted sources, result counts,
+calibration authority, and the gate that authorized it. Individual records
+retain their selected snapshot IDs.
+When several source/output targets have receipts, it also reports
 their newest states individually and reconciles their combined totals. It reads
 receipt files recursively; it does not infer progress from filenames or count
 superseded retries twice.</p>

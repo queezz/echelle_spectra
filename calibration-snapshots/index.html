@@ -9,7 +9,7 @@
         <link rel="prev" href="../usage/">
       
       
-        <link rel="next" href="../campaign-runs/">
+        <link rel="next" href="../calibration-epoch-registry/">
       
       
         
@@ -253,7 +253,7 @@
     
     
       <li class="md-tabs__item md-tabs__item--active">
-        <a href="../usage/" class="md-tabs__link">
+        <a href="../operator-cheat-sheet/" class="md-tabs__link">
           
   
   
@@ -544,6 +544,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../operator-cheat-sheet/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Operator cheat sheet
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../usage/" class="md-nav__link">
         
   
@@ -668,6 +696,34 @@
   
 </nav>
       
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../calibration-epoch-registry/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Calibration epoch registry
+  
+
+    
+  </span>
+  
+  
+
+      </a>
     </li>
   
 
@@ -1123,6 +1179,62 @@
 
               
             
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../harbor-candidate/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Harbor Packets 9–13 candidate
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../harbor-reconciliation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Harbor reconciliation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
           </ul>
         </nav>
       
@@ -1360,8 +1472,20 @@ Its separately generated campaign, alignment, and export TOMLs remain editable
 configuration evidence; they do not replace <code>snapshot.toml</code> as the binder.</p>
 <h2 id="historical-calibrations">Historical calibrations<a class="headerlink" href="#historical-calibrations" title="Permanent link">¶</a></h2>
 <p>Existing 2019, 2024, and 2025 calibration files are historical evidence and are
-not renamed. They will receive thin manifests that point to their existing role
-files. New campaign snapshots use the role-named folder convention from birth.</p>
+not renamed. Thin bundled binders point at them under their original names; list
+them with <code>echelle historical</code>. New campaign snapshots use the role-named folder
+convention from birth.</p>
+<p>A binder is evidence, not a snapshot: the registry reads only
+<code>echelle-snapshot/v1</code> with a <code>[validity]</code> table. Convert one with</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="n">echelle</span> <span class="n">snapshot</span> <span class="nb">import-historical</span> <span class="n">20250926_cmos</span> <span class="p">`</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>  <span class="p">-</span><span class="n">-calibrations</span> <span class="n">calibrations</span> <span class="p">`</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>  <span class="p">-</span><span class="n">-artifact-root</span> <span class="n">local</span><span class="p">\</span><span class="n">20250926_calib</span> <span class="p">`</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>  <span class="p">-</span><span class="n">-valid-from</span> <span class="n">2025</span><span class="p">-</span><span class="n">09</span><span class="p">-</span><span class="n">26</span>
+</code></pre></div>
+<p>which copies the named artifacts into an immutable, digested snapshot carrying
+the epoch you declare and an <code>[imported]</code> table naming the binder it came from.
+See <a href="../calibration-epoch-registry/">the epoch registry guide</a> for the artifact
+roots and the refusal that names a missing one.</p>
 
 
 
