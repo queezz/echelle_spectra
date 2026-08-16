@@ -310,7 +310,7 @@ def test_three_command_readme_and_installers_expose_offline_refusals() -> None:
     assert windows is not None and len(windows.group(1).strip().splitlines()) == 3
     assert macos is not None and len(macos.group(1).strip().splitlines()) == 3
     assert "OPERATOR-CHEAT-SHEET.md" in readme
-    assert "Lab is optional development convenience" in operator_guide
+    assert "not an Echelle dependency" in operator_guide
     assert "Portable kit on Windows" in operator_guide
     assert "Portable kit on macOS" in operator_guide
     powershell = (ROOT / "kit" / "install.ps1").read_text(encoding="utf-8")

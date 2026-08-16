@@ -2,8 +2,9 @@
 
 `echelle-calib` is a separate pyqtgraph window for calibration work at the
 instrument. It keeps file triage, procedure, line-identification, sphere-factor,
-configuration, and snapshot state outside the established five-tab analysis GUI.
-The Qt callbacks are adapters over UI-independent campaign and alignment state.
+configuration, and snapshot state in their own window, separate from the
+single-SIF viewer. The Qt callbacks are adapters over UI-independent campaign
+and alignment state.
 
 The bench takes whatever you throw at it. It has no required lamp, no required
 filename, and no required folder: files arrive by hand, roles are assigned by
@@ -15,8 +16,9 @@ hand, and the procedure is derived from what you actually loaded.
 echelle-calib
 ```
 
-The optional folder argument only chooses where the **Add SIF files…** dialog
-opens first:
+Name today's calibration folder and the bench uses it twice: it is where the
+**Add SIF files…** dialog opens first, and it is what both output roots are
+derived from (see [Where the bench writes](#where-the-bench-writes)).
 
 ```bash
 echelle-calib path/to/todays-calibration-folder
@@ -50,6 +52,33 @@ echelle-calib path/to/calibration-folder --file path/to/lamp.sif --watch
 
 Run `echelle-calib --help` for polling, stability, saturation, SNR, campaign,
 configuration, and snapshot controls.
+
+## Where the bench writes
+
+Both output roots are **derived from the folder argument**. Launched at
+`D:\NIFS\incoming`, the bench writes:
+
+```text
+D:\NIFS\incoming\calibrations\<snapshot-id>\         the immutable snapshot
+D:\NIFS\incoming\calibration-configs\<snapshot-id>\  the settings bundle
+```
+
+The folder argument is the calibration's own folder, and it is where you go
+looking for what the bench wrote — so that is what the roots hang off. Nothing
+is scattered into whatever directory a shortcut happened to start in any more.
+With no folder argument at all there is nothing better than the working
+directory, and the bench falls back to it.
+
+`--output-root` and `--config-root` still override each root independently, and
+an overriding path is made absolute so the window can be honest about it. A
+network path stays intact: only path joins are used, so a `\\server\share`
+root keeps its two leading separators.
+
+Either way the **Save** tab states both roots in full — shortened in the middle
+only when they will not fit, one hover or one click into the *Why this reading*
+dock away from being read exactly. Once a snapshot is saved, an **Open folder**
+button appears beside the confirmation and shows the saved folder in the
+system's own file manager, so no path has to be retyped.
 
 ## Reading the bench
 
@@ -208,7 +237,7 @@ fixed lamp list:
    the sphere pair alone unblocks this, no lamp needed;
 5. for **every lamp you actually assigned**, its signal and background rows;
 6. the lamp alignment is solved with at least two accepted anchors;
-7. the commented campaign, alignment, and export TOMLs are generated;
+7. the alignment settings and the campaign around them are saved;
 8. the snapshot is saved and validated.
 
 A Ne-only campaign therefore reaches "snapshot saved and validated" with every
@@ -335,9 +364,15 @@ The packaged default comparison uses the historical 2024 CMOS sphere pair
 because no packaged 2025 sphere pair is available. It is software rehearsal
 evidence, not a claim about a new lamp response.
 
-## Generate TOMLs and save the snapshot
+## Save the alignment settings, then save the snapshot
 
-The **Save** tab writes a new identity directory containing:
+The **Save alignment settings** button comes first: it writes the solved
+alignment, the roles you assigned, and the campaign's own settings into a new
+identity directory. Existing files are never overwritten silently — the bench
+says they are already there and offers a separate, deliberate **Regenerate**
+press, because that press discards any hand edits.
+
+The directory it writes contains:
 
 ```text
 calibration-configs/20260901_cmos/
@@ -351,9 +386,12 @@ than machine paths, parse as ordinary TOML, and remain freely hand-editable. The
 campaign file records explicit roles, lamp families, exposure evidence, and the
 sphere-comparison result. Alignment settings record the measured transform and
 anchors. The export configuration uses the existing SpectroCube configuration
-shape and snapshot role filenames. Existing configuration identities are not
-silently overwritten; choose a corrected snapshot identity if a generated bundle
-must change after review.
+shape and snapshot role filenames.
+
+The export file also carries the LHD timing and crop the bench does not measure
+— `trigger_delay_s` above all — carried forward from the previous campaign and
+marked as inherited. Review those values before the next LHD campaign; see
+[From calibration to cube](calibration-to-cube.md).
 
 **Save and validate snapshot** calls `create_snapshot()` from the established
 snapshot API. That API copies read-only source inputs into an atomic staging
@@ -402,10 +440,17 @@ calibration epoch registry without hand editing. The epoch is open-ended and
 starts on the acquisition date; `--valid-from YYYY-MM-DD` states another start,
 and the default is today.
 
-A save failure preserves classifications, comparison, anchors, and generated
-TOMLs. Correct the identity or missing input and retry. The generated-TOML
-identity must match the snapshot identity, preventing a corrected save from
-quietly using stale configuration.
+A save failure preserves classifications, comparison, anchors, and the settings
+already written. Correct the identity or missing input and retry. Those settings
+must carry the same identity as the snapshot, which prevents a corrected save
+from quietly using the previous attempt's configuration.
+
+## What happens to these files next
+
+Everything the bench saved is now input to processing — but not all of it, and
+not equally. Which file supplies which part of a finished cube, and what a cube
+records about the calibration behind it, is
+[From calibration to cube](calibration-to-cube.md).
 
 ## Tested evidence boundary
 

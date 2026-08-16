@@ -78,8 +78,10 @@ nav:
       - Overview: index.md
       - Band data: band-data.md
   - Usage:
+      - Where to start: usage-overview.md
       - Operator cheat sheet: operator-cheat-sheet.md
-      - Basic usage: usage.md
+      - Single-SIF viewer: usage.md
+      - From calibration to cube: calibration-to-cube.md
       - Calibration snapshots: calibration-snapshots.md
       - Calibration epoch registry: calibration-epoch-registry.md
       - Durable campaign runs: campaign-runs.md

@@ -1,5 +1,10 @@
 # Exporting to SpectroCube
 
+This page is the reference for the cube format and every export option. For the
+workflow view — how a bench session's saved files become a cube, and where each
+number in a finished cube came from — see
+[From calibration to cube](calibration-to-cube.md).
+
 ## What is SpectroCube?
 
 [SpectroCube](https://queezz.github.io/spectrocube/) is a neutral, self-describing

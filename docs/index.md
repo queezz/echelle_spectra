@@ -2,11 +2,15 @@
 
 **Echelle Spectra** is a tool for extracting and analyzing calibrated spectra from 2D echelle spectrometer images.
 
-For copy-paste commands, start with the [operator cheat
-sheet](operator-cheat-sheet.md). It distinguishes portable-kit commands from a
-development checkout and lists every installed GUI and CLI surface.
+Three surfaces share one calibration and extraction pipeline: the **live
+calibration bench** you use at the instrument, the **`echelle` campaign
+commands** that convert whole drives, and the **single-SIF viewer** for looking
+at one shot.
 
-It provides a graphical interface for interactive use, but the underlying workflow can also be driven from Jupyter notebooks or scripts — useful for batch processing or automated pipelines.
+[Where to start](usage-overview.md) routes by task in one table. For copy-paste
+commands, go to the [operator cheat sheet](operator-cheat-sheet.md): it
+distinguishes portable-kit commands from a development checkout and lists every
+installed surface.
 
 ---
 
@@ -26,25 +30,33 @@ It provides a graphical interface for interactive use, but the underlying workfl
 git clone https://github.com/queezz/echelle_spectra.git
 cd echelle_spectra
 pip install -e .
-echelle_spectra          # launch GUI
+echelle status           # what calibrations and runs exist
+echelle_spectra          # open the single-SIF viewer
 ```
+
+The primary workflow is **snapshot → registry → process**. See
+[Where to start](usage-overview.md).
 
 ---
 
 ## CMOS workflow notebooks
 
-Notebooks for the Andor CMOS (2560×2160) setup are in `examples/workflows/black_cmos/`:
+The notebooks in `examples/workflows/black_cmos/` are a **manual and tuning
+reference** for the Andor CMOS (2560×2160) setup — kept for a new optical setup
+or a fit worth stepping through, not for routine work.
 
-| Notebook | Purpose | Frequency |
+| Notebook | Purpose | When |
 |---|---|---|
 | `01_load_image.ipynb` | Sanity check: load image, verify dimensions | as needed |
 | `02_automated_pattern_extraction.ipynb` | Run packaged pattern extraction and compare traces | rare — only if optics moved |
-| `02_pattern_calibration.ipynb` | Manual/tuning reference for pattern extraction | rare — setup/debugging |
+| `02_pattern_calibration.ipynb` | Manual pattern tuning and debugging | rare — setup/debugging |
 | `03_wavelength_calibration.ipynb` | Manual line ID, polynomial fit | rare — new setup only |
-| `04_extract_spectrum.ipynb` | Load → calibrate → extract → save | **routine** |
-| `05_calibration_alignment.ipynb` | Align existing wavelength table with new Ne lamp data | session recalibration |
+| `04_extract_spectrum.ipynb` | One-file walkthrough: load → calibrate → extract → save | reference |
+| `05_calibration_alignment.ipynb` | Align existing wavelength table with new Ne lamp data | superseded by the bench |
 
-For daily use only `04_extract_spectrum.ipynb` is needed.
+For routine calibration use the [live bench](calibration-bench.md); for routine
+conversion use [`echelle process`](calibration-to-cube.md). Both record
+provenance the notebooks do not.
 
 ---
 

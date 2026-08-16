@@ -5,10 +5,14 @@ It separates the portable NIFS kit from a source checkout because their command
 prefixes are different. The portable kit does **not** add commands to the
 machine-wide `PATH`.
 
-Lab is optional development convenience on the owner's own machines. It is not
-an Echelle dependency and is not required on an institute workstation. For the
-trip, use the portable-kit section below. Administrator access may be available
-there, but the kit does not need to use it or change the machine-wide Python.
+If you are not sure which of the three surfaces your job belongs to, read
+[Where to start](usage-overview.md) first; it routes by task in one table.
+
+Lab is queezz's own private development helper for switching environments on
+his own machines. It is not an Echelle dependency, it is not required on an
+institute workstation, and nothing here needs it. For the trip, use the
+portable-kit section below. Administrator access may be available there, but
+the kit does not need to use it or change the machine-wide Python.
 
 The portable 1.6 kit is the current released travel kit. Verify the installed
 version before a campaign and keep campaign data outside the replaceable kit.
@@ -26,8 +30,8 @@ Set-ExecutionPolicy -Scope Process Bypass
 .\echelle.ps1 status
 ```
 
-The main GUI, live bench, and specialist commands live inside the kit-local
-environment:
+The viewer, the live bench, and the specialist commands live inside the
+kit-local environment:
 
 ```powershell
 & ".\.venv\Scripts\echelle_spectra.exe"
@@ -108,8 +112,8 @@ developer tools cannot be assumed.
 
 | Command | Use it for | Normal trip use |
 | --- | --- | --- |
-| `echelle_spectra` | Main five-tab analysis GUI for loading, calibrating, viewing, fitting, and exporting spectra | Yes |
-| `echelle-calib [FOLDER]` | Separate live calibration bench; drag SIFs onto it (FOLDER only sets where the file dialog opens, `--watch` adds folder polling), triages every exposure, takes hand-assigned roles for any lamp, fits alignment, compares sphere response, and builds configuration/snapshot evidence | Yes, during calibration |
+| `echelle_spectra` | Single-SIF viewer: open one shot, see the image, the extracted orders, the calibrated spectrum, and the known-line overlays | Yes, for looking at a shot |
+| `echelle-calib [FOLDER]` | Separate live calibration bench; drag SIFs onto it (FOLDER sets where the file dialog opens **and** where the two output folders are derived; `--watch` adds folder polling), triages every exposure, takes hand-assigned roles for any lamp, fits alignment, compares sphere response, and builds configuration/snapshot evidence | Yes, during calibration |
 | `echelle status` | Summarizes snapshots, registry presence, and durable processing receipts | Yes; safest first command |
 | `echelle snapshot create` | Copies role-named calibration inputs into one immutable, digested snapshot | Yes, usually through the bench |
 | `echelle snapshot validate DIR` | Rechecks snapshot schema, paths, sizes, and SHA-256 digests | Yes |
@@ -120,7 +124,7 @@ developer tools cannot be assumed.
 | `echelle txt CUBE OUTPUT` / `echelle-cube2txt` | Writes LHD text at the frozen legacy header; refuses a cube missing `trigger_delay_s`, `frame_interval_s` or `exposure_s` | Candidate; no raw SIF needed |
 | `echelle recal-cube CUBE --new-snapshot DIR` | Applies safe wavelength/factor snapshot deltas and refuses geometry changes | Candidate; reviewed repair only |
 | `echelle drift audit/refine` | Samples Balmer/Fulcher centroids, solves one rigid detector shift in pixels, emits a four-state verdict, and accepts immutable `-rN` refinements. Each Balmer window is judged against both the H and D references and assigned to the nearer one, so a deuterium shot is tagged `D` and read as aligned instead of condemned by the 0.178 nm isotope offset; a `D` shot drops the H2 Fulcher anchors, and a tag that disagrees with the bundled LHD deuterium calendar is flagged in the evidence, never silently resolved | Candidate; required before any registry run |
-| `echelle web --catalog INDEX --output DIR` | Builds the static read-only campaign page: four tabs — Now (a per-drive stepper saying what to do first), Drives (catalog with a local Find), Calibration (epochs and drift verdicts) and the packaged reading room; `--registry` and `--drift` are what let the stepper place the campaign | Candidate; never controls workers |
+| `echelle web --catalog INDEX --output DIR` | Builds the static read-only campaign page into `DIR/index.html`, which you open by double-clicking it — four tabs: Now (a per-drive stepper saying what to do first), Drives (catalog with a local Find), Calibration (epochs and drift verdicts) and the packaged reading room; `--registry` and `--drift` are what let the stepper place the campaign | Candidate; never controls workers |
 | `echelle historical` | Validates the three thin historical calibration binders | Candidate; inspection only |
 | `echelle-pattern SPHERE BACKGROUND` | Previews or writes a detector order-pattern fit | Specialist recalibration |
 | `echelle-align SIGNAL BACKGROUND SPHERE SPHERE_BG` | Previews or saves a rigid wavelength-table alignment | Specialist recalibration |
@@ -150,6 +154,9 @@ $Data = "D:\NIFS"
   --runs "$Data\runs"
 
 # 2. Open the live bench on the acquisition folder, then drag SIFs onto it.
+#    The two roots below are only needed because this loop keeps them one
+#    level up; without them the bench writes calibrations\ and
+#    calibration-configs\ inside the folder argument itself.
 & ".\.venv\Scripts\echelle-calib.exe" "$Data\incoming" `
   --output-root "$Data\calibrations" `
   --config-root "$Data\calibration-configs"
@@ -184,6 +191,25 @@ $Data = "D:\NIFS"
   --calibrations "$Data\calibrations" `
   --volume-label NIFS-A `
   --drift-verdict "$Data\epoch-drift.json"
+
+# 8. Index what this drive now holds, and fold it into the all-years index.
+.\echelle.ps1 catalog build "$Data\cubes" `
+  --volume-label NIFS-A `
+  --receipt-dir "$Data\runs" `
+  --output "$Data\cubes\catalog.json"
+
+.\echelle.ps1 catalog merge "$Data\cubes\catalog.json" `
+  -o "$Data\all-years.json"
+
+# 9. Build and open the campaign page.
+.\echelle.ps1 web `
+  --catalog "$Data\all-years.json" `
+  --output "$Data\campaign-page" `
+  --registry "$Data\calibration_registry.toml" `
+  --calibrations "$Data\calibrations" `
+  --drift "$Data\epoch-drift.json"
+
+Invoke-Item "$Data\campaign-page\index.html"
 ```
 
 ### macOS Terminal
@@ -198,6 +224,9 @@ data="/Volumes/NIFS"
   --runs "$data/runs"
 
 # 2. Open the live bench on the acquisition folder, then drag SIFs onto it.
+#    The two roots below are only needed because this loop keeps them one
+#    level up; without them the bench writes calibrations/ and
+#    calibration-configs/ inside the folder argument itself.
 ./.venv/bin/echelle-calib "$data/incoming" \
   --output-root "$data/calibrations" \
   --config-root "$data/calibration-configs"
@@ -232,6 +261,25 @@ data="/Volumes/NIFS"
   --calibrations "$data/calibrations" \
   --volume-label NIFS-A \
   --drift-verdict "$data/epoch-drift.json"
+
+# 8. Index what this drive now holds, and fold it into the all-years index.
+./echelle catalog build "$data/cubes" \
+  --volume-label NIFS-A \
+  --receipt-dir "$data/runs" \
+  --output "$data/cubes/catalog.json"
+
+./echelle catalog merge "$data/cubes/catalog.json" \
+  -o "$data/all-years.json"
+
+# 9. Build and open the campaign page.
+./echelle web \
+  --catalog "$data/all-years.json" \
+  --output "$data/campaign-page" \
+  --registry "$data/calibration_registry.toml" \
+  --calibrations "$data/calibrations" \
+  --drift "$data/epoch-drift.json"
+
+open "$data/campaign-page/index.html"
 ```
 
 Put every accepted snapshot ID into the ordered registry and verify its
@@ -243,6 +291,55 @@ which processes at most N resolved files and marks its receipt and cubes as an
 unverified sample, or `--drift-verdict`, which spends the sampled evidence the
 audit wrote. A run with an explicit `--config` calibration and no registry stays
 legal and is recorded as `ungated (no registry)`.
+
+## Where the bench writes
+
+`echelle-calib` derives both of its output folders from the folder argument it
+was launched at. Launch it at `D:\NIFS\incoming` and it writes:
+
+```text
+D:\NIFS\incoming\calibrations\<snapshot-id>\        the immutable snapshot
+D:\NIFS\incoming\calibration-configs\<snapshot-id>\ campaign/alignment/export settings
+```
+
+That is the fix for a bench started from a shortcut scattering its output into
+whatever directory the shortcut happened to begin in. To put them somewhere
+else — the trip loop above keeps them one level up, beside the shots —
+`--output-root` and `--config-root` override each independently.
+
+Either way the Save tab states both paths **in full**, so you can read where
+the files will go before pressing anything, and once a snapshot is saved an
+**Open folder** button appears beside the confirmation and shows it in the file
+manager. No path has to be retyped, which matters most on a network share.
+
+What each of those files is for, and which of them a cube is actually built
+from, is [From calibration to cube](calibration-to-cube.md).
+
+## The campaign page
+
+`echelle web` writes one self-contained `index.html`. There is no server and
+nothing is fetched: **double-click the file** to open it in a browser.
+
+```powershell
+.\echelle.ps1 web `
+  --catalog "$Data\all-years.json" `
+  --output "$Data\campaign-page" `
+  --registry "$Data\calibration_registry.toml" `
+  --calibrations "$Data\calibrations" `
+  --drift "$Data\epoch-drift.json"
+```
+
+- `--catalog` is required: the merged all-years index from `echelle catalog
+  merge`, or a single drive's catalog.
+- `--output` is required: the folder `index.html` is written into.
+- `--registry` and `--calibrations` name the epochs, and `--drift` supplies the
+  verdicts; together they are what let the Now tab place the campaign and say
+  what to do next. Without them the page still builds, with less to say.
+- `--document` appends one extra Markdown file after the packaged reading room.
+
+The page is a snapshot of the moment it was built. After processing more shots,
+rebuild the catalog and rerun `echelle web` over the same `--output` folder to
+refresh it. The page never controls a worker and never writes campaign data.
 
 ## Safe inspection versus writing
 

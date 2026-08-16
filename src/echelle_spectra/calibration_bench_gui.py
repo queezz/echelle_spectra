@@ -1892,7 +1892,7 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
             "Where saved snapshots are written",
             "Every snapshot this bench saves is created inside this folder, "
             "one subfolder per snapshot identity. Unless you passed "
-            "--output-root, it is the calibrations folder beside the data "
+            "--output-root, it is the calibrations folder inside the data "
             f"folder the bench was launched at. In full: {self.output_root}",
             hint=str(self.output_root),
         )
@@ -1905,7 +1905,7 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
             "The commented campaign, alignment and export files are written "
             "inside this folder, one subfolder per snapshot identity. Unless "
             "you passed --config-root, it is the calibration-configs folder "
-            "beside the data folder the bench was launched at. In full: "
+            "inside the data folder the bench was launched at. In full: "
             f"{self.config_root}",
             hint=str(self.config_root),
         )

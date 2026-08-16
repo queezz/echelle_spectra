@@ -1,66 +1,89 @@
-# Basic Usage
-
-!!! note
-    Detailed usage examples and API reference will be added in a future documentation pass. For now, see the example notebooks in `examples/workflows/black_cmos/`.
-
----
-
-## Intended workflow
-
-The general processing pipeline for an echelle spectrum is:
-
-1. **Load a 2D echelle image**  
-   Read the raw detector image from file (FITS, TIFF, or camera-native format).
-
-2. **Define or load the order pattern**  
-   Either load a previously saved pattern calibration, or run order detection on a suitable image (flat-field or bright continuum source). This step is only needed when the optical setup changes.
-
-3. **Extract order spectra**  
-   Apply the pattern to slice each diffraction order from the 2D image into a 1D intensity array.
-
-4. **Calibrate wavelength**  
-   Map pixel positions to wavelengths using a calibration solution (polynomial fit derived from known emission lines). Again, this is only redone when the setup changes.
-
-5. **Inspect or analyze spectral windows**  
-   Use the defined wavelength windows (see [Band data](band-data.md)) to locate and integrate lines of interest such as H-alpha, He-587, CII-515, etc.
-
-For small detector or optics shifts, use the headless
-[Calibration alignment](calibration-alignment.md) workflow to fit a rigid correction
-and write a separate adjusted wavelength table. Do not overwrite the historical
-calibration files.
-
-Before exporting a dataset, run the
-[Wavelength line validation](line-validation.md) gate on real plasma lines. Start
-with Balmer lines, then use Fulcher-alpha line positions as supporting checks when
-the features are visible and not dominated by blends.
-
-After validation, use the
-[Batch SpectroCube workflow](spectrocube-batch-workflow.md) to generate cropped,
-absolute `wmsr` SpectroCube products from the dataset plan.
-
----
-
-## GUI
-
-Launch the graphical interface with:
+# The single-SIF viewer
 
 ```bash
 echelle_spectra
 ```
 
-The GUI wraps the same extraction and calibration pipeline in an interactive window.
+`echelle_spectra` is the **viewer**: it opens one SIF at a time and shows you
+what is in it — the detector image, the extracted orders, the calibrated
+spectrum, and known-line overlays on top. Use it to look at a shot.
+
+It is not where calibrations are made and not where drives are converted:
+
+- **Making a calibration** → the live bench, `echelle-calib`.
+  See [Live calibration bench](calibration-bench.md).
+- **Converting SIFs to cubes and LHD text** → the `echelle` umbrella command.
+  See [Where to start](usage-overview.md) and the
+  [operator cheat sheet](operator-cheat-sheet.md).
+
+---
+
+## What the viewer shows
+
+- The raw 2D echelle image, with the fitted order pattern over it.
+- Each diffraction order extracted into a 1D spectrum.
+- That spectrum on a wavelength axis, from the loaded calibration.
+- Optional Balmer, Fulcher H₂, ThAr, Ne, and Hg line markers, each separately
+  toggleable. All overlays start off; labels thin out in wide views and reveal
+  local lines as you zoom. The viewer and `echelle-validate-lines` read the same
+  provenance-carrying tables — see
+  [Known-line overlays](known-line-overlays.md).
+- The defined spectral windows for lines of interest — H-alpha, He-587,
+  CII-515, and the rest. See [Band data](band-data.md).
+
+---
+
+## How a spectrum is built
+
+The same five steps happen whether you are in the viewer, at the bench, or
+running `echelle process`:
+
+1. **Load the 2D image.** The raw detector frame from the SIF.
+2. **Apply the order pattern.** Where each diffraction order sits on the
+   detector. Only redetermined when the optics move.
+3. **Extract the orders.** Slice each order out of the image into a 1D
+   intensity array.
+4. **Apply the wavelength solution.** Map detector column to wavelength through
+   the per-order polynomial fit.
+5. **Read the windows.** Locate and integrate the lines of interest.
+
+Steps 2 and 4 are the calibration. Where the files behind them come from, and
+what a finished cube records about them, is
+[From calibration to cube](calibration-to-cube.md).
+
+---
+
+## When the instrument has moved a little
+
+For a small detector or optics shift, fit a rigid correction rather than
+recalibrating from scratch. The live bench does this interactively; the same fit
+is available headlessly through
+[Calibration alignment](calibration-alignment.md), which writes a **separate**
+adjusted wavelength table. Never overwrite the historical calibration files.
+
+Before exporting a dataset, run the
+[Wavelength line validation](line-validation.md) gate on real plasma lines:
+Balmer first, then Fulcher-alpha positions as supporting checks where the
+features are visible and not dominated by blends.
 
 ---
 
 ## Notebooks
 
-For scripted or batch workflows, see the example notebooks:
+The notebooks in `examples/workflows/black_cmos/` are a **manual and tuning
+reference**, kept for the cases the packaged commands do not cover — a new
+optical setup, a pattern that needs to be talked into place by hand, a fit worth
+inspecting step by step.
 
-```
-examples/workflows/black_cmos/
-├── 01_load_image.ipynb
-├── 02_pattern_calibration.ipynb
-├── 03_wavelength_calibration.ipynb
-├── 04_extract_spectrum.ipynb    ← routine daily use
-└── 05_calibration_alignment.ipynb
-```
+| Notebook | Use it for |
+| --- | --- |
+| `01_load_image.ipynb` | Sanity check: load an image, verify dimensions |
+| `02_automated_pattern_extraction.ipynb` | Run packaged pattern extraction and compare traces |
+| `02_pattern_calibration.ipynb` | Manual pattern tuning and debugging |
+| `03_wavelength_calibration.ipynb` | Manual line identification and polynomial fit — new setup only |
+| `04_extract_spectrum.ipynb` | Load → calibrate → extract → save, one file at a time |
+| `05_calibration_alignment.ipynb` | Align an existing wavelength table against fresh lamp data |
+
+For routine work, prefer the bench for calibration and `echelle process` for
+conversion: both record provenance the notebooks do not. Historical notebooks
+are in `examples/obsolete/`.

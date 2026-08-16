@@ -4,6 +4,10 @@ Use the epoch registry when one processing run spans more than one calibration
 context. It resolves one validated immutable snapshot for each source before
 the source is opened with a calibration.
 
+For the plainer walk from a bench session to a finished cube — which saved file
+supplies which part of it — start with
+[From calibration to cube](calibration-to-cube.md).
+
 ## One boundary authority
 
 Shot/date boundaries live only in each snapshot's existing `[validity]` table:
