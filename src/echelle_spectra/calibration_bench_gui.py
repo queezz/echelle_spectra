@@ -8,7 +8,7 @@ import platform
 import sys
 from collections.abc import Sequence
 from datetime import date
-from pathlib import Path
+from pathlib import Path, PurePath
 
 import numpy as np
 import pyqtgraph as pg
@@ -57,6 +57,62 @@ _DEFAULT_PREVIOUS_SPHERE = _CALIBRATION_DIR / "sphere_cmos_20240305.sif"
 _DEFAULT_PREVIOUS_SPHERE_BACKGROUND = (
     _CALIBRATION_DIR / "sphere_cmos_20240305_bkg.sif"
 )
+
+#: The two folder names the bench writes under, wherever its roots end up.
+SNAPSHOT_ROOT_NAME = "calibrations"
+CONFIG_ROOT_NAME = "calibration-configs"
+
+
+def absolute_root(path: str | PurePath) -> Path:
+    """Return *path* as an absolute path without asking the filesystem anything.
+
+    ``resolve()`` is the obvious call and the wrong one here: it asks the
+    operating system, and asking about ``\\\\server\\share\\…`` costs a network
+    round trip that can hang when the share is away.  A path that is already
+    absolute is already the honest answer — only a relative one needs the
+    working directory written in front of it.  A pure path is handed back as it
+    came, so a Windows UNC path can be reasoned about on any platform.
+    """
+
+    base = path if isinstance(path, PurePath) else Path(path)
+    if base.is_absolute():
+        return base  # type: ignore[return-value]
+    return Path.cwd() / base
+
+
+def default_bench_roots(folder: str | PurePath | None = None) -> tuple[Path, Path]:
+    """Where snapshots and generated settings land when no flag says otherwise.
+
+    The bench is launched *at* a calibration folder, and that folder is where
+    the operator goes looking for what the bench wrote.  Deriving both roots
+    from it is what stopped a run against a NAS folder from scattering its
+    TOMLs into whatever directory the shortcut happened to start in.  With no
+    folder to derive from there is nothing better than the working directory,
+    so that is what it falls back to — but the Save tab says so out loud
+    either way.
+
+    Only ``pathlib`` joins are used, which is what keeps a UNC root intact: a
+    ``Path`` appends below ``\\\\server\\share`` without ever losing the two
+    leading separators that string surgery eats.
+    """
+
+    base = absolute_root(Path.cwd() if folder is None else folder)
+    return base / SNAPSHOT_ROOT_NAME, base / CONFIG_ROOT_NAME
+
+
+def open_containing_folder(path: str | Path) -> bool:
+    """Show one saved thing's folder in the system's own file manager.
+
+    ``QUrl.fromLocalFile`` is what makes this portable and what makes it work
+    for a UNC path — it renders ``\\\\server\\share\\x`` as a ``file:`` URL
+    Explorer opens.  A directory is shown as itself; anything else is shown by
+    its parent, because the folder is what the operator wanted to see.
+    """
+
+    target = Path(path)
+    folder = target if target.is_dir() else target.parent
+    return bool(QtGui.QDesktopServices.openUrl(QtCore.QUrl.fromLocalFile(str(folder))))
+
 
 #: Role labels are deliberately short.  The Role control shows only the role;
 #: nothing about a file's *state* is ever written into it, because a combo box
@@ -505,8 +561,8 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         campaign: CalibrationCampaignSession | None = None,
         watcher: StableSifWatcher | None = None,
         loader: FrameLoader | None = None,
-        output_root: str | Path = "calibrations",
-        config_root: str | Path = "calibration-configs",
+        output_root: str | Path = SNAPSHOT_ROOT_NAME,
+        config_root: str | Path = CONFIG_ROOT_NAME,
         snapshot_id: str = "",
         detector: str = "cmos",
         base_snapshot: str = "",
@@ -519,8 +575,12 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         self.campaign = campaign
         self.watcher = watcher
         self.loader = loader
-        self.output_root = Path(output_root)
-        self.config_root = Path(config_root)
+        # Absolute from here on, whatever the caller passed.  A bare name is a
+        # promise about the working directory, and a display that repeats the
+        # bare name keeps that promise secret — which is exactly how a campaign
+        # got saved into the launcher's home folder instead of beside its data.
+        self.output_root = absolute_root(output_root)
+        self.config_root = absolute_root(config_root)
         self.initial_snapshot_id = snapshot_id
         self.initial_detector = detector
         self.initial_base_snapshot = base_snapshot
@@ -537,6 +597,9 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         #: that identity may be overwritten, and only while the id field still
         #: names it.
         self._refused_identity = ""
+        #: The folder the last successful snapshot save wrote, so the offer to
+        #: open it points at what was actually written rather than at a guess.
+        self._saved_snapshot_root: Path | None = None
         self._pattern_items: list[pg.PlotDataItem] = []
         self._pattern_key: tuple[int, int] | None = None
         self._selected_trace: int | None = None
@@ -1816,12 +1879,37 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         form.addRow("Notes", self.notes_edit)
         layout.addWidget(identity_group)
 
-        destination = QtWidgets.QLabel(
-            f"Snapshots: {self.output_root.name}\nConfigs: {self.config_root.name}"
+        # Where the files go, in full.  The bare folder names that used to be
+        # here read as a promise that the bench wrote beside the data, and the
+        # bench had no such promise to make: it wrote under whatever directory
+        # the launcher started in.  The whole path is shown, shortened in the
+        # middle only when it will not fit, and is one hover — or one click
+        # into the Why dock — away from being read exactly.
+        self.snapshot_root_value = _ElidingLabel(f"Snapshots: {self.output_root}")
+        self.snapshot_root_value.setObjectName("mutedText")
+        self._explainable(
+            self.snapshot_root_value,
+            "Where saved snapshots are written",
+            "Every snapshot this bench saves is created inside this folder, "
+            "one subfolder per snapshot identity. Unless you passed "
+            "--output-root, it is the calibrations folder beside the data "
+            f"folder the bench was launched at. In full: {self.output_root}",
+            hint=str(self.output_root),
         )
-        destination.setObjectName("mutedText")
-        destination.setWordWrap(True)
-        layout.addWidget(destination)
+        layout.addWidget(self.snapshot_root_value)
+        self.config_root_value = _ElidingLabel(f"Configs: {self.config_root}")
+        self.config_root_value.setObjectName("mutedText")
+        self._explainable(
+            self.config_root_value,
+            "Where the generated settings files are written",
+            "The commented campaign, alignment and export files are written "
+            "inside this folder, one subfolder per snapshot identity. Unless "
+            "you passed --config-root, it is the calibration-configs folder "
+            "beside the data folder the bench was launched at. In full: "
+            f"{self.config_root}",
+            hint=str(self.config_root),
+        )
+        layout.addWidget(self.config_root_value)
         # "TOML" names the file format, which is not what the operator is
         # deciding to do (F21 item 6).  What this step saves is the alignment
         # and the campaign around it; that the files happen to be commented
@@ -1855,7 +1943,18 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         layout.addWidget(self.save_snapshot_button)
         self.save_state_value = QtWidgets.QLabel("NOT READY")
         self.save_state_value.setObjectName("stateBadge")
-        layout.addWidget(self.save_state_value)
+        # A confirmation that names a folder and leaves the operator to go find
+        # it is half a confirmation, and on a UNC path it is the half that
+        # costs the most typing.  The offer appears only once there is a real
+        # saved folder to open.
+        confirmation = QtWidgets.QHBoxLayout()
+        confirmation.addWidget(self.save_state_value)
+        self.open_snapshot_button = QtWidgets.QPushButton("Open folder")
+        self.open_snapshot_button.setVisible(False)
+        self.open_snapshot_button.clicked.connect(self._open_saved_snapshot_folder)
+        confirmation.addWidget(self.open_snapshot_button)
+        confirmation.addStretch(1)
+        layout.addLayout(confirmation)
         self.toml_preview = QtWidgets.QPlainTextEdit()
         self.toml_preview.setReadOnly(True)
         self.toml_preview.setPlaceholderText(
@@ -2772,10 +2871,31 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         elif hasattr(result, "snapshot_id"):
             correction = getattr(self.campaign, "wavelength_correction", None)
             detail = "" if correction is None else f" Saved wavelength.txt: {correction.reason}."
+            # The one place the operator learns where the campaign went.  It
+            # says the whole path, because "calibrations" said nothing about
+            # which machine's calibrations folder it meant.
+            saved_root = absolute_root(
+                getattr(result, "root", self.output_root / result.snapshot_id)
+            )
+            self._saved_snapshot_root = saved_root
+            self.open_snapshot_button.setVisible(True)
+            self.open_snapshot_button.setToolTip(f"Open {saved_root} in the file manager")
             self.message_value.setText(
-                f"Snapshot {result.snapshot_id} saved and validated through Packet 0.{detail}"
+                f"Snapshot {result.snapshot_id} saved and validated through "
+                f"Packet 0 in {saved_root}.{detail}"
             )
         self.refresh()
+
+    def _open_saved_snapshot_folder(self) -> None:
+        """Show the folder the last save wrote, in the system file manager."""
+
+        if self._saved_snapshot_root is None:
+            return
+        if not open_containing_folder(self._saved_snapshot_root):
+            self.message_value.setText(
+                f"The file manager would not open {self._saved_snapshot_root}; "
+                "the snapshot itself is saved and untouched."
+            )
 
     @QtCore.pyqtSlot(str)
     def _campaign_task_failed(self, reason: str) -> None:
@@ -4096,17 +4216,26 @@ def _build_parser() -> argparse.ArgumentParser:
             "(default: today)"
         ),
     )
+    # Left unset on purpose: the default is not knowable until the folder
+    # argument has been parsed, and a default computed from the working
+    # directory is precisely the trap this replaces.
     parser.add_argument(
         "--output-root",
         type=Path,
-        default=Path.cwd() / "calibrations",
-        help="snapshot parent directory",
+        default=None,
+        help=(
+            "snapshot parent directory "
+            f"(default: {SNAPSHOT_ROOT_NAME}/ inside the folder argument)"
+        ),
     )
     parser.add_argument(
         "--config-root",
         type=Path,
-        default=Path.cwd() / "calibration-configs",
-        help="parent for generated commented TOML bundles",
+        default=None,
+        help=(
+            "parent for generated commented TOML bundles "
+            f"(default: {CONFIG_ROOT_NAME}/ inside the folder argument)"
+        ),
     )
     parser.add_argument("--poll-ms", type=int, default=1000)
     parser.add_argument("--stable-polls", type=int, default=2)
@@ -4134,6 +4263,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         raise SystemExit(f"integrating-sphere reference not found: {args.integral}")
     if args.poll_ms < 50:
         raise SystemExit("--poll-ms must be at least 50")
+
+    # The folder argument is the campaign's own folder, so it — not whatever
+    # directory the shortcut started in — is what the roots hang off.  An
+    # explicit flag still wins, and is made absolute so the Save tab can be
+    # honest about it too.
+    default_output, default_config = default_bench_roots(args.folder)
+    output_root = default_output if args.output_root is None else absolute_root(args.output_root)
+    config_root = default_config if args.config_root is None else absolute_root(args.config_root)
 
     pattern = np.loadtxt(args.pattern, dtype=int)
     lines = load_wavelength_table(args.wavelength)
@@ -4175,8 +4312,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         campaign=campaign,
         watcher=watcher,
         loader=loader,
-        output_root=args.output_root,
-        config_root=args.config_root,
+        output_root=output_root,
+        config_root=config_root,
         snapshot_id=args.snapshot_id,
         detector=args.detector,
         base_snapshot=args.base_snapshot,

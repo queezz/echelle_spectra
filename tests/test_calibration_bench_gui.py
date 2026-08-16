@@ -7,7 +7,7 @@ import subprocess
 import sys
 from dataclasses import replace
 from datetime import date
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -28,15 +28,19 @@ from echelle_spectra.calibration_bench_gui import (
     BENCH_HEADLINE_POINT_SIZE,
     BENCH_PREFERRED_LINES,
     BENCH_TOOLTIP_LIMIT,
+    CONFIG_ROOT_NAME,
+    SNAPSHOT_ROOT_NAME,
     CalibrationBenchWindow,
     _build_parser,
     _ElidingLabel,
+    absolute_root,
     apply_windows_taskbar_identity,
     bench_default_geometry,
     bench_layout_unit,
     bench_minimum_size,
     bench_point_sizes,
     bench_window_icon,
+    default_bench_roots,
     forget_session_layout,
     one_line,
     role_combo_minimum_width,
@@ -2469,4 +2473,214 @@ def test_one_campaign_refresh_derives_the_procedure_once(qt_app, tmp_path):
     window.refresh_campaign()
 
     assert len(derived) == 1
+    window.close()
+
+
+# ----------------------------------------------------------------------
+# The bench saves beside its data, and says so
+# ----------------------------------------------------------------------
+
+
+def _bench_from_main(monkeypatch, argv) -> dict:
+    """Run ``main`` off-screen and report the one window it opened.
+
+    The real ``exec_`` never returns, so it is replaced by a look at whatever
+    window was not there a moment ago — the same trick the icon test uses.
+    """
+
+    monkeypatch.setattr(
+        bench_gui, "apply_windows_taskbar_identity", lambda *args, **values: None
+    )
+
+    def bench_windows():
+        application = QtWidgets.QApplication.instance()
+        return {
+            id(widget): widget
+            for widget in application.topLevelWidgets()
+            if isinstance(widget, CalibrationBenchWindow)
+        }
+
+    before = set(bench_windows())
+    seen: dict = {}
+
+    def fake_exec(self=None):
+        opened = [
+            widget for key, widget in bench_windows().items() if key not in before
+        ]
+        assert len(opened) == 1
+        window = opened[0]
+        seen["output_root"] = window.output_root
+        seen["config_root"] = window.config_root
+        seen["snapshots_said"] = window.snapshot_root_value.text()
+        seen["configs_said"] = window.config_root_value.text()
+        seen["snapshots_tooltip"] = window.snapshot_root_value.toolTip()
+        window.close()
+        return 0
+
+    monkeypatch.setattr(QtWidgets.QApplication, "exec_", fake_exec)
+    assert bench_gui.main(argv) == 0
+    return seen
+
+
+def test_the_folder_argument_decides_where_the_campaign_is_saved(
+    qt_app, tmp_path, monkeypatch
+):
+    """The field report: TOMLs landed in the launch directory, not the data.
+
+    Both roots defaulted to ``Path.cwd()``-relative, so a bench opened on a
+    NAS acquisition folder wrote its calibrations into whatever directory the
+    shortcut happened to start in — with nothing on screen to say so.  The
+    folder the bench was pointed at is the folder it saves beside.
+    """
+
+    data = tmp_path / "20250926_calib"
+    data.mkdir()
+    elsewhere = tmp_path / "launch-dir"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
+
+    seen = _bench_from_main(monkeypatch, [str(data)])
+
+    assert seen["output_root"] == data / SNAPSHOT_ROOT_NAME
+    assert seen["config_root"] == data / CONFIG_ROOT_NAME
+    assert seen["output_root"].is_absolute() and seen["config_root"].is_absolute()
+    # And emphatically not the working directory the launcher started in.
+    assert elsewhere not in seen["output_root"].parents
+    assert elsewhere not in seen["config_root"].parents
+
+
+def test_without_a_folder_argument_the_roots_stay_where_the_bench_started(
+    qt_app, tmp_path, monkeypatch
+):
+    """There is nothing better than the working directory — but it is absolute."""
+
+    here = tmp_path / "just-here"
+    here.mkdir()
+    monkeypatch.chdir(here)
+
+    seen = _bench_from_main(monkeypatch, [])
+
+    assert seen["output_root"] == here / SNAPSHOT_ROOT_NAME
+    assert seen["config_root"] == here / CONFIG_ROOT_NAME
+
+
+def test_explicit_roots_beat_both_the_folder_and_the_working_directory(
+    qt_app, tmp_path, monkeypatch
+):
+    """A flag is a decision; deriving from the folder is only a default."""
+
+    data = tmp_path / "20250926_calib"
+    data.mkdir()
+    chosen_snapshots = tmp_path / "archive" / "snaps"
+    monkeypatch.chdir(tmp_path)
+
+    seen = _bench_from_main(
+        monkeypatch,
+        [
+            str(data),
+            "--output-root",
+            str(chosen_snapshots),
+            "--config-root",
+            "relative-configs",
+        ],
+    )
+
+    assert seen["output_root"] == chosen_snapshots
+    # A relative flag is honoured, and made absolute so the display cannot lie.
+    assert seen["config_root"] == tmp_path / "relative-configs"
+    assert seen["config_root"].is_absolute()
+    # The parser itself keeps "unset" distinguishable from "set to the default".
+    assert _build_parser().parse_args([]).output_root is None
+    assert _build_parser().parse_args([]).config_root is None
+
+
+def test_the_save_tab_names_the_whole_destination_not_its_last_folder(
+    qt_app, tmp_path, monkeypatch
+):
+    """``calibrations`` names a folder on every machine; it located none of them."""
+
+    data = tmp_path / "20250926_calib"
+    data.mkdir()
+    monkeypatch.chdir(tmp_path)
+
+    seen = _bench_from_main(monkeypatch, [str(data)])
+
+    assert str(data / SNAPSHOT_ROOT_NAME) in seen["snapshots_said"]
+    assert str(data / CONFIG_ROOT_NAME) in seen["configs_said"]
+    # The whole path is one hover away even when the label paints it shortened.
+    assert seen["snapshots_tooltip"] == str(data / SNAPSHOT_ROOT_NAME)
+
+
+def test_the_save_tab_reading_shortens_in_the_middle_and_keeps_the_whole_path(
+    qt_app, tmp_path
+):
+    """A long NAS path must not clip away the half that identifies it."""
+
+    window = _window(tmp_path)
+    assert isinstance(window.snapshot_root_value, _ElidingLabel)
+    assert str(window.output_root) in window.snapshot_root_value.text()
+    assert window.snapshot_root_value.property("explainText").endswith(
+        str(window.output_root)
+    )
+    window.close()
+
+
+def test_a_bare_root_name_is_absolute_before_it_is_ever_displayed(qt_app, tmp_path):
+    """The constructor's own defaults were relative names, shown as names."""
+
+    window = _window(tmp_path)
+    assert window.output_root.is_absolute()
+    assert window.config_root.is_absolute()
+    assert window.output_root.name == SNAPSHOT_ROOT_NAME
+    assert window.config_root.name == CONFIG_ROOT_NAME
+    window.close()
+
+
+def test_a_unc_folder_keeps_its_share_when_the_roots_are_derived():
+    r"""Pure paths only: the NAS is never touched to work out where to write.
+
+    ``\\server\share`` survives a pathlib join and does not survive string
+    surgery, which is why the derivation is joins all the way down.
+    """
+
+    share = "\\" * 2 + "10.10.10.122" + "\\" + "workdata"
+    folder = PureWindowsPath(share, "2025-LHD-BH", "20250926_calib")
+    snapshots, configs = default_bench_roots(folder)
+
+    assert str(snapshots) == str(folder / SNAPSHOT_ROOT_NAME)
+    assert str(configs) == str(folder / CONFIG_ROOT_NAME)
+    assert str(snapshots).startswith(share + "\\")
+    assert snapshots.drive == share
+    assert snapshots.is_absolute()
+    # An already-absolute UNC path is handed straight back, unresolved.
+    assert absolute_root(folder) is folder
+
+
+def test_the_saved_snapshot_confirmation_names_its_folder_and_opens_it(
+    qt_app, tmp_path, monkeypatch
+):
+    """Naming a folder and leaving the operator to find it is half a message."""
+
+    window = _campaign_window(tmp_path)
+    window.output_root = tmp_path / "calibrations"
+    window.show()
+    qt_app.processEvents()
+    assert window.open_snapshot_button.isHidden()
+
+    class _Saved:
+        root = tmp_path / "calibrations" / "20250813_cmos"
+        snapshot_id = "20250813_cmos"
+
+    opened: list = []
+    monkeypatch.setattr(
+        bench_gui, "open_containing_folder", lambda path: opened.append(Path(path)) or True
+    )
+    window._campaign_task_completed(_Saved())
+    qt_app.processEvents()
+
+    assert str(_Saved.root) in window.message_value.text()
+    assert not window.open_snapshot_button.isHidden()
+    window.open_snapshot_button.click()
+
+    assert opened == [_Saved.root]
     window.close()
