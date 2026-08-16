@@ -627,6 +627,24 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         self._build_lamp_tab()
         self._build_save_tab()
         controls_layout.addWidget(self.control_tabs, 1)
+
+        # The procedure is good but it is behind a tab, so it is only there
+        # when you go looking (owner, 2026-08-16: "Do we have a spot for it, so
+        # it will be shown?").  This is the spot, and deliberately the smallest
+        # one that answers the question the checklist is consulted for: what is
+        # the next thing to do, and what is stopping it.  It sits below the
+        # tabs, so it is on screen whichever tab is open.  Minimal on purpose —
+        # the owner's own warning was that agents would make a big mess of the
+        # full summary, so this is a prototype for his verdict, not a design.
+        # One line that shortens itself rather than wrapping: a strip below the
+        # tabs takes its height from every one of them, and a wrapped "Next:"
+        # running to three lines put the Save tab into a scrollbar. The whole
+        # sentence is a click away in the Why dock, which is F16's own rule for
+        # readings.
+        self.next_step_value = _ElidingLabel("Drop a SIF onto the bench to begin.")
+        self.next_step_value.setObjectName("nextStep")
+        controls_layout.addWidget(self.next_step_value)
+
         self.controls_rail = controls
         root.addWidget(controls)
 
@@ -692,6 +710,8 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
                             padding: 7px; color: #ffd6a3; }}
             #messagePanel {{ background: #0f141a; border-left: 3px solid #49b5df;
                             padding: 7px; color: #bed4e1; }}
+            #nextStep {{ background: #14231d; border-left: 3px solid #70d6ae;
+                        padding: 7px; color: #cdeadd; }}
             QTableWidget, QTreeWidget, QListWidget, QPlainTextEdit, QTextBrowser {{
                 background: #10151b; alternate-background-color: #18212a;
                 gridline-color: #2b3946; }}
@@ -1603,15 +1623,37 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
                 return columns
         return 1
 
-    def _build_lamp_tab(self) -> None:
-        tab = QtWidgets.QWidget()
-        layout = QtWidgets.QVBoxLayout(tab)
-        layout.setContentsMargins(10, 12, 10, 10)
+    def _build_fit_bar(self) -> QtWidgets.QWidget:
+        """The controls that steer the spectrum, on one line above it.
 
-        order_group = QtWidgets.QGroupBox("Order and frame")
-        order_layout = QtWidgets.QVBoxLayout(order_group)
-        order_row = QtWidgets.QHBoxLayout()
-        order_row.addWidget(QtWidgets.QLabel("Order"))
+        These used to be a tall "Order and frame" group box in the left rail,
+        a whole column away from the plot they steer and from the lines being
+        clicked (owner, 2026-08-16: "we'd rather have a small box next to the
+        action — line selection"). They are three short controls; a rail-wide
+        group box was the wrong shape for them in the wrong place.
+        """
+
+        bar = QtWidgets.QWidget()
+        bar.setObjectName("fitBar")
+        # The bench's ordinary padding is generous on purpose — these are
+        # controls to be hit, not read. On one line across the centre that
+        # generosity is fatal: at the standard padding this row demands 1227 px
+        # of minimum width, and a centre column with a floor that high pushes
+        # both rails to their own minimums and breaks the rule that the plots
+        # are the flexible element (F20). A strip is a different shape from a
+        # column and gets its own, tighter, rule.
+        bar.setStyleSheet(
+            "#fitBar QLabel { padding: 0 2px; }"
+            "#fitBar QComboBox { padding: 2px 6px; }"
+            "#fitBar QToolButton { padding: 1px 6px; }"
+            "#fitBar QSpinBox { padding: 2px 4px; }"
+            "#fitBar QCheckBox { padding: 0 2px; }"
+        )
+        row = QtWidgets.QHBoxLayout(bar)
+        row.setContentsMargins(0, 0, 0, 2)
+        row.setSpacing(6)
+
+        row.addWidget(QtWidgets.QLabel("Order"))
         self.previous_order_button = QtWidgets.QToolButton()
         self.previous_order_button.setText("◀")
         self.previous_order_button.setToolTip("Previous Echelle order")
@@ -1620,24 +1662,69 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         self.order_spin.setToolTip(
             "Which Echelle order the spectrum plot shows and a click fits."
         )
+        self.order_spin.setMaximumWidth(70)
         self.next_order_button = QtWidgets.QToolButton()
         self.next_order_button.setText("▶")
         self.next_order_button.setToolTip("Next Echelle order")
         self.order_total_value = QtWidgets.QLabel(
             f"of {self.session.pattern.shape[1] - 1}"
         )
-        order_row.addWidget(self.previous_order_button)
-        order_row.addWidget(self.order_spin, 1)
-        order_row.addWidget(self.next_order_button)
-        order_row.addWidget(self.order_total_value)
-        order_layout.addLayout(order_row)
+        row.addWidget(self.previous_order_button)
+        row.addWidget(self.order_spin)
+        row.addWidget(self.next_order_button)
+        row.addWidget(self.order_total_value)
 
+        row.addSpacing(10)
+        row.addWidget(QtWidgets.QLabel("Lines"))
+        self.line_family_combo = QtWidgets.QComboBox()
+        self.line_family_combo.addItems(list(KNOWN_LAMP_NAMES))
+        self.line_family_combo.setSizeAdjustPolicy(
+            QtWidgets.QComboBox.AdjustToMinimumContentsLength
+        )
+        self.line_family_combo.setMinimumContentsLength(5)
+        row.addWidget(self.line_family_combo)
+        self._explainable(
+            self.line_family_combo,
+            "Which catalog fills the expected-lines table",
+            "This follows the assigned lamp on its own: assign a Ne lamp and "
+            "the expected-lines panel fills with neon. Changing it by hand is "
+            "an override for comparing one lamp's catalog against another "
+            "frame; the anchors themselves always reference the assigned "
+            "lamp's own rows, and the panel warns when the two disagree.",
+        )
+
+        row.addStretch(1)
+        return bar
+
+    def _build_lamp_tab(self) -> None:
+        tab = QtWidgets.QWidget()
+        layout = QtWidgets.QVBoxLayout(tab)
+        layout.setContentsMargins(10, 12, 10, 10)
+
+        # The order stepper and the lamp catalog went to the strip above the
+        # spectrum, where the clicking happens.  These two did not: choosing
+        # which frame to fit is a decision made once per acquisition, and
+        # squaring the pixels is a way of looking rather than a way of working.
         frame_row = QtWidgets.QHBoxLayout()
         frame_row.addWidget(QtWidgets.QLabel("Fit on"))
         self.frame_combo = QtWidgets.QComboBox()
         self.frame_combo.addItem("Mean of all frames", None)
         frame_row.addWidget(self.frame_combo, 1)
-        order_layout.addLayout(frame_row)
+        layout.addLayout(frame_row)
+
+        self.equal_aspect_check = QtWidgets.QCheckBox("Square detector pixels")
+        self._explainable(
+            self.equal_aspect_check,
+            "Showing the detector at its true shape",
+            "The detector view stretches to fill the space it is given, which "
+            "is what makes the order traces far enough apart to aim at. Tick "
+            "this and one detector pixel is drawn square in both directions, "
+            "so the frame appears at its real 2560x2160 proportions. Useful "
+            "for judging the geometry; unhelpful for clicking lines, which is "
+            "why it is off unless you ask.",
+        )
+        layout.addWidget(self.equal_aspect_check)
+
         self.frame_choice_value = QtWidgets.QLabel("no acquisition open")
         self.frame_choice_value.setWordWrap(True)
         self.frame_choice_value.setObjectName("benchHelp")
@@ -1653,24 +1740,7 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
             "collected, because a centroid belongs to the spectrum it was "
             "measured on.",
         )
-        order_layout.addWidget(self.frame_choice_value)
-
-        family_row = QtWidgets.QHBoxLayout()
-        family_row.addWidget(QtWidgets.QLabel("Expected lines"))
-        self.line_family_combo = QtWidgets.QComboBox()
-        self.line_family_combo.addItems(list(KNOWN_LAMP_NAMES))
-        family_row.addWidget(self.line_family_combo, 1)
-        order_layout.addLayout(family_row)
-        self._explainable(
-            self.line_family_combo,
-            "Which catalog fills the expected-lines table",
-            "This follows the assigned lamp on its own: assign a Ne lamp and "
-            "the expected-lines panel fills with neon. Changing it by hand is "
-            "an override for comparing one lamp's catalog against another "
-            "frame; the anchors themselves always reference the assigned "
-            "lamp's own rows, and the panel warns when the two disagree.",
-        )
-        layout.addWidget(order_group)
+        layout.addWidget(self.frame_choice_value)
 
         # The button itself lives on the anchor panel in the right rail, where
         # the table it fills is and where every tab can see it.  What stays
@@ -1873,18 +1943,8 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         self.reference_value.setObjectName("messagePanel")
         outer.addWidget(self.reference_value)
 
-        self.equal_aspect_check = QtWidgets.QCheckBox("Square detector pixels")
-        self._explainable(
-            self.equal_aspect_check,
-            "Showing the detector at its true shape",
-            "The detector view stretches to fill the space it is given, which "
-            "is what makes the order traces far enough apart to aim at. Tick "
-            "this and one detector pixel is drawn square in both directions, "
-            "so the frame appears at its real 2560x2160 proportions. Useful "
-            "for judging the geometry; unhelpful for clicking lines, which is "
-            "why it is off unless you ask.",
-        )
-        outer.addWidget(self.equal_aspect_check)
+        self.fit_bar = self._build_fit_bar()
+        outer.addWidget(self.fit_bar)
 
         split = QtWidgets.QSplitter(QtCore.Qt.Vertical)
         split.setChildrenCollapsible(False)
@@ -2912,24 +2972,20 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
 
     @staticmethod
     def _short_verdict(path: Path, triage: ExposureTriage, verdict) -> str:
-        """Two lines: which file, and what it says. Nothing else shouts.
+        """The verdict, and at most one reading that qualifies it.
 
-        The full sentence, its advice, and the four-line breakdown are all in
-        the Why dock. A headline that runs to fourteen lines is a paragraph
-        wearing a headline's font, and it is exactly what "all loud and big"
-        produced.
+        Not the filename: the file table is a few centimetres to the left with
+        that row selected, and repeating it here spent a line of the loudest
+        text on screen saying something already said (owner, 2026-08-16). Not
+        the peak, the anomalies, and the advice either — those have their own
+        panels directly underneath. Three lines of large bold red is not a
+        headline, it is shouting.
         """
 
-        readings = []
         if triage.state is ExposureState.SATURATED:
             clusters = triage.saturation.cluster_count
-            readings.append(f"{clusters} saturated cluster(s)")
-        if triage.headroom_fraction is not None:
-            readings.append(f"peak {100.0 * triage.headroom_fraction:.0f}% of full scale")
-        if triage.saturation.anomalous_pixels:
-            readings.append(f"{triage.saturation.anomalous_pixels} anomalies")
-        tail = f" · {' · '.join(readings)}" if readings else ""
-        return f"{path.name}\n{verdict.label.upper()}{tail}"
+            return f"{verdict.label.upper()} · {clusters} saturated cluster(s)"
+        return verdict.label.upper()
 
     def _show_triage(self, path: Path) -> None:
         """Render one file's exposure verdict; roles play no part in it."""
@@ -2977,14 +3033,20 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         # Selecting a file writes its whole verdict into the dock at once:
         # what it says, what to do about it, and the numbers behind both.
         self.explain(f"{path.name} — exposure verdict", whole_verdict)
-        self.exposure_value.setText(
-            f"{path.name} · {verdict.label.upper()} · peak {peak}. "
-            f"{guidance.next_action}"
-        )
+        # The numbers, and only the numbers. This panel used to repeat the
+        # filename, the state and the advice — all three already on screen
+        # above it — which is how one file's verdict came to be stated three
+        # times in one column (owner, 2026-08-16).
+        numbers = [f"peak {peak}"]
+        if triage.headroom_fraction is not None:
+            numbers.append(f"{100.0 * triage.headroom_fraction:.0f}% of full scale")
+        if triage.saturation.anomalous_pixels:
+            numbers.append(f"{triage.saturation.anomalous_pixels} anomalies")
+        self.exposure_value.setText(" · ".join(numbers))
         self._explainable(
             self.exposure_value,
-            f"{path.name} — next acquisition action",
-            f"{guidance.next_action}\n\n{verdict.advice}",
+            f"{path.name} — the numbers behind the verdict",
+            breakdown,
         )
 
     def _draw_histogram(self, plot, triage: ExposureTriage, histogram) -> None:
@@ -3202,12 +3264,14 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
                 if record.triage.saturation.anomalous_pixels:
                     marks.append(f"{record.triage.saturation.anomalous_pixels} anomalies")
             if measurement is None:
-                # The badge for an unconfirmed suggestion lives here, in full,
-                # never inside the Role control where it would be elided.
+                # One spot, not six (owner, 2026-08-16): "SUGGESTED ONLY — no
+                # role assigned" spelled out on every row filled the table with
+                # one sentence repeated, and it was already said twice over —
+                # by the amber border the Role control wears, and by the
+                # Confirm button that counts them. A row says what it is; the
+                # colour says whether anybody has confirmed it.
                 marks.append(
-                    f"{_SUGGESTED_BADGE} ONLY — no role assigned"
-                    if path in suggested
-                    else "no role yet"
+                    _SUGGESTED_BADGE.lower() if path in suggested else "no role yet"
                 )
             elif measurement.lamp_family:
                 marks.append(f"{measurement.lamp_family} {measurement.role.value}")
@@ -3343,6 +3407,46 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
             self.checklist_tree.addItem(row)
             self.checklist_tree.setItemWidget(row, label)
             self._fit_checklist_row(row, label, width)
+        self._refresh_next_step()
+
+    def _refresh_next_step(self) -> None:
+        """The one line the checklist is usually consulted for.
+
+        Not a copy of the procedure — the first row that is blocking and not
+        yet done, with whatever the checklist says would unblock it.  That is
+        the question an operator crosses the room to ask.
+        """
+
+        if self.campaign is None:
+            return
+        pending = [
+            item
+            for item in self.campaign.checklist(self.session)
+            if item.blocking and item.state is not ChecklistState.DONE
+        ]
+        if not pending:
+            self.next_step_value.setText(
+                "Next: nothing — every step of the procedure is done."
+            )
+            self._explainable(
+                self.next_step_value,
+                "The procedure is complete",
+                "Every blocking row on the Procedure tab is done. What remains "
+                "is saving the snapshot, and anything the checklist marked as "
+                "advice rather than a gate.",
+            )
+            return
+        step = pending[0]
+        self.next_step_value.setText(
+            f"Next: {step.label} — {step.unblocked_by or step.detail}"
+        )
+        self._explainable(
+            self.next_step_value,
+            f"Next step — {step.label}",
+            f"{step.detail}\n\nWhat unblocks it: {step.unblocked_by}"
+            if step.unblocked_by
+            else step.detail,
+        )
 
     def _refresh_sphere_plot(self) -> None:
         """Feed the two persistent factor curves; never rebuild the plot.

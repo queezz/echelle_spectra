@@ -357,9 +357,13 @@ def test_dropped_files_are_triaged_before_any_role(qt_app, tmp_path):
     triage = window.campaign.loaded[paths[0]].triage
     assert triage.state is ExposureState.GOOD
     assert triage.saturation.anomalous_pixels == 2
-    # The headline is two lines: which file, and what it says.
-    assert len(window.triage_headline.text().splitlines()) == 2
-    assert "anomalies" in window.triage_headline.text()
+    # One line, carrying the verdict and nothing else. The filename is in the
+    # selected table row a few centimetres away and the loudest text on screen
+    # does not spend a line repeating it; the anomaly count is a number, so it
+    # reads with the other numbers (owner, 2026-08-16).
+    assert window.triage_headline.text().splitlines() == ["GOOD"]
+    assert paths[0].name not in window.triage_headline.text()
+    assert "anomalies" in window.exposure_value.text()
     assert "not saturation" in window.details_view.toPlainText()
     # F16 item 3: the multi-line breakdown folds into the Why dock; the view
     # keeps the one line that decides the next action.
@@ -416,7 +420,11 @@ def test_confirming_the_prefilled_role_assigns_it(qt_app, tmp_path):
     assert not window.campaign.measurements
     # The pre-filled control must never read as an assignment nobody made —
     # and after F16 the badge lives beside the combo, never inside its text.
-    assert f"{_SUGGESTED_BADGE} ONLY" in window.file_table.item(0, 0).text()
+    # The carrier changed again on 2026-08-16: "SUGGESTED ONLY — no role
+    # assigned" spelled out on every row was one sentence repeated six times,
+    # so the row keeps the short word and the amber border does the shouting.
+    assert _SUGGESTED_BADGE.lower() in window.file_table.item(0, 0).text()
+    assert "no role assigned" not in window.file_table.item(0, 0).text()
     assert _SUGGESTED_BADGE not in role_combo.currentText()
     assert _SUGGESTED_COLOR_IN(role_combo)
 
@@ -479,7 +487,7 @@ def test_a_prefilled_role_never_looks_like_an_assigned_one(qt_app, tmp_path):
     # So the control must say so, and the Procedure tab must name the file.
     assert sphere_combo.currentText() == "Sphere"
     assert _SUGGESTED_COLOR_IN(sphere_combo)
-    assert f"{_SUGGESTED_BADGE} ONLY" in window.file_table.item(sphere_row, 0).text()
+    assert _SUGGESTED_BADGE.lower() in window.file_table.item(sphere_row, 0).text()
     assert window.confirm_roles_button.isEnabled()
     assert "6" in window.confirm_roles_button.text()
     checklist = {
@@ -560,9 +568,17 @@ def test_a_saturated_lamp_frame_is_informed_not_failed(qt_app, tmp_path):
     # The sphere frame keeps the hard verdict.
     window._select_file_row(sphere)
     qt_app.processEvents()
-    assert window.triage_headline.text().splitlines()[1].startswith("SATURATED")
+    # The headline is one line and starts with the verdict: the filename it
+    # used to carry on a first line is already in the selected table row, and
+    # repeating it spent the loudest text on screen saying it twice (owner,
+    # 2026-08-16). The advice lives in its own panel underneath, and the
+    # numbers in theirs, so no panel now repeats another.
+    assert window.triage_headline.text().startswith("SATURATED")
+    assert lamp.name not in window.triage_headline.text()
     assert window.campaign.role_triage(sphere).blocking
-    assert "Lower exposure" in window.exposure_value.text()
+    assert "Lower exposure" in window.triage_next_value.text()
+    assert "Lower exposure" not in window.exposure_value.text()
+    assert "peak" in window.exposure_value.text()
     window.close()
 
 
