@@ -2186,13 +2186,21 @@ class CalibrationCampaignSession:
         destination_root: str | Path,
         snapshot_id: str,
         alignment: CalibrationBenchSession,
+        *,
+        overwrite: bool = False,
     ) -> dict[str, Path]:
-        """Atomically publish a new identity's generated TOML bundle."""
+        """Atomically publish a new identity's generated TOML bundle.
+
+        Refusing to clobber is the default and stays the default.  ``overwrite``
+        is the deliberate second press: the new bundle is still staged and
+        parsed in full before anything existing is touched, so a failure part
+        way through leaves the old files exactly where they were.
+        """
 
         destination_parent = Path(destination_root)
         destination_parent.mkdir(parents=True, exist_ok=True)
         destination = destination_parent / snapshot_id
-        if destination.exists():
+        if destination.exists() and not overwrite:
             self.toml_state = TomlState.FAILED
             self.last_error = f"configuration identity already exists: {destination}"
             raise SnapshotError(self.last_error)
@@ -2210,7 +2218,18 @@ class CalibrationCampaignSession:
                 with path.open("rb") as stream:
                     tomllib.load(stream)
                 paths[name] = path
-            os.replace(staging, destination)
+            if destination.exists():
+                # Every file is written and parsed by now, so the old bundle is
+                # only moved aside once the new one is known to be good.
+                superseded = staging_parent / f"{snapshot_id}.superseded"
+                os.replace(destination, superseded)
+                try:
+                    os.replace(staging, destination)
+                except Exception:
+                    os.replace(superseded, destination)
+                    raise
+            else:
+                os.replace(staging, destination)
             shutil.rmtree(staging_parent, ignore_errors=True)
         except Exception as exc:
             if "staging_parent" in locals():

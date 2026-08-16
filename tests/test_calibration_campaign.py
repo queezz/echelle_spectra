@@ -1229,3 +1229,37 @@ def test_the_snapshot_records_whether_science_lines_ever_agreed(tmp_path):
     assert "science_residual_rms_nm" not in alignment_block
     # And the self-consistency number is still there beside it, unchanged.
     assert isinstance(alignment_block["rms_px"], float)
+
+
+def test_existing_settings_can_be_deliberately_rewritten(tmp_path):
+    """F21 item 11: "already exists" named the path but offered no way out.
+
+    Refusing to clobber stays the default. The second, explicit press replaces
+    the bundle — and stages and parses the whole new one first, so a failure
+    part way through leaves the old files exactly where they were.
+    """
+
+    sources = _curated_sources(tmp_path)
+    alignment = _aligned_session(tmp_path)
+    campaign = _campaign(tmp_path, sources)
+    _classify_complete(campaign, sources, alignment.frame)
+    campaign.compute_sphere_comparison(_calculator)
+    configs = tmp_path / "configs"
+
+    first = campaign.write_tomls(configs, "20250813_cmos", alignment)
+    original = first["campaign"].read_text(encoding="utf-8")
+
+    with pytest.raises(SnapshotError) as refused:
+        campaign.write_tomls(configs, "20250813_cmos", alignment)
+    assert "already exists" in str(refused.value)
+    assert first["campaign"].read_text(encoding="utf-8") == original
+
+    again = campaign.write_tomls(
+        configs, "20250813_cmos", alignment, overwrite=True
+    )
+
+    assert campaign.toml_state is TomlState.GENERATED
+    assert again["campaign"].exists()
+    assert again["campaign"].read_text(encoding="utf-8") == original
+    # No staging debris is left beside the bundle it replaced.
+    assert [path.name for path in configs.iterdir()] == ["20250813_cmos"]

@@ -634,8 +634,14 @@ def test_left_pane_is_resizable_and_its_text_wraps(qt_app, tmp_path):
         label = window.checklist_tree.itemWidget(window.checklist_tree.item(row))
         assert label.wordWrap()
         assert label.width() <= max(280, width)
-        # The row is tall enough for every wrapped line it holds.
-        assert window.checklist_tree.item(row).sizeHint().height() >= label.sizeHint().height()
+        # The row is tall enough for every wrapped line it holds — measured at
+        # the width the label really has.  This used to compare against
+        # ``label.sizeHint().height()``, which is a hint computed at some other
+        # width entirely (252 px for a label drawn at 777) and was therefore
+        # demanding rows twice as tall as their own text: F21 item 5's padding,
+        # asserted from the other side. Deliberately superseded.
+        needed = label.heightForWidth(label.width())
+        assert window.checklist_tree.item(row).sizeHint().height() >= needed
         assert label.toolTip()
     window.close()
 
@@ -2115,4 +2121,121 @@ def test_selecting_file_after_file_never_orphans_a_threshold_line(qt_app, tmp_pa
         for item in window.histogram_plot.items
         if isinstance(item, pg.InfiniteLine)
     ], "the thresholds were rebuilt per file instead of moved"
+    window.close()
+
+
+def test_no_procedure_row_is_taller_than_its_own_text(qt_app, tmp_path):
+    """F21 item 5: the Procedure tab added a LOT of vertical padding.
+
+    Every row was sized ``max(heightForWidth, sizeHint().height())``. For a
+    word-wrapped rich-text label the size hint is a heuristic computed against
+    a width the label does not have, it came out taller than the truth on nine
+    rows out of ten, and it won that comparison — so rows stood 48 to 114 px
+    taller than their text and a five-item list scrolled.
+
+    This is the screenshot-shaped check the owner asked for: measure what is
+    actually reserved against what the text actually costs, at the width the
+    row is actually drawn at.
+    """
+
+    forget_session_layout()
+    window, _paths = _real_folder_window(qt_app, tmp_path)
+    qt_app.processEvents()
+    index = [
+        window.control_tabs.tabText(i) for i in range(window.control_tabs.count())
+    ].index("Procedure")
+    window.control_tabs.setCurrentIndex(index)
+    qt_app.processEvents()
+    window._relayout_wrapped_text()
+    qt_app.processEvents()
+
+    tree = window.checklist_tree
+    assert tree.count() >= 4, "the fixture stopped producing a real checklist"
+    for row in range(tree.count()):
+        item = tree.item(row)
+        label = tree.itemWidget(item)
+        reserved = item.sizeHint().height()
+        needed = label.heightForWidth(label.width())
+        assert needed > 0
+        # Four pixels of breathing room is the intent; anything approaching a
+        # second copy of the text is the defect coming back.
+        assert reserved - needed <= 8, (
+            f"row {row} reserves {reserved} px for {needed} px of text"
+        )
+    window.close()
+    forget_session_layout()
+
+
+def test_the_auto_anchor_button_is_visible_from_every_tab(qt_app, tmp_path):
+    """F21 item 10, and the miss that prompted this round.
+
+    The action that fills the anchor table was put away on the Lamp fit
+    control tab, so an operator standing on Procedure saw an empty table, two
+    greyed buttons, and no way to learn what fills them. It lives on the
+    anchors panel now, which is in the right rail and therefore never behind
+    a tab.
+    """
+
+    forget_session_layout()
+    window, _paths = _real_folder_window(qt_app, tmp_path)
+    window.show()
+    qt_app.processEvents()
+
+    assert window.tables_rail.isAncestorOf(window.auto_anchor_button)
+    for index in range(window.control_tabs.count()):
+        window.control_tabs.setCurrentIndex(index)
+        qt_app.processEvents()
+        assert window.auto_anchor_button.isVisible(), (
+            f"hidden on the {window.control_tabs.tabText(index)!r} tab"
+        )
+    window.close()
+    forget_session_layout()
+
+
+def test_stepping_the_order_control_up_moves_the_trace_up(qt_app, tmp_path):
+    """F21 item 9: the control and the detector stacking were opposite.
+
+    Detector row grows with order number — order 0 sits near row 56 and the
+    last order near row 2094 — while the view inverted its y axis, so pressing
+    up walked the highlight down the image. The axis is no longer inverted, so
+    a higher order number is higher on screen, and the order numbers still
+    read exactly as the wavelength table spells them.
+    """
+
+    window = _window(tmp_path)
+    window.show()
+    qt_app.processEvents()
+
+    assert not window.detector_plot.getViewBox().yInverted()
+
+    pattern = window.session.pattern
+    column = pattern.shape[0] // 2
+    rows = [float(pattern[column, order]) for order in range(pattern.shape[1])]
+    assert rows[-1] > rows[0], "fixture no longer stacks orders downward in row"
+
+    # Screen y grows downward, so "visually higher" means a smaller scene y.
+    box = window.detector_plot.getViewBox()
+    first = box.mapViewToScene(QtCore.QPointF(column, rows[0])).y()
+    last = box.mapViewToScene(QtCore.QPointF(column, rows[-1])).y()
+    assert last < first, "a higher order number still paints lower on screen"
+    window.close()
+
+
+def test_the_detector_view_can_be_squared_up_on_request(qt_app, tmp_path):
+    """F21 item 8: equal aspect wanted, not mandatory."""
+
+    window = _window(tmp_path)
+    window.show()
+    qt_app.processEvents()
+
+    assert not window.equal_aspect_check.isChecked()
+    assert window.detector_plot.getViewBox().state["aspectLocked"] is False
+
+    window.equal_aspect_check.setChecked(True)
+    qt_app.processEvents()
+    assert window.detector_plot.getViewBox().state["aspectLocked"] == 1
+
+    window.equal_aspect_check.setChecked(False)
+    qt_app.processEvents()
+    assert window.detector_plot.getViewBox().state["aspectLocked"] is False
     window.close()

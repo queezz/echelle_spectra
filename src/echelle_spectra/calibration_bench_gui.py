@@ -926,18 +926,44 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         self.anchor_table.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
         layout.addWidget(self.anchor_table, 1)
 
-        # Stacked, not side by side: a rail is narrow by design, and two
-        # buttons sharing its width is how a label gets clipped at the first
-        # platform whose font is wider than the designer's.  Down the rail each
-        # of them keeps its whole text at any width the rail can have.
+        # The action that FILLS this table stands on it, always visible, in
+        # every tab.  Putting it away in the Lamp fit control tab was the
+        # owner's own complaint back again — a bench that does not teach where
+        # the next action lives — and an empty table with two greyed buttons
+        # says nothing about how to stop being empty.
         buttons = QtWidgets.QWidget()
         button_column = QtWidgets.QVBoxLayout(buttons)
         button_column.setContentsMargins(0, 0, 0, 0)
         button_column.setSpacing(4)
-        self.remove_button = QtWidgets.QPushButton("Remove selected")
-        self.clear_button = QtWidgets.QPushButton("Clear anchors")
-        button_column.addWidget(self.remove_button)
-        button_column.addWidget(self.clear_button)
+        self.auto_anchor_button = QtWidgets.QPushButton("Auto-anchor lines")
+        self._explainable(
+            self.auto_anchor_button,
+            "Anchoring the lines the calibration already trusts",
+            "The curated wavelength table marks the rows vetted during the BH "
+            "paper's own calibration — tried and tested for the Balmer and "
+            "Fulcher analysis, which is the pedigree that makes them "
+            "trustworthy, not their brightness. This measures every one of "
+            "them, in every order, with the same centroid fit and the same "
+            "raw-detector saturation guard a click uses, and anchors the ones "
+            "that pass. It is what echelle-align has always done headlessly. "
+            "Anything it declines is listed with its reason, anchors you "
+            "placed by hand are kept, and any anchor it places comes off with "
+            "a right-click on the spectrum.",
+        )
+        button_column.addWidget(self.auto_anchor_button)
+        # Remove and Clear pair on one row so the primary action costs this
+        # panel no height at all: they are short, secondary, and act on a
+        # selected row rather than on the frame.  Each carries a minimum width
+        # read off its own text, so neither can elide however narrow the rail.
+        secondary = QtWidgets.QHBoxLayout()
+        secondary.setContentsMargins(0, 0, 0, 0)
+        secondary.setSpacing(4)
+        self.remove_button = QtWidgets.QPushButton("Remove")
+        self.clear_button = QtWidgets.QPushButton("Clear")
+        for button in (self.remove_button, self.clear_button):
+            button.setMinimumWidth(button.sizeHint().width())
+            secondary.addWidget(button)
+        button_column.addLayout(secondary)
         layout.addWidget(buttons)
 
         self.anchor_buttons = buttons
@@ -1170,14 +1196,25 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         return max(1, tree.viewport().width() - 2 * tree.frameWidth())
 
     def _fit_checklist_row(self, item, label, width: int) -> None:
-        """Give one row the full width and exactly the height its text needs."""
+        """Give one row the full width and exactly the height its text needs.
+
+        ``heightForWidth`` is the answer to the only question worth asking —
+        how tall is this text at the width it will actually be drawn at — so
+        it is used, alone.  Taking ``max()`` of it and ``sizeHint().height()``
+        was what padded every row: a word-wrapped label's size hint is a
+        heuristic computed against a width the label does not have, it came
+        out taller than the truth on nine rows out of ten, and it won the
+        comparison every time.  Rows stood 48 to 114 px taller than their own
+        text, which is the "LOT of vertical padding" in the owner's screenshot
+        and the reason the list scrolled with five items in it.
+        """
 
         label.setMinimumWidth(width)
         label.setMaximumWidth(width)
         needed = label.heightForWidth(width)
         if needed <= 0:
             needed = label.sizeHint().height()
-        item.setSizeHint(QtCore.QSize(width, max(needed, label.sizeHint().height()) + 4))
+        item.setSizeHint(QtCore.QSize(width, needed + 4))
 
     @staticmethod
     def _checklist_row_html(symbol: str, headline: str, unblocked_by: str) -> str:
@@ -1307,7 +1344,21 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         self._fills_its_share(self.file_table)
         layout.addWidget(self.file_table, 1)
 
-        self.show_frame_button = QtWidgets.QPushButton("Open selected file for lamp fitting")
+        # "Open" is what you do to a file; this loads the selected acquisition
+        # into the fit, which is a different verb and the one the operator is
+        # actually choosing (F21 item 3).  It sits directly under the table it
+        # takes its selection from — the only place it is ever pressed.
+        self.show_frame_button = QtWidgets.QPushButton("Load for fitting")
+        self._explainable(
+            self.show_frame_button,
+            "Loading the selected acquisition into the fit",
+            "Takes whichever file is selected above and makes it the frame the "
+            "Lamp fit tab measures — its orders, its spectrum, its raw pixels "
+            "for the saturation checks. Nothing is opened in another program "
+            "and nothing on disk changes. The bench also does this on its own "
+            "when a lamp signal is the obvious next thing to fit; this is for "
+            "when you want a different file.",
+        )
         layout.addWidget(self.show_frame_button)
         self.control_tabs.addTab(self._scrollable(tab), "Files")
 
@@ -1621,30 +1672,10 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         )
         layout.addWidget(order_group)
 
-        # The fit's own action stands with the fit's own controls.  It is not a
-        # table operation the way Remove and Clear are — those act on a selected
-        # row, this one measures the frame — and a third button in the anchor
-        # panel costs that table a visible row, which is the working surface
-        # F18 and F20 spent two packets widening.  Bare rather than in a group
-        # box for the same reason in this column: a frame and a title around
-        # one button cost more height than the tab has spare, and the label and
-        # its caption already say what a title would have.
-        self.auto_anchor_button = QtWidgets.QPushButton("Auto-anchor lines")
-        self._explainable(
-            self.auto_anchor_button,
-            "Anchoring the lines the calibration already trusts",
-            "The curated wavelength table marks the rows vetted during the BH "
-            "paper's own calibration — tried and tested for the Balmer and "
-            "Fulcher analysis, which is the pedigree that makes them "
-            "trustworthy, not their brightness. This measures every one of "
-            "them, in every order, with the same centroid fit and the same "
-            "raw-detector saturation guard a click uses, and anchors the ones "
-            "that pass. It is what echelle-align has always done headlessly. "
-            "Anything it declines is listed with its reason, anchors you "
-            "placed by hand are kept, and any anchor it places comes off with "
-            "a right-click on the spectrum.",
-        )
-        layout.addWidget(self.auto_anchor_button)
+        # The button itself lives on the anchor panel in the right rail, where
+        # the table it fills is and where every tab can see it.  What stays
+        # here is the reading behind it: which rows it would measure, and whose
+        # vetting they carry.
         self.auto_anchor_value = QtWidgets.QLabel("no acquisition open")
         self.auto_anchor_value.setWordWrap(True)
         self.auto_anchor_value.setObjectName("benchHelp")
@@ -1684,9 +1715,36 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         destination.setObjectName("mutedText")
         destination.setWordWrap(True)
         layout.addWidget(destination)
-        self.generate_tomls_button = QtWidgets.QPushButton("Generate commented TOMLs")
+        # "TOML" names the file format, which is not what the operator is
+        # deciding to do (F21 item 6).  What this step saves is the alignment
+        # and the campaign around it; that the files happen to be commented
+        # TOML is a detail for whoever opens them afterwards.
+        self.generate_tomls_button = QtWidgets.QPushButton("Save alignment settings")
+        self._explainable(
+            self.generate_tomls_button,
+            "Saving the alignment and the campaign around it",
+            "Writes the solved alignment, the roles you assigned, and the "
+            "campaign's own settings as commented text files you can open and "
+            "edit by hand. They are the input to the snapshot below, so this "
+            "comes first. Existing files are never overwritten silently — if "
+            "they are already there the bench says so and offers to redo them.",
+        )
         self.save_snapshot_button = QtWidgets.QPushButton("Save and validate snapshot")
         layout.addWidget(self.generate_tomls_button)
+        # Refusing to clobber is right; refusing with no way forward is what
+        # left the owner stuck at "already exists" (F21 item 11).
+        self.regenerate_tomls_button = QtWidgets.QPushButton("Regenerate")
+        self.regenerate_tomls_button.setVisible(False)
+        self._explainable(
+            self.regenerate_tomls_button,
+            "Rewriting settings files that already exist",
+            "Appears only when the files are already on disk. It writes them "
+            "again from the bench's current state, replacing what is there. "
+            "Any edits made by hand in those files are lost, which is why it "
+            "is a separate, deliberate press rather than something the first "
+            "button does quietly.",
+        )
+        layout.addWidget(self.regenerate_tomls_button)
         layout.addWidget(self.save_snapshot_button)
         self.save_state_value = QtWidgets.QLabel("NOT READY")
         self.save_state_value.setObjectName("stateBadge")
@@ -1815,6 +1873,19 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         self.reference_value.setObjectName("messagePanel")
         outer.addWidget(self.reference_value)
 
+        self.equal_aspect_check = QtWidgets.QCheckBox("Square detector pixels")
+        self._explainable(
+            self.equal_aspect_check,
+            "Showing the detector at its true shape",
+            "The detector view stretches to fill the space it is given, which "
+            "is what makes the order traces far enough apart to aim at. Tick "
+            "this and one detector pixel is drawn square in both directions, "
+            "so the frame appears at its real 2560x2160 proportions. Useful "
+            "for judging the geometry; unhelpful for clicking lines, which is "
+            "why it is off unless you ask.",
+        )
+        outer.addWidget(self.equal_aspect_check)
+
         split = QtWidgets.QSplitter(QtCore.Qt.Vertical)
         split.setChildrenCollapsible(False)
         self.lamp_fit_splitter = split
@@ -1828,7 +1899,17 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         self.detector_plot.setLabel("left", "detector row", units="px")
         self.detector_plot.getAxis("bottom").enableAutoSIPrefix(False)
         self.detector_plot.getAxis("left").enableAutoSIPrefix(False)
-        self.detector_plot.invertY(True)
+        # Detector row increases upward, so the order control and the image
+        # agree: order 0 sits at row 56 and order 28 at row 2094, and stepping
+        # the control up moves the highlighted trace up (F21 item 9, the owner
+        # twice).  Inverting the axis was what put them in opposition, and the
+        # order numbers stay exactly as the wavelength table spells them —
+        # which is the constraint the owner set on fixing this.  The main GUI
+        # never inverted its own view, so the two tools now match as well.
+        self.detector_plot.invertY(False)
+        # Equal aspect on request: one detector pixel square in both directions
+        # (F21 item 8, "not mandatory, but wanted"), off by default because a
+        # 2560x2160 frame squared up leaves the order traces too thin to aim at.
         self.detector_plot.setAspectLocked(False)
         self.detector_image = pg.ImageItem(axisOrder="col-major")
         self.detector_plot.addItem(self.detector_image)
@@ -1981,6 +2062,7 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         self.line_family_combo.currentTextChanged.connect(self._line_family_changed)
         self.order_plot.scene().sigMouseClicked.connect(self._order_plot_clicked)
         self.auto_anchor_button.clicked.connect(self._auto_anchor)
+        self.equal_aspect_check.toggled.connect(self.detector_plot.setAspectLocked)
         self.remove_button.clicked.connect(self._remove_selected_anchor)
         self.clear_button.clicked.connect(self._clear_anchors)
         self.add_files_button.clicked.connect(self._pick_files)
@@ -1993,7 +2075,8 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         self.anchor_table.itemSelectionChanged.connect(self._anchor_row_selected)
         self.line_help_table.itemSelectionChanged.connect(self._expected_line_selected)
         self.compare_button.clicked.connect(self._start_sphere_comparison)
-        self.generate_tomls_button.clicked.connect(self._generate_tomls)
+        self.generate_tomls_button.clicked.connect(lambda: self._generate_tomls())
+        self.regenerate_tomls_button.clicked.connect(self._regenerate_tomls)
         self.save_snapshot_button.clicked.connect(self._save_snapshot)
         self.snapshot_id_edit.textChanged.connect(self.refresh_campaign)
         # Picking the work on the left brings its own view with it: one lamp
@@ -2563,7 +2646,7 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         self._campaign_thread = None
         self.refresh_campaign()
 
-    def _generate_tomls(self) -> None:
+    def _generate_tomls(self, *, overwrite: bool = False) -> None:
         if self.campaign is None:
             return
         try:
@@ -2571,17 +2654,31 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
                 self.config_root,
                 self.snapshot_id_edit.text().strip(),
                 self.session,
+                overwrite=overwrite,
             )
         except (OSError, SnapshotError, ValueError) as exc:
-            self.message_value.setText(f"TOMLs were not generated: {exc}")
+            self.message_value.setText(f"Alignment settings were not saved: {exc}")
+            # An existing bundle is a choice to offer, not a dead end: the
+            # button that can get past it appears beside the one that refused.
+            self.regenerate_tomls_button.setVisible("already exists" in str(exc))
         else:
+            self.regenerate_tomls_button.setVisible(False)
             self.message_value.setText(
-                "Generated commented campaign, alignment, and export TOMLs."
+                "Saved the alignment settings, the campaign, and the export "
+                f"configuration as commented files you can edit: {paths['campaign'].parent}."
+                if not overwrite
+                else "Rewrote the alignment settings, the campaign, and the export "
+                f"configuration, replacing what was in {paths['campaign'].parent}."
             )
             self.toml_preview.setPlainText(
                 paths["campaign"].read_text(encoding="utf-8")
             )
         self.refresh_campaign()
+
+    def _regenerate_tomls(self) -> None:
+        """Rewrite settings files that already exist, on a deliberate press."""
+
+        self._generate_tomls(overwrite=True)
 
     def _save_snapshot(self) -> None:
         if self.campaign is None:
