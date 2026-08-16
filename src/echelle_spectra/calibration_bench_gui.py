@@ -1450,25 +1450,13 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
             "either real ageing or an exposure-normalisation mismatch worth "
             "chasing before the trip. Only the sphere pair is needed — no lamp.",
         )
-        # "Compute factors" names an intermediate array, not the thing the
-        # operator wants (owner, 2026-08-16: "the cryptic compare factors.
-        # Decrypt those"). The factors ARE the instrument's sensitivity against
-        # wavelength — what turns counts into physical intensity — measured
-        # from the sphere pair and compared with the previous campaign's.
-        self.compare_button = QtWidgets.QPushButton("Measure sensitivity")
-        self._explainable(
-            self.compare_button,
-            "Measuring how sensitive the instrument is right now",
-            "The integrating sphere emits a known, smooth spectrum, so "
-            "photographing it with the lamp off and on tells the bench how "
-            "many counts this instrument returns per unit of real light, at "
-            "every wavelength. That curve is what converts counts into "
-            "physical intensity in every cube produced afterwards, and "
-            "comparing it against the previous campaign's curve is how "
-            "lamp and sphere ageing show up. It needs only the sphere pair.",
-        )
         comparison_layout.addWidget(self.comparison_value)
-        comparison_layout.addWidget(self.compare_button)
+        # No button on the readings strip.  Bench state, Alignment and Sphere
+        # factors are things to READ; the one action they used to carry sat at
+        # the opposite corner of the window from the step that calls for it and
+        # existed twice over once the next-step panel could run it (owner,
+        # 2026-08-16: "Why is your measure sensitivity still at a diagonal and
+        # duplicated?").  The verb lives beside the step now, and nowhere else.
         self.sphere_factors_group = comparison_group
 
         # The alignment numbers are readings too, and they were the last ones
@@ -1730,7 +1718,10 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         # not parked in a tab a column away. "1:1" costs almost no width, which
         # is what let it come back.
         self.equal_aspect_check = QtWidgets.QToolButton()
-        self.equal_aspect_check.setText("1:1")
+        # "1:1" alone was unfindable — the owner went looking for the aspect
+        # control and reported it gone while it sat right there. His own words
+        # for it, on the button.
+        self.equal_aspect_check.setText("Aspect 1:1")
         self.equal_aspect_check.setCheckable(True)
         self._explainable(
             self.equal_aspect_check,
@@ -2188,7 +2179,6 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         self.checklist_tree.currentRowChanged.connect(self._checklist_row_selected)
         self.anchor_table.itemSelectionChanged.connect(self._anchor_row_selected)
         self.line_help_table.itemSelectionChanged.connect(self._expected_line_selected)
-        self.compare_button.clicked.connect(self._start_sphere_comparison)
         self.next_step_button.clicked.connect(self._run_next_action)
         self.generate_tomls_button.clicked.connect(lambda: self._generate_tomls())
         self.regenerate_tomls_button.clicked.connect(self._regenerate_tomls)
@@ -3038,10 +3028,16 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         """
 
         if verdict.label.startswith("background"):
-            # A background's state word means nothing on its own — DIM is
-            # correct here and alarming everywhere else — so it always carries
-            # the half-sentence that says which it is.
-            return f"{verdict.label.upper()} · {verdict.headline}"
+            # A correct background says one word and stops. It was reading
+            # "BACKGROUND · dark as it should be" in warning amber, which is a
+            # bench explaining darkness to the person who shot it (owner: "I
+            # know that darks are dark. Did you write it for yourself?"). Only
+            # a background that is NOT dark has anything to add.
+            return (
+                f"{verdict.label.upper()} · {verdict.headline}"
+                if verdict.headline
+                else verdict.label.upper()
+            )
         if triage.state is ExposureState.SATURATED:
             clusters = triage.saturation.cluster_count
             return f"{verdict.label.upper()} · {clusters} saturated cluster(s)"
@@ -3060,7 +3056,15 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         verdict = triage_for_role(triage, role, self.campaign.partner_peak(path, role))
         color = _TRIAGE_COLORS[triage.state]
         headline = triage.headline
-        if triage.state is ExposureState.SATURATED and not verdict.blocking:
+        if verdict.label.startswith("background"):
+            # Colour follows the ROLE's verdict, not the raw state: a dark
+            # background is DIM and DIM is amber, so a frame doing exactly its
+            # job was being painted in the colour that means attend to me.
+            color = _TRIAGE_COLORS[
+                ExposureState.SATURATED if verdict.blocking else ExposureState.GOOD
+            ]
+            headline = verdict.headline or verdict.label
+        elif triage.state is ExposureState.SATURATED and not verdict.blocking:
             # The bright/dim pair exists so the dim series saturates its strong
             # lines; saying FAILED here would be the bench misreading physics.
             color = _TRIAGE_COLORS[ExposureState.DIM]
@@ -3087,7 +3091,16 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         # the action, and the role-blind guidance only speaks when the role has
         # nothing to add (owner, on a lamp background reading "increase toward
         # 19.98 s": "Background is dim. Wow, genius").
-        self.triage_next_value.setText(verdict.next_action or guidance.next_action)
+        if verdict.label.startswith("background"):
+            # A background that is dark needs no next action, so it gets no
+            # panel — not a panel saying there is nothing to do. The role-blind
+            # guidance must never be reached here: it would say "increase
+            # exposure toward 19.98 s" about a frame shot with the light off.
+            action = verdict.next_action
+        else:
+            action = verdict.next_action or guidance.next_action
+        self.triage_next_value.setText(action)
+        self.triage_next_value.setVisible(bool(action))
         self._explainable(
             self.triage_next_value,
             f"{path.name} — how the verdict was reached",
@@ -3266,7 +3279,6 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         self.add_files_button.setEnabled(self.loader is not None)
         self._refresh_file_buttons()
         self.drop_hint.setVisible(not self._file_rows)
-        self.compare_button.setEnabled(enabled and not busy)
         self.generate_tomls_button.setEnabled(enabled and not busy)
         if not enabled:
             self.checklist_tree.clear()
@@ -3307,6 +3319,21 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         # background — decided here, after the roles are known.
         self._follow_assigned_lamp_signal()
         self._pair_lamp_background()
+
+    @staticmethod
+    def _verdict_colour(verdict, triage) -> str:
+        """The colour a frame's ROLE earns it, not the one its raw state does.
+
+        A background is DIM by construction and DIM is amber, so every correct
+        dark frame was painted in the colour that means attend to me.  A
+        background earns green for being dark and red only for not being.
+        """
+
+        if verdict is not None and verdict.label.startswith("background"):
+            return _TRIAGE_COLORS[
+                ExposureState.SATURATED if verdict.blocking else ExposureState.GOOD
+            ]
+        return _TRIAGE_COLORS[triage.state]
 
     @staticmethod
     def _role_marks(measurement, verdict, is_suggested: bool) -> list[str]:
@@ -3359,7 +3386,7 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
                 colour = (
                     _SUGGESTED_COLOR
                     if measurement is None and path in suggested
-                    else _TRIAGE_COLORS[record.triage.state]
+                    else self._verdict_colour(verdict, record.triage)
                 )
                 if verdict.state is ExposureState.SATURATED and not verdict.blocking:
                     # Expected saturation is a note, not an alarm.

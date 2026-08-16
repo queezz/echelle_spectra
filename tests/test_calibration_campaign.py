@@ -1309,12 +1309,15 @@ class TestABackgroundIsJudgedAsABackground:
             verdict = triage_for_role(triage, role, partner_peak=40000.0)
 
             assert verdict.label == "background"
-            assert verdict.headline == "dark as it should be"
+            # Nothing to say and nothing to do: the bench does not explain
+            # darkness to the person who shot the dark frame, and it offers no
+            # action panel saying there is no action (owner: "I know that darks
+            # are dark. Did you write it for yourself?").
+            assert verdict.headline == ""
+            assert verdict.next_action == ""
             assert not verdict.blocking
             assert verdict.is_usable
             assert "increase" not in verdict.advice.casefold()
-            assert "increase" not in verdict.next_action.casefold()
-            assert "expose" not in verdict.next_action.casefold()
 
     def test_a_background_approaching_its_signal_gets_loud(self, tmp_path):
         # Half the signal's counts: a leak, an open shutter, or the wrong file.
@@ -1340,7 +1343,7 @@ class TestABackgroundIsJudgedAsABackground:
         )
 
         assert not verdict.blocking
-        assert verdict.headline == "dark as it should be"
+        assert verdict.headline == ""
 
     def test_the_signal_frame_it_is_compared_against_is_its_own_partner(
         self, tmp_path
@@ -1365,7 +1368,7 @@ class TestABackgroundIsJudgedAsABackground:
         # A lamp signal of another element is not this background's partner.
         assert campaign.partner_peak(bright.path, MeasurementRole.LAMP) is None
         verdict = campaign.role_triage(dark.path)
-        assert verdict.headline == "dark as it should be"
+        assert verdict.label == "background"
         assert not verdict.blocking
 
     def test_without_a_partner_a_background_is_still_read_as_one(self, tmp_path):
@@ -1373,5 +1376,5 @@ class TestABackgroundIsJudgedAsABackground:
 
         verdict = triage_for_role(triage, MeasurementRole.SPHERE_BACKGROUND)
 
-        assert verdict.headline == "dark as it should be"
+        assert verdict.label == "background"
         assert not verdict.blocking

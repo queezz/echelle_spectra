@@ -1079,7 +1079,7 @@ def _background_verdict(
         role,
         triage.state,
         "background",
-        "dark as it should be",
+        "",
         False,
         f"This is a {kind} background, so dark is correct and DIM is the "
         "reading to expect — it is subtracted from its "
@@ -1087,7 +1087,7 @@ def _background_verdict(
         "background; it is matched to the frame it partners. The reading worth "
         "watching is the opposite one: a background approaching its signal's "
         "own counts means light is getting in.",
-        "Nothing to change — a background is meant to read dark.",
+        "",
     )
 
 

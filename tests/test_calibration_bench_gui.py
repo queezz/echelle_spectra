@@ -1718,13 +1718,15 @@ def test_the_readings_strip_folds_instead_of_squeezing_its_button(qt_app, tmp_pa
     assert wide == len(window._status_panels), "a wide band should stand in one row"
     assert narrow == 1, "a narrow band must fold, not squeeze"
 
-    # Whatever the fold, the compute button keeps its whole label.
+    # The strip carries no buttons at all now: Bench state, Alignment and
+    # Sphere factors are readings, and the one action they held sat diagonally
+    # opposite the step that calls for it while also existing in the next-step
+    # panel (owner, 2026-08-16). What must survive the fold is the reading.
     for width in (1400, 900, 640, 320):
         window._reflow_status_band(window._status_band_columns(width))
         qt_app.processEvents()
-        assert window.compare_button.sizeHint().width() <= (
-            window.sphere_factors_group.minimumWidth()
-        )
+        assert not window.sphere_factors_group.findChildren(QtWidgets.QPushButton)
+        assert window.comparison_value.isVisible()
     window.close()
     forget_session_layout()
 
