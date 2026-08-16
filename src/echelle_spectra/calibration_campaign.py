@@ -18,7 +18,7 @@ import os
 import re
 import shutil
 import tempfile
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date
 from enum import Enum
@@ -151,6 +151,14 @@ BACKGROUND_PARTNERS = {
 #: from is a light leak, a shutter that stayed open, or the wrong file — and
 #: that, not dimness, is what deserves to be loud.
 BACKGROUND_LEAK_FRACTION = 0.30
+
+#: The roles exactly one file of a campaign can hold.  Two files proposing the
+#: same one is a filename clash the bench must not resolve on its own — which
+#: is the whole test of whether a folder's names may be applied unasked.  The
+#: two lamp roles are deliberately absent: a lamp family is shot as a
+#: bright/dim pair, so several files legitimately propose the same lamp role,
+#: and the campaign already reads the last one assigned as the pair's member.
+SINGLE_HOLDER_ROLES = (MeasurementRole.SPHERE, MeasurementRole.SPHERE_BACKGROUND)
 
 
 class ExposureState(Enum):
@@ -1539,6 +1547,72 @@ class CalibrationCampaignSession:
             pending.append((path, suggestion.roles[0]))
         return tuple(sorted(pending, key=lambda item: item[0].name.casefold()))
 
+    def unanimous_suggestions(
+        self, *, declined: Iterable[str | Path] = ()
+    ) -> tuple[tuple[Path, MeasurementRole], ...]:
+        """Every unassigned file's role when the whole folder leaves nothing to ask.
+
+        A suggestion is help until somebody confirms it, and confirming a
+        folder one row at a time is the interaction the operator called
+        painful.  When a *set* of filenames says exactly one thing — each file
+        naming one role, a lamp role naming its lamp, and no two files claiming
+        a role only one file can hold — there is nothing left for the operator
+        to decide, and the bench may simply assign it.
+
+        The test is on the set, not the file: one doubtful name anywhere makes
+        the whole folder the operator's to sort out, and this returns nothing
+        so the confirm flow stays exactly as it was.  Files in *declined* are
+        ones the operator has deliberately unassigned; they neither block the
+        set nor get their suggestion pushed back onto them.
+        """
+
+        ignored = {Path(item) for item in declined}
+        claimed: set[tuple[MeasurementRole, str]] = set()
+        for record in self.measurements.values():
+            # What is already assigned is what a new suggestion has to fit
+            # around: a folder holding a sphere already cannot gain a second.
+            claimed.add((record.role, record.lamp_family))
+        pending: list[tuple[Path, MeasurementRole]] = []
+        for path in self.loaded:
+            if path in self.measurements or path in ignored:
+                continue
+            suggestion = self.observed.get(path)
+            if suggestion is None or not suggestion.is_unambiguous:
+                return ()
+            role = suggestion.roles[0]
+            lamp = ""
+            if role in LAMP_ROLES:
+                try:
+                    lamp = normalize_lamp_name(suggestion.lamp_name)
+                except ValueError:
+                    # "lamp" in a filename with no lamp name in it: which lamp
+                    # is exactly the question only the operator can answer.
+                    return ()
+            if role in SINGLE_HOLDER_ROLES and (role, lamp) in claimed:
+                return ()
+            claimed.add((role, lamp))
+            pending.append((path, role))
+        return tuple(sorted(pending, key=lambda item: item[0].name.casefold()))
+
+    def apply_unanimous_suggestions(
+        self,
+        *,
+        declined: Iterable[str | Path] = (),
+        saturation_level: float = 0.98 * FULL_SCALE_COUNTS,
+    ) -> tuple[MeasurementRecord, ...]:
+        """Assign a folder's filename roles when they leave nothing to ask.
+
+        Nothing is inferred here that :meth:`unanimous_suggestions` has not
+        already found unambiguous, and every assignment goes through
+        :meth:`classify_file` — the same door the operator's own combo uses —
+        so an applied role is an ordinary assignment they can change.
+        """
+
+        return self._assign(
+            self.unanimous_suggestions(declined=declined),
+            saturation_level=saturation_level,
+        )
+
     def confirm_suggested_roles(
         self, *, saturation_level: float = 0.98 * FULL_SCALE_COUNTS
     ) -> tuple[MeasurementRecord, ...]:
@@ -1550,12 +1624,24 @@ class CalibrationCampaignSession:
         at all.
         """
 
-        confirmed = []
-        for path, role in self.unconfirmed_suggestions():
+        return self._assign(
+            self.unconfirmed_suggestions(), saturation_level=saturation_level
+        )
+
+    def _assign(
+        self,
+        pending: Sequence[tuple[Path, MeasurementRole]],
+        *,
+        saturation_level: float,
+    ) -> tuple[MeasurementRecord, ...]:
+        """Assign each (path, role) pair through the ordinary classification."""
+
+        assigned = []
+        for path, role in pending:
             suggestion = self.observed.get(path)
             lamp = suggestion.lamp_name if suggestion is not None else ""
             try:
-                confirmed.append(
+                assigned.append(
                     self.classify_file(
                         path,
                         role,
@@ -1567,7 +1653,7 @@ class CalibrationCampaignSession:
                 # A lamp suggestion with no readable lamp name stays the
                 # operator's to make; the rest of the folder still confirms.
                 continue
-        return tuple(confirmed)
+        return tuple(assigned)
 
     @property
     def assigned_lamps(self) -> tuple[str, ...]:

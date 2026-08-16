@@ -26,8 +26,10 @@ from echelle_spectra.calibration_bench_gui import (
     BENCH_BODY_POINT_SIZE,
     BENCH_FLOOR_LINES,
     BENCH_HEADLINE_POINT_SIZE,
+    BENCH_HISTOGRAM_LINES,
     BENCH_PREFERRED_LINES,
     BENCH_TOOLTIP_LIMIT,
+    BENCH_TOP_END_LINES,
     CONFIG_ROOT_NAME,
     SNAPSHOT_ROOT_NAME,
     CalibrationBenchWindow,
@@ -346,10 +348,17 @@ def test_with_no_files_the_drop_target_is_the_primary_surface(qt_app, tmp_path):
 
 
 def test_dropped_files_are_triaged_before_any_role(qt_app, tmp_path):
+    """Triage needs a file and nothing else — not even a readable name.
+
+    The names here say nothing, so no role is applied and none is confirmed;
+    the exposure verdict is reached all the same. (F21 item 1 assigns a folder
+    whose names *do* say something, which is a different test.)
+    """
+
     window = _manual_window(tmp_path, cosmic=True)
     window.show()
     paths = []
-    for name in ("Ne-0.02s-x3-bright-lines.sif", "sphere-0.1s-x3.sif"):
+    for name in ("IMG_0042.sif", "IMG_0043.sif"):
         path = tmp_path / name
         path.write_bytes(b"sif\n")
         paths.append(path)
@@ -416,12 +425,20 @@ def test_roles_are_assigned_by_hand_per_file_whatever_the_name(qt_app, tmp_path)
 
 
 def test_confirming_the_prefilled_role_assigns_it(qt_app, tmp_path):
+    """The confirm path, on a drop the bench will not decide for itself.
+
+    The nameless file is what keeps the drop doubtful: with it there, nothing
+    is applied unasked and every row keeps its SUGGESTED badge (F21 item 1).
+    """
+
     window = _manual_window(tmp_path)
     window.show()
     source = tmp_path / "sphere-0.1s-x3-bg.sif"
     source.write_bytes(b"sif\n")
+    nameless = tmp_path / "IMG_0042.sif"
+    nameless.write_bytes(b"sif\n")
 
-    _drop(window, [source])
+    _drop(window, [source, nameless])
     _wait_for_loads(window, qt_app)
     role_combo = window.file_table.cellWidget(0, 1)
     assert role_combo.currentData() is MeasurementRole.SPHERE_BACKGROUND
@@ -466,12 +483,17 @@ _REAL_2025_NAMES = (
 )
 
 
-def _real_folder_window(qt_app, tmp_path: Path, **frame_options):
-    """The owner's own folder on the bench, dropped through the real drop path."""
+def _real_folder_window(qt_app, tmp_path: Path, *, extra=(), **frame_options):
+    """The owner's own folder on the bench, dropped through the real drop path.
+
+    ``extra`` adds files beyond the six real ones — a name the bench cannot
+    read, or a second claim on a role only one file can hold — which is what
+    keeps a drop doubtful now that an unambiguous one assigns itself.
+    """
 
     window = _manual_window(tmp_path, **frame_options)
     paths = []
-    for name in _REAL_2025_NAMES:
+    for name in (*_REAL_2025_NAMES, *extra):
         path = tmp_path / name
         path.write_bytes(b"sif\n")
         paths.append(path)
@@ -481,16 +503,20 @@ def _real_folder_window(qt_app, tmp_path: Path, **frame_options):
 
 
 def test_a_prefilled_role_never_looks_like_an_assigned_one(qt_app, tmp_path):
-    """F14 item 1 regression.
+    """F14 item 1 regression, on the drop that is still the operator's to sort.
 
     Every file of the real folder pre-fills its role correctly, so the Role
     column read right while the campaign had been given nothing: the Procedure
     tab said "no file carries this role yet" and the factor computation failed.
-    The control now says SUGGESTED until somebody confirms it, and confirming
-    it through the combo reaches the campaign.
+    The control says SUGGESTED until somebody confirms it, and confirming it
+    through the combo reaches the campaign.
+
+    F21 item 1 applies a folder whose names leave nothing to ask, so the drop
+    tested here carries one name the bench cannot read. One doubt is enough:
+    nothing is applied, and every row of it stays SUGGESTED.
     """
 
-    window, paths = _real_folder_window(qt_app, tmp_path)
+    window, paths = _real_folder_window(qt_app, tmp_path, extra=("IMG_0042.sif",))
     sphere = tmp_path / "sphere-0.1s-x3.sif"
     sphere_row = window._file_rows.index(sphere)
     sphere_combo = window.file_table.cellWidget(sphere_row, 1)
@@ -537,15 +563,21 @@ def test_a_prefilled_role_never_looks_like_an_assigned_one(qt_app, tmp_path):
 
 
 def test_one_press_confirms_every_suggested_role(qt_app, tmp_path):
-    """The whole folder is one deliberate press, not one popup pick per row."""
+    """A doubtful drop is one deliberate press, not one popup pick per row.
 
-    window, _paths = _real_folder_window(qt_app, tmp_path)
+    The unreadable name is what left the press to be made at all: without it
+    the six would have assigned themselves (F21 item 1).
+    """
+
+    window, _paths = _real_folder_window(qt_app, tmp_path, extra=("IMG_0042.sif",))
     assert not window.campaign.measurements
 
     window.confirm_roles_button.click()
     qt_app.processEvents()
 
+    # The six that named themselves; the one that did not stays unassigned.
     assert len(window.campaign.measurements) == len(_REAL_2025_NAMES)
+    assert tmp_path / "IMG_0042.sif" not in window.campaign.measurements
     assert window.campaign.unconfirmed_suggestions() == ()
     assert window.campaign.assigned_lamps == ("Ne",)
     assert "Assigned 6 suggested role(s)" in window.message_value.text()
@@ -554,6 +586,94 @@ def test_one_press_confirms_every_suggested_role(qt_app, tmp_path):
     }
     assert checklist["sphere"].detail == "sphere-0.1s-x3.sif"
     assert checklist["sphere-background"].detail == "sphere-0.1s-x3-bg.sif"
+    window.close()
+
+
+def test_a_folder_that_names_itself_is_assigned_on_arrival(qt_app, tmp_path):
+    """F21 item 1: an unambiguous drop is applied, with one line about it.
+
+    The owner's complaint was the confirmation dance — a dropdown per row, or
+    a Confirm press, for suggestions that are "always like so". When every
+    name in the drop says exactly one thing there is nothing to decide, so the
+    bench assigns them and says so once.
+    """
+
+    window, paths = _real_folder_window(qt_app, tmp_path)
+    window.show()
+    qt_app.processEvents()
+
+    assert len(window.campaign.measurements) == len(_REAL_2025_NAMES)
+    assert window.campaign.unconfirmed_suggestions() == ()
+    assert window.campaign.assigned_lamps == ("Ne",)
+    assert (
+        window.campaign.measurements[tmp_path / "sphere-0.1s-x3.sif"].role
+        is MeasurementRole.SPHERE
+    )
+    # One notice, and it names what happened and where to undo it.
+    message = window.message_value.text()
+    assert "Roles assigned from filenames: 6 file(s)" in message
+    assert "change any that are wrong" in message
+
+    # No new badge state was invented: SUGGESTED simply is not there, exactly
+    # as after a confirmation, and the dropdowns still carry the roles.
+    for row, path in enumerate(window._file_rows):
+        combo = window.file_table.cellWidget(row, 1)
+        assert not _SUGGESTED_COLOR_IN(combo)
+        assert _SUGGESTED_BADGE.lower() not in window.file_table.item(row, 0).text()
+        assert combo.currentData() is window.campaign.measurements[path].role
+    assert not window.confirm_roles_button.isEnabled()
+    # And the procedure moved on rather than asking for a confirmation.
+    checklist = {item.key: item for item in window.campaign.checklist(window.session)}
+    assert checklist["sphere"].detail == "sphere-0.1s-x3.sif"
+    window.close()
+
+
+def test_an_applied_role_is_an_ordinary_assignment_the_combo_can_change(
+    qt_app, tmp_path
+):
+    """Applied is not locked: the dropdown remains the operator's override."""
+
+    window, _paths = _real_folder_window(qt_app, tmp_path)
+    window.show()
+    sphere = tmp_path / "sphere-0.1s-x3.sif"
+    row = window._file_rows.index(sphere)
+    combo = window.file_table.cellWidget(row, 1)
+
+    combo.setCurrentIndex(combo.findData(MeasurementRole.OTHER))
+    qt_app.processEvents()
+    assert window.campaign.measurements[sphere].role is MeasurementRole.OTHER
+
+    # Taking the role off entirely sticks, too — including across the next
+    # drop, which must never push the filename's guess back onto it.
+    combo.setCurrentIndex(combo.findData(None))
+    qt_app.processEvents()
+    assert sphere not in window.campaign.measurements
+
+    later = tmp_path / "Ne-0.3s-x3-lines.sif"
+    later.write_bytes(b"sif\n")
+    _drop(window, [later])
+    _wait_for_loads(window, qt_app)
+
+    assert window.campaign.measurements[later].role is MeasurementRole.LAMP
+    assert sphere not in window.campaign.measurements
+    window.close()
+
+
+def test_two_files_claiming_one_role_keep_the_confirm_flow(qt_app, tmp_path):
+    """The owner's own example of doubt: two files that both say sphere."""
+
+    window, _paths = _real_folder_window(
+        qt_app, tmp_path, extra=("sphere-0.2s-x3.sif",)
+    )
+    window.show()
+    qt_app.processEvents()
+
+    assert not window.campaign.measurements
+    assert "Roles assigned from filenames" not in window.message_value.text()
+    for row in range(window.file_table.rowCount()):
+        assert _SUGGESTED_COLOR_IN(window.file_table.cellWidget(row, 1))
+    assert window.confirm_roles_button.isEnabled()
+    assert "7" in window.confirm_roles_button.text()
     window.close()
 
 
@@ -1396,6 +1516,108 @@ def test_a_populated_top_end_draws_visible_outlined_bins(qt_app, tmp_path):
     # The plot is in log mode, so the fill has to start below one pixel;
     # filling to y=1 is what painted an empty histogram as a solid block.
     assert curve.opts["fillLevel"] == pytest.approx(float(np.log10(0.5)))
+    window.close()
+
+
+def test_the_whole_folder_is_summarised_one_row_per_file(qt_app, tmp_path):
+    """F21 item 4a: judge the folder in one look, then open the row worth opening.
+
+    Triage was a single-file surface: six acquisitions meant six clicks and
+    five verdicts held in the head. The summary answers "is this folder any
+    good" at a glance, and the detailed panel below still reads one file.
+    """
+
+    window, _paths = _real_folder_window(qt_app, tmp_path, cosmic=True)
+    window.show()
+    qt_app.processEvents()
+    table = window.triage_summary_table
+
+    assert table.rowCount() == len(window._file_rows) == len(_REAL_2025_NAMES)
+    for row, path in enumerate(window._file_rows):
+        record = window.campaign.loaded[path]
+        verdict = window.campaign.role_triage(path)
+        assert table.item(row, 0).text() == path.name
+        # The role it carries, spelled out in its own column.
+        assert window.campaign.measurements[path].role.value in table.item(row, 1).text()
+        # The verdict word, in the colour that verdict earns.
+        assert table.item(row, 2).text() == verdict.label.upper()
+        assert table.item(row, 2).foreground().color().name() == (
+            window._reading_colour(verdict, record.triage)
+        )
+        # Peak as a share of full scale, and the anomalies that were counted
+        # rather than held against the frame.
+        assert table.item(row, 3).text() == (
+            f"{100.0 * record.triage.headroom_fraction:.0f}%"
+        )
+        assert table.item(row, 4).text() == "2"
+
+    # The table is the entry point: clicking a row opens that file below.
+    lamp_row = window._file_rows.index(tmp_path / "Ne-0.02s-x3-bright-lines.sif")
+    window._summary_row_clicked(lamp_row, 0)
+    qt_app.processEvents()
+    assert window._selected_file() == window._file_rows[lamp_row]
+    assert window.triage_headline.text()
+    assert window.file_table.currentRow() == lamp_row
+    window.close()
+
+
+def test_the_summary_paints_an_expected_saturation_as_a_note(qt_app, tmp_path):
+    """A dim-series lamp is shot to clip; the summary must not shout red."""
+
+    window, _paths = _real_folder_window(qt_app, tmp_path, peak=65535.0)
+    window.show()
+    qt_app.processEvents()
+    table = window.triage_summary_table
+
+    lamp_row = window._file_rows.index(tmp_path / "Ne-0.1s-x3-dimm-lines.sif")
+    sphere_row = window._file_rows.index(tmp_path / "sphere-0.1s-x3.sif")
+
+    assert table.item(lamp_row, 2).text() == "SATURATED LINES (EXPECTED)"
+    assert table.item(lamp_row, 2).foreground().color().name() == "#ffb86b"
+    # The sphere keeps the hard verdict, in the colour that means stop.
+    assert table.item(sphere_row, 2).text() == "SATURATED"
+    assert table.item(sphere_row, 2).foreground().color().name() == "#ff8f8f"
+    window.close()
+
+
+def test_the_top_end_is_a_strip_under_the_histogram_it_qualifies(qt_app, tmp_path):
+    """F21 item 4b: the near-saturation panel stays, and stops competing.
+
+    The owner now reads the top end as the number the lamp is adjusted by, so
+    it is kept — but drawn at the same size as the raw-counts histogram it
+    split the view's attention in half. Its subordination is structural: a
+    capped strip with no appetite for height, beside a primary that keeps its
+    floor and every share of the growth.
+    """
+
+    window = _manual_window(tmp_path, peak=65000.0)
+    window.show()
+    path = tmp_path / "Ne-0.02s-x3-bright-lines.sif"
+    path.write_bytes(b"sif\n")
+    _drop(window, [path])
+    _wait_for_loads(window, qt_app)
+    qt_app.processEvents()
+
+    strip = window.top_histogram_widget
+    primary = window.histogram_widget
+    unit = window.layout_unit
+
+    assert strip.maximumHeight() == BENCH_TOP_END_LINES * unit
+    assert primary.minimumHeight() == BENCH_HISTOGRAM_LINES * unit
+    # The ceiling of the secondary sits below the floor of the primary.
+    assert strip.maximumHeight() < primary.minimumHeight()
+    assert strip.sizePolicy().verticalPolicy() == QtWidgets.QSizePolicy.Maximum
+    assert primary.sizePolicy().verticalPolicy() == QtWidgets.QSizePolicy.Expanding
+
+    layout = strip.parentWidget().layout()
+    assert layout.stretch(layout.indexOf(strip)) == 0
+    assert layout.stretch(layout.indexOf(primary)) >= 1
+
+    # And on screen, not only in the size policy.
+    assert strip.isVisible()
+    assert strip.height() < primary.height()
+    # F17 item 3 survives: emptiness is still stated in words, not drawn.
+    assert not window.top_end_message.isVisible()
     window.close()
 
 

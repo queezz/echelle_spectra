@@ -495,6 +495,105 @@ def test_a_suggested_role_is_reported_as_unconfirmed_not_as_assigned(tmp_path):
     assert checklist["sphere"].detail == "sphere-0.1s-x3.sif"
 
 
+def test_a_folder_whose_names_leave_nothing_to_ask_assigns_itself(tmp_path):
+    """F21 item 1: confirming what nobody doubts is a dance, not a decision.
+
+    The owner's folders always read the same way ("the suggestions are always
+    like so"), and every role in them had to be confirmed one row at a time.
+    A set of filenames that says exactly one thing is not a question.
+    """
+
+    sources = _real_2025_folder(tmp_path)
+    campaign = _ne_campaign(sources)
+    for name in _REAL_2025_NAMES:
+        campaign.record_frame(_triage_frame(sources[name].parent, name, _bright_line))
+
+    pending = dict(campaign.unanimous_suggestions())
+    assert set(pending) == {sources[name] for name in _REAL_2025_NAMES}
+    # The bright/dim pair is not a clash: a lamp family is shot twice on
+    # purpose, and only the roles one file can hold are exclusive.
+    assert pending[sources["Ne-0.02s-x3-bright-lines.sif"]] is MeasurementRole.LAMP
+    assert pending[sources["Ne-0.1s-x3-dimm-lines.sif"]] is MeasurementRole.LAMP
+
+    applied = campaign.apply_unanimous_suggestions()
+
+    assert {record.path.name for record in applied} == set(_REAL_2025_NAMES)
+    assert campaign.unconfirmed_suggestions() == ()
+    assert campaign.unanimous_suggestions() == ()
+    assert campaign.assigned_lamps == ("Ne",)
+    assert campaign.measurements[sources["sphere-0.1s-x3.sif"]].role is (
+        MeasurementRole.SPHERE
+    )
+    checklist = {item.key: item for item in campaign.checklist(_aligned_session(tmp_path))}
+    assert checklist["sphere"].state is ChecklistState.DONE
+
+
+def test_two_files_claiming_one_role_are_never_applied_unasked(tmp_path):
+    """A role only one file can hold, proposed by two, is the operator's call."""
+
+    sources = _real_2025_folder(tmp_path)
+    campaign = _ne_campaign(sources)
+    second_sphere = sources["sphere-0.1s-x3.sif"].parent / "sphere-0.2s-x3.sif"
+    second_sphere.write_bytes(b"sphere again\n")
+    for name in (*_REAL_2025_NAMES, second_sphere.name):
+        campaign.record_frame(
+            _triage_frame(sources["sphere-0.1s-x3.sif"].parent, name, _bright_line)
+        )
+
+    assert campaign.unanimous_suggestions() == ()
+    assert campaign.apply_unanimous_suggestions() == ()
+    # Nothing was applied at all — not even the files nobody was in doubt about.
+    assert not campaign.measurements
+    # And the confirm flow is exactly where it was, for every one of them.
+    assert len(campaign.unconfirmed_suggestions()) == len(_REAL_2025_NAMES) + 1
+
+
+def test_one_unreadable_name_leaves_the_whole_drop_to_the_operator(tmp_path):
+    """Half a folder guessed is worse than a folder asked about."""
+
+    sources = _real_2025_folder(tmp_path)
+    campaign = _ne_campaign(sources)
+    nameless = sources["sphere-0.1s-x3.sif"].parent / "IMG_0042.sif"
+    nameless.write_bytes(b"nameless\n")
+    for name in (*_REAL_2025_NAMES, nameless.name):
+        campaign.record_frame(
+            _triage_frame(sources["sphere-0.1s-x3.sif"].parent, name, _bright_line)
+        )
+
+    assert campaign.unanimous_suggestions() == ()
+    assert not campaign.apply_unanimous_suggestions()
+
+    # A lamp with no readable lamp name is the same kind of doubt: which lamp?
+    campaign = _ne_campaign(sources)
+    lamp = sources["sphere-0.1s-x3.sif"].parent / "lamp-0.1s.sif"
+    lamp.write_bytes(b"lamp\n")
+    campaign.record_frame(_triage_frame(lamp.parent, lamp.name, _bright_line))
+    assert campaign.observed[lamp].is_unambiguous
+    assert campaign.unanimous_suggestions() == ()
+
+
+def test_a_file_the_operator_unassigned_is_never_reassigned_by_a_later_drop(tmp_path):
+    """An applied role is an ordinary assignment, and so is taking one off."""
+
+    sources = _real_2025_folder(tmp_path)
+    campaign = _ne_campaign(sources)
+    for name in _REAL_2025_NAMES:
+        campaign.record_frame(_triage_frame(sources[name].parent, name, _bright_line))
+    campaign.apply_unanimous_suggestions()
+    sphere = sources["sphere-0.1s-x3.sif"]
+    assert campaign.remove_classification(sphere)
+    later = sphere.parent / "Ne-0.3s-x3-lines.sif"
+    later.write_bytes(b"one more lamp exposure\n")
+    campaign.record_frame(_triage_frame(later.parent, later.name, _bright_line))
+
+    applied = campaign.apply_unanimous_suggestions(declined=[sphere])
+
+    # The new file lands; the one taken off by hand stays off.
+    assert [record.path.name for record in applied] == [later.name]
+    assert sphere not in campaign.measurements
+    assert campaign.unanimous_suggestions(declined=[sphere]) == ()
+
+
 def test_saturation_never_fails_a_lamp_frame_but_still_fails_a_sphere(tmp_path):
     """F14 item 2, in the owner's words: of course the dim series saturates."""
 

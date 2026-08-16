@@ -168,6 +168,20 @@ BENCH_HEADLINE_POINT_SIZE = 17.0
 #: where it can be read calmly instead of floating over the controls.
 BENCH_TOOLTIP_LIMIT = 88
 
+#: The raw-counts histogram's floor, in lines of body text.  It is the primary
+#: reading of the triage view and never shrinks to its neighbour's size.
+BENCH_HISTOGRAM_LINES = 8
+
+#: The near-saturation strip's ceiling, in the same unit.  Deliberately a
+#: fraction of the primary histogram's floor: the top end is the number the
+#: lamp is adjusted by, and it is read *after* the raw counts, never instead
+#: of them (F21 item 4b).
+BENCH_TOP_END_LINES = 4
+
+#: How many summary rows the triage table shows before it scrolls.  Enough for
+#: a whole campaign folder; past that the reading is a scroll either way.
+BENCH_SUMMARY_ROWS = 8
+
 
 def bench_point_sizes(base_point_size: float | None = None) -> tuple[float, float]:
     """Return the (body, headline) point sizes for this platform's font.
@@ -617,6 +631,14 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         self._catalog_rows: tuple = ()
         self._queue: list[Path] = []
         self._file_rows: list[Path] = []
+        #: The last line the bench wrote about the roles themselves.  While it
+        #: is still the line on screen, the bench's own follow-up narration
+        #: holds its tongue rather than burying it (see ``_bench_says``).
+        self._role_notice = ""
+        #: Files the operator has deliberately put back to no role.  A folder
+        #: whose names read unambiguously is applied unasked, and that must
+        #: never undo a decision somebody made by hand.
+        self._declined_suggestions: set[Path] = set()
         self._explainable_widgets: list[object] = []
         self._checklist_labels: list[object] = []
         #: Files the operator opened deliberately; the fit view never argues
@@ -1416,12 +1438,14 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         self.confirm_roles_button = QtWidgets.QPushButton("Confirm suggested roles")
         self._explainable(
             self.confirm_roles_button,
-            "Suggested is not assigned",
-            "A filename may pre-fill the Role control, but the bench is not "
-            "given that role until somebody says so. Rows in that state are "
-            "marked SUGGESTED. This button assigns every one of them at once, "
-            "so a whole acquisition folder is one deliberate press rather than "
-            "one popup pick per row.",
+            "What is left to confirm",
+            "A folder whose filenames say exactly one thing is assigned the "
+            "moment it finishes loading, and the bench says so in one line. "
+            "This button is for the rest: a drop holding a name the bench "
+            "cannot read, or two files claiming the same role, is left "
+            "entirely to you, and every row of it is marked SUGGESTED until "
+            "you say what it is. Pressing this assigns each unambiguous one "
+            "at once; change any of them in the Role column afterwards.",
         )
         layout.addWidget(self.confirm_roles_button)
 
@@ -1967,6 +1991,61 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
     def _build_triage_view(self) -> None:
         widget = QtWidgets.QWidget()
         layout = QtWidgets.QVBoxLayout(widget)
+
+        # The folder before the file (F21 item 4a).  Triage used to be a
+        # single-file surface: to judge six acquisitions the operator clicked
+        # six rows and held five verdicts in their head.  One compact row per
+        # file — its role, its verdict in the verdict's own colour, its peak as
+        # a share of full scale, its anomaly count — answers "is this folder
+        # any good" in one look, and clicking a row opens exactly the detailed
+        # reading that was already here, underneath.
+        self.triage_summary_table = QtWidgets.QTableWidget(0, 5)
+        self.triage_summary_table.setHorizontalHeaderLabels(
+            ["File", "Role", "Verdict", "Peak", "Anomalies"]
+        )
+        summary_header = self.triage_summary_table.horizontalHeader()
+        summary_header.setSectionResizeMode(0, QtWidgets.QHeaderView.Stretch)
+        for column in range(1, 5):
+            summary_header.setSectionResizeMode(
+                column, QtWidgets.QHeaderView.ResizeToContents
+            )
+        self.triage_summary_table.verticalHeader().setVisible(False)
+        self.triage_summary_table.verticalHeader().setDefaultSectionSize(
+            self.layout_unit + 6
+        )
+        # One line per file is the whole point: a wrapped row is not a glance.
+        self.triage_summary_table.setWordWrap(False)
+        self.triage_summary_table.setTextElideMode(QtCore.Qt.ElideMiddle)
+        self.triage_summary_table.setMouseTracking(False)
+        self.triage_summary_table.setSelectionBehavior(
+            QtWidgets.QAbstractItemView.SelectRows
+        )
+        self.triage_summary_table.setSelectionMode(
+            QtWidgets.QAbstractItemView.SingleSelection
+        )
+        self.triage_summary_table.setEditTriggers(
+            QtWidgets.QAbstractItemView.NoEditTriggers
+        )
+        self.triage_summary_table.setHorizontalScrollBarPolicy(
+            QtCore.Qt.ScrollBarAlwaysOff
+        )
+        # It summarises; it never takes room from the reading it introduces.
+        self.triage_summary_table.setSizePolicy(
+            QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Maximum
+        )
+        self.triage_summary_table.setMinimumHeight(3 * self.layout_unit)
+        self._fit_triage_summary_height()
+        self._explainable(
+            self.triage_summary_table,
+            "The whole folder at a glance",
+            "One row per loaded file: the role it carries, the verdict its "
+            "exposure earns in that role, its brightest honest pixel as a "
+            "share of full scale, and how many isolated full-scale pixels "
+            "(cosmic rays, hot pixels) were counted rather than held against "
+            "it. Click a row to read that file in full below.",
+        )
+        layout.addWidget(self.triage_summary_table, 0)
+
         self.triage_headline = QtWidgets.QLabel(
             "Drop a SIF onto the bench. Triage needs nothing but a file."
         )
@@ -1993,28 +2072,45 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         self.exposure_value.setObjectName("messagePanel")
         layout.addWidget(self.exposure_value)
 
-        graphics = pg.GraphicsLayoutWidget()
-        graphics.setBackground("#10151b")
-        self.histogram_plot = graphics.addPlot(row=0, col=0, title="Raw counts histogram")
+        self.histogram_widget = pg.GraphicsLayoutWidget()
+        self.histogram_widget.setBackground("#10151b")
+        self.histogram_plot = self.histogram_widget.addPlot(
+            row=0, col=0, title="Raw counts histogram"
+        )
         self.histogram_plot.setLabel("bottom", "counts")
         self.histogram_plot.setLabel("left", "pixels per bin")
         self.histogram_plot.getAxis("bottom").enableAutoSIPrefix(False)
         self.histogram_plot.setLogMode(y=True)
-        layout.addWidget(graphics, 1)
+        self.histogram_widget.setMinimumHeight(BENCH_HISTOGRAM_LINES * self.layout_unit)
+        layout.addWidget(self.histogram_widget, 1)
 
         # The top end lives in its own widget so that the honest answer — "no
         # pixels are up here" — can take its place in words (F17 item 3). An
         # empty log histogram drew a solid block, which says nothing at all.
+        #
+        # It is a strip, not a second histogram (F21 item 4b).  Near-saturation
+        # distribution is the number the lamp is adjusted by, so it stays — but
+        # it was drawn the same size as the raw-counts histogram and split the
+        # view's attention in half.  A fixed strip a fraction of the primary's
+        # floor makes the subordination structural rather than a matter of
+        # which one happens to be looked at first.
         self.top_histogram_widget = pg.GraphicsLayoutWidget()
         self.top_histogram_widget.setBackground("#10151b")
         self.top_histogram_plot = self.top_histogram_widget.addPlot(
             row=0, col=0, title="Top end — the last 10% before full scale"
         )
         self.top_histogram_plot.setLabel("bottom", "counts")
-        self.top_histogram_plot.setLabel("left", "pixels per bin")
+        # No left label: on a strip this thin the axis title is most of the
+        # panel, and the count of pixels per bin is read off the primary.
         self.top_histogram_plot.getAxis("bottom").enableAutoSIPrefix(False)
         self.top_histogram_plot.setLogMode(y=True)
-        layout.addWidget(self.top_histogram_widget, 1)
+        self.top_histogram_widget.setMaximumHeight(
+            BENCH_TOP_END_LINES * self.layout_unit
+        )
+        self.top_histogram_widget.setSizePolicy(
+            QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Maximum
+        )
+        layout.addWidget(self.top_histogram_widget, 0)
         self.top_end_message = QtWidgets.QLabel(_TOP_END_EMPTY)
         self.top_end_message.setWordWrap(True)
         self.top_end_message.setObjectName("messagePanel")
@@ -2304,6 +2400,9 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         self.show_frame_button.clicked.connect(self._open_selected_file)
         self.file_table.itemSelectionChanged.connect(self._file_selection_changed)
         self.file_table.itemClicked.connect(self._file_row_clicked)
+        # A click, not a selection change: the summary drives the files table,
+        # and the files table drives the summary's highlight back.
+        self.triage_summary_table.cellClicked.connect(self._summary_row_clicked)
         self.checklist_tree.currentRowChanged.connect(self._checklist_row_selected)
         self.anchor_table.itemSelectionChanged.connect(self._anchor_row_selected)
         self.line_help_table.itemSelectionChanged.connect(self._expected_line_selected)
@@ -2383,6 +2482,62 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
             "anchor is only accepted when its own detector window is clear.",
         )
 
+    def _bench_says(self, text: str) -> None:
+        """Narrate an automatic follow-up without burying the operator's notice.
+
+        Opening the assigned lamp signal and subtracting its background are
+        things the bench does *because* roles were assigned, and both are
+        already stated permanently beside the fit.  Landing them on the message
+        line a moment later left the operator watching six roles change with
+        the explanation already scrolled away (F21 item 1: one notice).  As
+        soon as anything newer is on the line, the narration resumes.
+        """
+
+        if self._role_notice and self.message_value.text() == self._role_notice:
+            return
+        self.message_value.setText(text)
+
+    def _say_roles(self, text: str) -> None:
+        """Put one line about the roles on screen, and hold it there."""
+
+        self._role_notice = text
+        self.message_value.setText(text)
+
+    def _apply_unambiguous_suggestions(self) -> None:
+        """Assign a whole drop's roles when its filenames leave nothing to ask.
+
+        The bench used to hold every filename-derived role at arm's length
+        until the operator confirmed it row by row, and the owner's folders
+        always read the same way: "the suggestions are always like so".  A set
+        of names that says exactly one thing is not a question, and asking it
+        anyway is the confirmation dance this replaces (F21 item 1).
+
+        Doubt keeps the old behaviour in full.  One ambiguous or clashing name
+        anywhere in the drop and nothing is applied at all — every row keeps
+        its SUGGESTED badge and its Confirm button — because a bench that
+        guesses half a folder is worse than one that asks about all of it.
+
+        The whole drop is judged at once, after the last queued file is read,
+        so a six-file folder is one decision and one notice rather than six.
+        """
+
+        if self.campaign is None:
+            return
+        applied = self.campaign.apply_unanimous_suggestions(
+            declined=self._declined_suggestions,
+            saturation_level=self.session.saturation_level,
+        )
+        if not applied:
+            return
+        self.campaign.scope_alignment_to_lamp(self.session)
+        # One line, after the refresh that may report opening a lamp signal:
+        # what just happened to the roles is what the operator has to read.
+        self.refresh()
+        self._say_roles(
+            f"Roles assigned from filenames: {len(applied)} file(s) — "
+            "review them in the table and change any that are wrong."
+        )
+
     def _confirm_suggested_roles(self) -> None:
         """Assign every filename suggestion the operator has not confirmed."""
 
@@ -2406,9 +2561,10 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
             else "No suggestion could be confirmed; assign those roles by hand."
         )
         # The refresh may open the assigned lamp signal and report that; the
-        # operator's own action is what they need to read, so it is set last.
+        # operator's own action is what they need to read, so it is set last
+        # and held against the bench's own follow-up narration.
         self.refresh()
-        self.message_value.setText(outcome)
+        self._say_roles(outcome)
 
     def _line_family_changed(self) -> None:
         """A hand-picked catalog is an override; the default follows the lamp."""
@@ -2623,7 +2779,7 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
             return
         self._auto_following = True
         try:
-            self.message_value.setText(
+            self._bench_says(
                 f"Opened the assigned lamp signal {signal.name} for fitting."
             )
             self.add_paths([signal])
@@ -2667,7 +2823,7 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         except ValueError as exc:
             self.message_value.setText(f"Lamp background was not subtracted: {exc}")
             return
-        self.message_value.setText(
+        self._bench_says(
             f"Fitting {frame.path.name} subtracted from the lamp signal, as "
             "echelle-align does."
         )
@@ -2745,6 +2901,7 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
             return
         if self.campaign is not None:
             self.campaign.forget_file(selected)
+        self._declined_suggestions.discard(selected)
         self._file_rows.remove(selected)
         self.file_table.removeRow(self.file_table.currentRow())
         self.message_value.setText(f"Removed {selected.name} from the bench.")
@@ -2807,11 +2964,15 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         role = role_combo.currentData()
         lamp_combo.setEnabled(role in _LAMP_ROLES)
         if role is None:
+            # Taking a role off is a decision, and the next drop must not put
+            # the filename's guess back on top of it.
+            self._declined_suggestions.add(path)
             if self.campaign.remove_classification(path):
                 self.campaign.scope_alignment_to_lamp(self.session)
                 self.message_value.setText(f"{path.name} is unassigned again.")
                 self.refresh()
             return
+        self._declined_suggestions.discard(path)
         try:
             record = self.campaign.classify_file(
                 path,
@@ -3029,7 +3190,10 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
             if record.path not in self._file_rows:
                 self._add_file_row(record.path)
             self._select_file_row(record.path)
-            self.message_value.setText(record.triage.headline)
+            # The headline is also the loudest thing in the triage view, so it
+            # yields to a fresh notice about the roles rather than covering it
+            # when the bench re-opens a file on its own.
+            self._bench_says(record.triage.headline)
         self.refresh()
 
     def _select_file_row(self, path: Path) -> None:
@@ -3049,6 +3213,11 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
             self._load_thread.deleteLater()
         self._load_thread = None
         self._start_next_load()
+        if self._load_thread is None and not self._queue:
+            # The drop is fully read. Filenames are judged as a set — a folder
+            # arrives as a folder — so this waits for the last file rather than
+            # deciding on each one as it lands.
+            self._apply_unambiguous_suggestions()
 
     def _order_changed(self, order_idx: int) -> None:
         self.session.set_selected_order(order_idx)
@@ -3230,14 +3399,13 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         measurement = self.campaign.measurements.get(path)
         role = measurement.role if measurement is not None else None
         verdict = triage_for_role(triage, role, self.campaign.partner_peak(path, role))
-        color = self._verdict_colour(verdict, triage)
+        color = self._reading_colour(verdict, triage)
         headline = triage.headline
         if verdict.is_background:
             headline = verdict.headline or verdict.label
         elif triage.state is ExposureState.SATURATED and not verdict.blocking:
             # The bright/dim pair exists so the dim series saturates its strong
             # lines; saying FAILED here would be the bench misreading physics.
-            color = _TRIAGE_COLORS[ExposureState.DIM]
             headline = verdict.headline.upper()
         self.triage_headline.setText(self._short_verdict(path, triage, verdict))
         self.triage_headline.setStyleSheet(f"color: {color};")
@@ -3482,6 +3650,7 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
             else "Confirm suggested roles"
         )
         self._refresh_file_table()
+        self._refresh_triage_summary()
         self._refresh_comparison_summary()
         self._refresh_checklist()
         self.save_state_value.setText(
@@ -3523,6 +3692,40 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
                 ExposureState.SATURATED if verdict.blocking else ExposureState.GOOD
             ]
         return _TRIAGE_COLORS[triage.state]
+
+    @classmethod
+    def _reading_colour(cls, verdict, triage) -> str:
+        """The colour one frame's reading is painted, wherever it is read.
+
+        The role decides it, and expected saturation is demoted to a note:
+        the dim series of a bright/dim pair is *shot* to clip its strong lines,
+        so painting it alarm red is the bench misreading physics.  Written once
+        because the triage headline, the files table and the folder summary all
+        have to answer this the same way.
+        """
+
+        if (
+            verdict.state is ExposureState.SATURATED
+            and not verdict.blocking
+            and not verdict.is_background
+        ):
+            return _TRIAGE_COLORS[ExposureState.DIM]
+        return cls._verdict_colour(verdict, triage)
+
+    @staticmethod
+    def _role_text(measurement, is_suggested: bool) -> str:
+        """What the summary's own Role column says, in its own column.
+
+        The files table folds the role in beside the verdict and therefore
+        drops it when the verdict already names it; a column cannot do that —
+        an empty cell under a heading reads as missing, not as redundant.
+        """
+
+        if measurement is None:
+            return _SUGGESTED_BADGE.lower() if is_suggested else "no role yet"
+        if measurement.lamp_family:
+            return f"{measurement.lamp_family} {measurement.role.value}"
+        return measurement.role.value
 
     @staticmethod
     def _role_marks(measurement, verdict, is_suggested: bool) -> list[str]:
@@ -3575,11 +3778,8 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
                 colour = (
                     _SUGGESTED_COLOR
                     if measurement is None and path in suggested
-                    else self._verdict_colour(verdict, record.triage)
+                    else self._reading_colour(verdict, record.triage)
                 )
-                if verdict.state is ExposureState.SATURATED and not verdict.blocking:
-                    # Expected saturation is a note, not an alarm.
-                    colour = _TRIAGE_COLORS[ExposureState.DIM]
                 item.setForeground(QtGui.QColor(colour))
                 title = "exposure verdict"
                 explanation = f"{path}\n{verdict.headline}\n\n{verdict.advice}"
@@ -3594,6 +3794,103 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
             lamp_combo.setEnabled(
                 measurement is not None and measurement.role in _LAMP_ROLES
             )
+
+    def _fit_triage_summary_height(self) -> None:
+        """Cap the summary at the folder it summarises, never at the view."""
+
+        table = self.triage_summary_table
+        rows = max(1, min(table.rowCount(), BENCH_SUMMARY_ROWS))
+        table.setMaximumHeight(
+            table.horizontalHeader().height()
+            + rows * table.verticalHeader().defaultSectionSize()
+            + 2 * table.frameWidth()
+        )
+
+    def _summary_row(self, path: Path, is_suggested: bool) -> tuple:
+        """One file's summary line: its cells, its colour, and its one-liner."""
+
+        assert self.campaign is not None
+        record = self.campaign.loaded.get(path)
+        measurement = self.campaign.measurements.get(path)
+        role_text = self._role_text(measurement, is_suggested)
+        if record is None:
+            return (path.name, role_text, "—", "—", "—"), "", ""
+        role = measurement.role if measurement is not None else None
+        verdict = triage_for_role(
+            record.triage, role, self.campaign.partner_peak(path, role)
+        )
+        peak = (
+            "—"
+            if record.triage.headroom_fraction is None
+            else f"{100.0 * record.triage.headroom_fraction:.0f}%"
+        )
+        counted = record.triage.saturation.anomalous_pixels
+        return (
+            (
+                path.name,
+                role_text,
+                verdict.label.upper(),
+                peak,
+                str(counted) if counted else "—",
+            ),
+            self._reading_colour(verdict, record.triage),
+            verdict.headline,
+        )
+
+    def _refresh_triage_summary(self) -> None:
+        """Summarise every loaded file on one line each, in verdict colour.
+
+        The detailed panel below still reads one file — the selected one — and
+        this is how it gets selected: the operator sees which row is worth
+        opening instead of clicking every row to find out (F21 item 4a).
+        """
+
+        assert self.campaign is not None
+        table = self.triage_summary_table
+        suggested = dict(self.campaign.unconfirmed_suggestions())
+        if table.rowCount() != len(self._file_rows):
+            table.setRowCount(len(self._file_rows))
+            self._fit_triage_summary_height()
+        for row, path in enumerate(self._file_rows):
+            cells, colour, headline = self._summary_row(path, path in suggested)
+            for column, text in enumerate(cells):
+                item = table.item(row, column)
+                if item is None:
+                    item = QtWidgets.QTableWidgetItem()
+                    if column:
+                        item.setTextAlignment(QtCore.Qt.AlignCenter)
+                    table.setItem(row, column, item)
+                item.setText(text)
+            table.item(row, 0).setToolTip(one_line(path.name))
+            if colour:
+                # The verdict word carries the colour, not the whole row: a row
+                # painted end to end is a highlight, and a highlight on every
+                # row is no highlight at all.
+                table.item(row, 2).setForeground(QtGui.QColor(colour))
+                table.item(row, 2).setToolTip(one_line(headline))
+        self._sync_summary_selection()
+
+    def _sync_summary_selection(self) -> None:
+        """Highlight the summary row of whatever file is being read below."""
+
+        selected = self._selected_file()
+        if selected is None or selected not in self._file_rows:
+            return
+        index = self._file_rows.index(selected)
+        table = self.triage_summary_table
+        if table.currentRow() == index:
+            return
+        table.blockSignals(True)
+        try:
+            table.selectRow(index)
+        finally:
+            table.blockSignals(False)
+
+    def _summary_row_clicked(self, row: int, _column: int = 0) -> None:
+        """Open the file whose summary row was clicked in the panel below."""
+
+        if 0 <= row < len(self._file_rows):
+            self._select_file_row(self._file_rows[row])
 
     def _render_role_combo(self, role_combo, is_only_suggested: bool) -> None:
         """Make an unconfirmed suggestion impossible to read as an assignment.
