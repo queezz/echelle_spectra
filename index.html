@@ -251,7 +251,7 @@
     
     
       <li class="md-tabs__item">
-        <a href="operator-cheat-sheet/" class="md-tabs__link">
+        <a href="usage-overview/" class="md-tabs__link">
           
   
   
@@ -633,6 +633,34 @@
   
   
     <li class="md-nav__item">
+      <a href="usage-overview/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Where to start
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="operator-cheat-sheet/" class="md-nav__link">
         
   
@@ -668,7 +696,35 @@
   <span class="md-ellipsis">
     
   
-    Basic usage
+    Single-SIF viewer
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="calibration-to-cube/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    From calibration to cube
   
 
     
@@ -1428,10 +1484,14 @@
 
 <h1 id="echelle-spectra">Echelle Spectra<a class="headerlink" href="#echelle-spectra" title="Permanent link">¶</a></h1>
 <p><strong>Echelle Spectra</strong> is a tool for extracting and analyzing calibrated spectra from 2D echelle spectrometer images.</p>
-<p>For copy-paste commands, start with the <a href="operator-cheat-sheet/">operator cheat
-sheet</a>. It distinguishes portable-kit commands from a
-development checkout and lists every installed GUI and CLI surface.</p>
-<p>It provides a graphical interface for interactive use, but the underlying workflow can also be driven from Jupyter notebooks or scripts — useful for batch processing or automated pipelines.</p>
+<p>Three surfaces share one calibration and extraction pipeline: the <strong>live
+calibration bench</strong> you use at the instrument, the <strong><code>echelle</code> campaign
+commands</strong> that convert whole drives, and the <strong>single-SIF viewer</strong> for looking
+at one shot.</p>
+<p><a href="usage-overview/">Where to start</a> routes by task in one table. For copy-paste
+commands, go to the <a href="operator-cheat-sheet/">operator cheat sheet</a>: it
+distinguishes portable-kit commands from a development checkout and lists every
+installed surface.</p>
 <hr>
 <h2 id="what-it-does">What it does<a class="headerlink" href="#what-it-does" title="Permanent link">¶</a></h2>
 <ul>
@@ -1446,17 +1506,22 @@ development checkout and lists every installed GUI and CLI surface.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>git<span class="w"> </span>clone<span class="w"> </span>https://github.com/queezz/echelle_spectra.git
 <a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="nb">cd</span><span class="w"> </span>echelle_spectra
 <a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>pip<span class="w"> </span>install<span class="w"> </span>-e<span class="w"> </span>.
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>echelle_spectra<span class="w">          </span><span class="c1"># launch GUI</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>echelle<span class="w"> </span>status<span class="w">           </span><span class="c1"># what calibrations and runs exist</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>echelle_spectra<span class="w">          </span><span class="c1"># open the single-SIF viewer</span>
 </code></pre></div>
+<p>The primary workflow is <strong>snapshot → registry → process</strong>. See
+<a href="usage-overview/">Where to start</a>.</p>
 <hr>
 <h2 id="cmos-workflow-notebooks">CMOS workflow notebooks<a class="headerlink" href="#cmos-workflow-notebooks" title="Permanent link">¶</a></h2>
-<p>Notebooks for the Andor CMOS (2560×2160) setup are in <code>examples/workflows/black_cmos/</code>:</p>
+<p>The notebooks in <code>examples/workflows/black_cmos/</code> are a <strong>manual and tuning
+reference</strong> for the Andor CMOS (2560×2160) setup — kept for a new optical setup
+or a fit worth stepping through, not for routine work.</p>
 <table>
 <thead>
 <tr>
 <th>Notebook</th>
 <th>Purpose</th>
-<th>Frequency</th>
+<th>When</th>
 </tr>
 </thead>
 <tbody>
@@ -1472,7 +1537,7 @@ development checkout and lists every installed GUI and CLI surface.</p>
 </tr>
 <tr>
 <td><code>02_pattern_calibration.ipynb</code></td>
-<td>Manual/tuning reference for pattern extraction</td>
+<td>Manual pattern tuning and debugging</td>
 <td>rare — setup/debugging</td>
 </tr>
 <tr>
@@ -1482,17 +1547,19 @@ development checkout and lists every installed GUI and CLI surface.</p>
 </tr>
 <tr>
 <td><code>04_extract_spectrum.ipynb</code></td>
-<td>Load → calibrate → extract → save</td>
-<td><strong>routine</strong></td>
+<td>One-file walkthrough: load → calibrate → extract → save</td>
+<td>reference</td>
 </tr>
 <tr>
 <td><code>05_calibration_alignment.ipynb</code></td>
 <td>Align existing wavelength table with new Ne lamp data</td>
-<td>session recalibration</td>
+<td>superseded by the bench</td>
 </tr>
 </tbody>
 </table>
-<p>For daily use only <code>04_extract_spectrum.ipynb</code> is needed.</p>
+<p>For routine calibration use the <a href="calibration-bench/">live bench</a>; for routine
+conversion use <a href="calibration-to-cube/"><code>echelle process</code></a>. Both record
+provenance the notebooks do not.</p>
 <hr>
 <h2 id="documentation-history">Documentation history<a class="headerlink" href="#documentation-history" title="Permanent link">¶</a></h2>
 <p>The project previously had a minimal static HTML documentation site on the <code>html-docs</code> branch. That branch is preserved for reference. This MkDocs site is the new home for documentation going forward.</p>

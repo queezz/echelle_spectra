@@ -6,7 +6,7 @@
       
       
       
-        <link rel="prev" href="../band-data/">
+        <link rel="prev" href="../usage-overview/">
       
       
         <link rel="next" href="../usage/">
@@ -253,7 +253,7 @@
     
     
       <li class="md-tabs__item md-tabs__item--active">
-        <a href="./" class="md-tabs__link">
+        <a href="../usage-overview/" class="md-tabs__link">
           
   
   
@@ -541,6 +541,34 @@
                 
   
   
+  
+  
+    <li class="md-nav__item">
+      <a href="../usage-overview/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Where to start
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
     
   
   
@@ -715,6 +743,28 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#where-the-bench-writes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Where the bench writes
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-campaign-page" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The campaign page
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#safe-inspection-versus-writing" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -842,7 +892,35 @@
   <span class="md-ellipsis">
     
   
-    Basic usage
+    Single-SIF viewer
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../calibration-to-cube/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    From calibration to cube
   
 
     
@@ -1648,6 +1726,28 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#where-the-bench-writes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Where the bench writes
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-campaign-page" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The campaign page
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#safe-inspection-versus-writing" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1777,10 +1877,13 @@
 It separates the portable NIFS kit from a source checkout because their command
 prefixes are different. The portable kit does <strong>not</strong> add commands to the
 machine-wide <code>PATH</code>.</p>
-<p>Lab is optional development convenience on the owner's own machines. It is not
-an Echelle dependency and is not required on an institute workstation. For the
-trip, use the portable-kit section below. Administrator access may be available
-there, but the kit does not need to use it or change the machine-wide Python.</p>
+<p>If you are not sure which of the three surfaces your job belongs to, read
+<a href="../usage-overview/">Where to start</a> first; it routes by task in one table.</p>
+<p>Lab is queezz's own private development helper for switching environments on
+his own machines. It is not an Echelle dependency, it is not required on an
+institute workstation, and nothing here needs it. For the trip, use the
+portable-kit section below. Administrator access may be available there, but
+the kit does not need to use it or change the machine-wide Python.</p>
 <p>The portable 1.6 kit is the current released travel kit. Verify the installed
 version before a campaign and keep campaign data outside the replaceable kit.</p>
 <h2 id="first-identify-how-echelle-is-installed">First identify how Echelle is installed<a class="headerlink" href="#first-identify-how-echelle-is-installed" title="Permanent link">¶</a></h2>
@@ -1791,8 +1894,8 @@ wrapper for campaign commands:</p>
 <a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="p">.\</span><span class="n">install</span><span class="p">.</span><span class="n">ps1</span> <span class="n">offline</span>
 <a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="p">.\</span><span class="n">echelle</span><span class="p">.</span><span class="n">ps1</span> <span class="n">status</span>
 </code></pre></div>
-<p>The main GUI, live bench, and specialist commands live inside the kit-local
-environment:</p>
+<p>The viewer, the live bench, and the specialist commands live inside the
+kit-local environment:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="p">&amp;</span> <span class="s2">".\.venv\Scripts\echelle_spectra.exe"</span>
 <a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="p">&amp;</span> <span class="s2">".\.venv\Scripts\echelle-calib.exe"</span> <span class="s2">"D:\NIFS\incoming"</span>
 <a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="p">&amp;</span> <span class="s2">".\.venv\Scripts\echelle-pattern.exe"</span> <span class="p">-</span><span class="n">-help</span>
@@ -1853,12 +1956,12 @@ developer tools cannot be assumed.</p>
 <tbody>
 <tr>
 <td><code>echelle_spectra</code></td>
-<td>Main five-tab analysis GUI for loading, calibrating, viewing, fitting, and exporting spectra</td>
-<td>Yes</td>
+<td>Single-SIF viewer: open one shot, see the image, the extracted orders, the calibrated spectrum, and the known-line overlays</td>
+<td>Yes, for looking at a shot</td>
 </tr>
 <tr>
 <td><code>echelle-calib [FOLDER]</code></td>
-<td>Separate live calibration bench; drag SIFs onto it (FOLDER only sets where the file dialog opens, <code>--watch</code> adds folder polling), triages every exposure, takes hand-assigned roles for any lamp, fits alignment, compares sphere response, and builds configuration/snapshot evidence</td>
+<td>Separate live calibration bench; drag SIFs onto it (FOLDER sets where the file dialog opens <strong>and</strong> where the two output folders are derived; <code>--watch</code> adds folder polling), triages every exposure, takes hand-assigned roles for any lamp, fits alignment, compares sphere response, and builds configuration/snapshot evidence</td>
 <td>Yes, during calibration</td>
 </tr>
 <tr>
@@ -1913,7 +2016,7 @@ developer tools cannot be assumed.</p>
 </tr>
 <tr>
 <td><code>echelle web --catalog INDEX --output DIR</code></td>
-<td>Builds the static read-only campaign page: four tabs — Now (a per-drive stepper saying what to do first), Drives (catalog with a local Find), Calibration (epochs and drift verdicts) and the packaged reading room; <code>--registry</code> and <code>--drift</code> are what let the stepper place the campaign</td>
+<td>Builds the static read-only campaign page into <code>DIR/index.html</code>, which you open by double-clicking it — four tabs: Now (a per-drive stepper saying what to do first), Drives (catalog with a local Find), Calibration (epochs and drift verdicts) and the packaged reading room; <code>--registry</code> and <code>--drift</code> are what let the stepper place the campaign</td>
 <td>Candidate; never controls workers</td>
 </tr>
 <tr>
@@ -1969,40 +2072,62 @@ campaign data.</p>
 <a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a>  <span class="p">-</span><span class="n">-runs</span> <span class="s2">"$Data\runs"</span>
 <a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a>
 <a id="__codelineno-8-9" name="__codelineno-8-9" href="#__codelineno-8-9"></a><span class="c"># 2. Open the live bench on the acquisition folder, then drag SIFs onto it.</span>
-<a id="__codelineno-8-10" name="__codelineno-8-10" href="#__codelineno-8-10"></a><span class="p">&amp;</span> <span class="s2">".\.venv\Scripts\echelle-calib.exe"</span> <span class="s2">"$Data\incoming"</span> <span class="p">`</span>
-<a id="__codelineno-8-11" name="__codelineno-8-11" href="#__codelineno-8-11"></a>  <span class="p">-</span><span class="n">-output-root</span> <span class="s2">"$Data\calibrations"</span> <span class="p">`</span>
-<a id="__codelineno-8-12" name="__codelineno-8-12" href="#__codelineno-8-12"></a>  <span class="p">-</span><span class="n">-config-root</span> <span class="s2">"$Data\calibration-configs"</span>
-<a id="__codelineno-8-13" name="__codelineno-8-13" href="#__codelineno-8-13"></a>
-<a id="__codelineno-8-14" name="__codelineno-8-14" href="#__codelineno-8-14"></a><span class="c"># 3. Recheck the snapshot produced by the completed bench procedure.</span>
-<a id="__codelineno-8-15" name="__codelineno-8-15" href="#__codelineno-8-15"></a><span class="p">.\</span><span class="n">echelle</span><span class="p">.</span><span class="n">ps1</span> <span class="n">snapshot</span> <span class="n">validate</span> <span class="s2">"$Data\calibrations\20260814_cmos"</span>
+<a id="__codelineno-8-10" name="__codelineno-8-10" href="#__codelineno-8-10"></a><span class="c">#    The two roots below are only needed because this loop keeps them one</span>
+<a id="__codelineno-8-11" name="__codelineno-8-11" href="#__codelineno-8-11"></a><span class="c">#    level up; without them the bench writes calibrations\ and</span>
+<a id="__codelineno-8-12" name="__codelineno-8-12" href="#__codelineno-8-12"></a><span class="c">#    calibration-configs\ inside the folder argument itself.</span>
+<a id="__codelineno-8-13" name="__codelineno-8-13" href="#__codelineno-8-13"></a><span class="p">&amp;</span> <span class="s2">".\.venv\Scripts\echelle-calib.exe"</span> <span class="s2">"$Data\incoming"</span> <span class="p">`</span>
+<a id="__codelineno-8-14" name="__codelineno-8-14" href="#__codelineno-8-14"></a>  <span class="p">-</span><span class="n">-output-root</span> <span class="s2">"$Data\calibrations"</span> <span class="p">`</span>
+<a id="__codelineno-8-15" name="__codelineno-8-15" href="#__codelineno-8-15"></a>  <span class="p">-</span><span class="n">-config-root</span> <span class="s2">"$Data\calibration-configs"</span>
 <a id="__codelineno-8-16" name="__codelineno-8-16" href="#__codelineno-8-16"></a>
-<a id="__codelineno-8-17" name="__codelineno-8-17" href="#__codelineno-8-17"></a><span class="c"># 4. Preview the first sample without writing files or receipts.</span>
-<a id="__codelineno-8-18" name="__codelineno-8-18" href="#__codelineno-8-18"></a><span class="p">.\</span><span class="n">echelle</span><span class="p">.</span><span class="n">ps1</span> <span class="k">process</span> <span class="s2">"$Data\shots"</span> <span class="p">`</span>
-<a id="__codelineno-8-19" name="__codelineno-8-19" href="#__codelineno-8-19"></a>  <span class="n">-o</span> <span class="s2">"$Data\cubes"</span> <span class="p">`</span>
-<a id="__codelineno-8-20" name="__codelineno-8-20" href="#__codelineno-8-20"></a>  <span class="p">-</span><span class="n">-runs-dir</span> <span class="s2">"$Data\runs"</span> <span class="p">`</span>
-<a id="__codelineno-8-21" name="__codelineno-8-21" href="#__codelineno-8-21"></a>  <span class="p">-</span><span class="n">-registry</span> <span class="s2">"$Data\calibration_registry.toml"</span> <span class="p">`</span>
-<a id="__codelineno-8-22" name="__codelineno-8-22" href="#__codelineno-8-22"></a>  <span class="p">-</span><span class="n">-calibrations</span> <span class="s2">"$Data\calibrations"</span> <span class="p">`</span>
-<a id="__codelineno-8-23" name="__codelineno-8-23" href="#__codelineno-8-23"></a>  <span class="p">-</span><span class="n">-volume-label</span> <span class="n">NIFS-A</span> <span class="p">`</span>
-<a id="__codelineno-8-24" name="__codelineno-8-24" href="#__codelineno-8-24"></a>  <span class="p">-</span><span class="n">-sample</span> <span class="n">5</span> <span class="p">`</span>
-<a id="__codelineno-8-25" name="__codelineno-8-25" href="#__codelineno-8-25"></a>  <span class="p">-</span><span class="n">-dry-run</span>
-<a id="__codelineno-8-26" name="__codelineno-8-26" href="#__codelineno-8-26"></a>
-<a id="__codelineno-8-27" name="__codelineno-8-27" href="#__codelineno-8-27"></a><span class="c"># 5. Take the sample for real by repeating step 4 without --dry-run.</span>
-<a id="__codelineno-8-28" name="__codelineno-8-28" href="#__codelineno-8-28"></a><span class="c">#    Nothing else may run yet: these cubes are the audit's input.</span>
+<a id="__codelineno-8-17" name="__codelineno-8-17" href="#__codelineno-8-17"></a><span class="c"># 3. Recheck the snapshot produced by the completed bench procedure.</span>
+<a id="__codelineno-8-18" name="__codelineno-8-18" href="#__codelineno-8-18"></a><span class="p">.\</span><span class="n">echelle</span><span class="p">.</span><span class="n">ps1</span> <span class="n">snapshot</span> <span class="n">validate</span> <span class="s2">"$Data\calibrations\20260814_cmos"</span>
+<a id="__codelineno-8-19" name="__codelineno-8-19" href="#__codelineno-8-19"></a>
+<a id="__codelineno-8-20" name="__codelineno-8-20" href="#__codelineno-8-20"></a><span class="c"># 4. Preview the first sample without writing files or receipts.</span>
+<a id="__codelineno-8-21" name="__codelineno-8-21" href="#__codelineno-8-21"></a><span class="p">.\</span><span class="n">echelle</span><span class="p">.</span><span class="n">ps1</span> <span class="k">process</span> <span class="s2">"$Data\shots"</span> <span class="p">`</span>
+<a id="__codelineno-8-22" name="__codelineno-8-22" href="#__codelineno-8-22"></a>  <span class="n">-o</span> <span class="s2">"$Data\cubes"</span> <span class="p">`</span>
+<a id="__codelineno-8-23" name="__codelineno-8-23" href="#__codelineno-8-23"></a>  <span class="p">-</span><span class="n">-runs-dir</span> <span class="s2">"$Data\runs"</span> <span class="p">`</span>
+<a id="__codelineno-8-24" name="__codelineno-8-24" href="#__codelineno-8-24"></a>  <span class="p">-</span><span class="n">-registry</span> <span class="s2">"$Data\calibration_registry.toml"</span> <span class="p">`</span>
+<a id="__codelineno-8-25" name="__codelineno-8-25" href="#__codelineno-8-25"></a>  <span class="p">-</span><span class="n">-calibrations</span> <span class="s2">"$Data\calibrations"</span> <span class="p">`</span>
+<a id="__codelineno-8-26" name="__codelineno-8-26" href="#__codelineno-8-26"></a>  <span class="p">-</span><span class="n">-volume-label</span> <span class="n">NIFS-A</span> <span class="p">`</span>
+<a id="__codelineno-8-27" name="__codelineno-8-27" href="#__codelineno-8-27"></a>  <span class="p">-</span><span class="n">-sample</span> <span class="n">5</span> <span class="p">`</span>
+<a id="__codelineno-8-28" name="__codelineno-8-28" href="#__codelineno-8-28"></a>  <span class="p">-</span><span class="n">-dry-run</span>
 <a id="__codelineno-8-29" name="__codelineno-8-29" href="#__codelineno-8-29"></a>
-<a id="__codelineno-8-30" name="__codelineno-8-30" href="#__codelineno-8-30"></a><span class="c"># 6. Audit the sample into one immutable verdict file. The audit takes the</span>
-<a id="__codelineno-8-31" name="__codelineno-8-31" href="#__codelineno-8-31"></a><span class="c">#    cube folder itself, so no shell glob is involved.</span>
-<a id="__codelineno-8-32" name="__codelineno-8-32" href="#__codelineno-8-32"></a><span class="p">.\</span><span class="n">echelle</span><span class="p">.</span><span class="n">ps1</span> <span class="n">drift</span> <span class="n">audit</span> <span class="s2">"$Data\cubes"</span> <span class="p">`</span>
-<a id="__codelineno-8-33" name="__codelineno-8-33" href="#__codelineno-8-33"></a>  <span class="p">-</span><span class="n">-calibrations</span> <span class="s2">"$Data\calibrations"</span> <span class="p">`</span>
-<a id="__codelineno-8-34" name="__codelineno-8-34" href="#__codelineno-8-34"></a>  <span class="n">-o</span> <span class="s2">"$Data\epoch-drift.json"</span>
-<a id="__codelineno-8-35" name="__codelineno-8-35" href="#__codelineno-8-35"></a>
-<a id="__codelineno-8-36" name="__codelineno-8-36" href="#__codelineno-8-36"></a><span class="c"># 7. Process the whole drive under that verdict.</span>
-<a id="__codelineno-8-37" name="__codelineno-8-37" href="#__codelineno-8-37"></a><span class="p">.\</span><span class="n">echelle</span><span class="p">.</span><span class="n">ps1</span> <span class="k">process</span> <span class="s2">"$Data\shots"</span> <span class="p">`</span>
-<a id="__codelineno-8-38" name="__codelineno-8-38" href="#__codelineno-8-38"></a>  <span class="n">-o</span> <span class="s2">"$Data\cubes"</span> <span class="p">`</span>
-<a id="__codelineno-8-39" name="__codelineno-8-39" href="#__codelineno-8-39"></a>  <span class="p">-</span><span class="n">-runs-dir</span> <span class="s2">"$Data\runs"</span> <span class="p">`</span>
-<a id="__codelineno-8-40" name="__codelineno-8-40" href="#__codelineno-8-40"></a>  <span class="p">-</span><span class="n">-registry</span> <span class="s2">"$Data\calibration_registry.toml"</span> <span class="p">`</span>
-<a id="__codelineno-8-41" name="__codelineno-8-41" href="#__codelineno-8-41"></a>  <span class="p">-</span><span class="n">-calibrations</span> <span class="s2">"$Data\calibrations"</span> <span class="p">`</span>
-<a id="__codelineno-8-42" name="__codelineno-8-42" href="#__codelineno-8-42"></a>  <span class="p">-</span><span class="n">-volume-label</span> <span class="n">NIFS-A</span> <span class="p">`</span>
-<a id="__codelineno-8-43" name="__codelineno-8-43" href="#__codelineno-8-43"></a>  <span class="p">-</span><span class="n">-drift-verdict</span> <span class="s2">"$Data\epoch-drift.json"</span>
+<a id="__codelineno-8-30" name="__codelineno-8-30" href="#__codelineno-8-30"></a><span class="c"># 5. Take the sample for real by repeating step 4 without --dry-run.</span>
+<a id="__codelineno-8-31" name="__codelineno-8-31" href="#__codelineno-8-31"></a><span class="c">#    Nothing else may run yet: these cubes are the audit's input.</span>
+<a id="__codelineno-8-32" name="__codelineno-8-32" href="#__codelineno-8-32"></a>
+<a id="__codelineno-8-33" name="__codelineno-8-33" href="#__codelineno-8-33"></a><span class="c"># 6. Audit the sample into one immutable verdict file. The audit takes the</span>
+<a id="__codelineno-8-34" name="__codelineno-8-34" href="#__codelineno-8-34"></a><span class="c">#    cube folder itself, so no shell glob is involved.</span>
+<a id="__codelineno-8-35" name="__codelineno-8-35" href="#__codelineno-8-35"></a><span class="p">.\</span><span class="n">echelle</span><span class="p">.</span><span class="n">ps1</span> <span class="n">drift</span> <span class="n">audit</span> <span class="s2">"$Data\cubes"</span> <span class="p">`</span>
+<a id="__codelineno-8-36" name="__codelineno-8-36" href="#__codelineno-8-36"></a>  <span class="p">-</span><span class="n">-calibrations</span> <span class="s2">"$Data\calibrations"</span> <span class="p">`</span>
+<a id="__codelineno-8-37" name="__codelineno-8-37" href="#__codelineno-8-37"></a>  <span class="n">-o</span> <span class="s2">"$Data\epoch-drift.json"</span>
+<a id="__codelineno-8-38" name="__codelineno-8-38" href="#__codelineno-8-38"></a>
+<a id="__codelineno-8-39" name="__codelineno-8-39" href="#__codelineno-8-39"></a><span class="c"># 7. Process the whole drive under that verdict.</span>
+<a id="__codelineno-8-40" name="__codelineno-8-40" href="#__codelineno-8-40"></a><span class="p">.\</span><span class="n">echelle</span><span class="p">.</span><span class="n">ps1</span> <span class="k">process</span> <span class="s2">"$Data\shots"</span> <span class="p">`</span>
+<a id="__codelineno-8-41" name="__codelineno-8-41" href="#__codelineno-8-41"></a>  <span class="n">-o</span> <span class="s2">"$Data\cubes"</span> <span class="p">`</span>
+<a id="__codelineno-8-42" name="__codelineno-8-42" href="#__codelineno-8-42"></a>  <span class="p">-</span><span class="n">-runs-dir</span> <span class="s2">"$Data\runs"</span> <span class="p">`</span>
+<a id="__codelineno-8-43" name="__codelineno-8-43" href="#__codelineno-8-43"></a>  <span class="p">-</span><span class="n">-registry</span> <span class="s2">"$Data\calibration_registry.toml"</span> <span class="p">`</span>
+<a id="__codelineno-8-44" name="__codelineno-8-44" href="#__codelineno-8-44"></a>  <span class="p">-</span><span class="n">-calibrations</span> <span class="s2">"$Data\calibrations"</span> <span class="p">`</span>
+<a id="__codelineno-8-45" name="__codelineno-8-45" href="#__codelineno-8-45"></a>  <span class="p">-</span><span class="n">-volume-label</span> <span class="n">NIFS-A</span> <span class="p">`</span>
+<a id="__codelineno-8-46" name="__codelineno-8-46" href="#__codelineno-8-46"></a>  <span class="p">-</span><span class="n">-drift-verdict</span> <span class="s2">"$Data\epoch-drift.json"</span>
+<a id="__codelineno-8-47" name="__codelineno-8-47" href="#__codelineno-8-47"></a>
+<a id="__codelineno-8-48" name="__codelineno-8-48" href="#__codelineno-8-48"></a><span class="c"># 8. Index what this drive now holds, and fold it into the all-years index.</span>
+<a id="__codelineno-8-49" name="__codelineno-8-49" href="#__codelineno-8-49"></a><span class="p">.\</span><span class="n">echelle</span><span class="p">.</span><span class="n">ps1</span> <span class="n">catalog</span> <span class="n">build</span> <span class="s2">"$Data\cubes"</span> <span class="p">`</span>
+<a id="__codelineno-8-50" name="__codelineno-8-50" href="#__codelineno-8-50"></a>  <span class="p">-</span><span class="n">-volume-label</span> <span class="n">NIFS-A</span> <span class="p">`</span>
+<a id="__codelineno-8-51" name="__codelineno-8-51" href="#__codelineno-8-51"></a>  <span class="p">-</span><span class="n">-receipt-dir</span> <span class="s2">"$Data\runs"</span> <span class="p">`</span>
+<a id="__codelineno-8-52" name="__codelineno-8-52" href="#__codelineno-8-52"></a>  <span class="p">-</span><span class="n">-output</span> <span class="s2">"$Data\cubes\catalog.json"</span>
+<a id="__codelineno-8-53" name="__codelineno-8-53" href="#__codelineno-8-53"></a>
+<a id="__codelineno-8-54" name="__codelineno-8-54" href="#__codelineno-8-54"></a><span class="p">.\</span><span class="n">echelle</span><span class="p">.</span><span class="n">ps1</span> <span class="n">catalog</span> <span class="n">merge</span> <span class="s2">"$Data\cubes\catalog.json"</span> <span class="p">`</span>
+<a id="__codelineno-8-55" name="__codelineno-8-55" href="#__codelineno-8-55"></a>  <span class="n">-o</span> <span class="s2">"$Data\all-years.json"</span>
+<a id="__codelineno-8-56" name="__codelineno-8-56" href="#__codelineno-8-56"></a>
+<a id="__codelineno-8-57" name="__codelineno-8-57" href="#__codelineno-8-57"></a><span class="c"># 9. Build and open the campaign page.</span>
+<a id="__codelineno-8-58" name="__codelineno-8-58" href="#__codelineno-8-58"></a><span class="p">.\</span><span class="n">echelle</span><span class="p">.</span><span class="n">ps1</span> <span class="n">web</span> <span class="p">`</span>
+<a id="__codelineno-8-59" name="__codelineno-8-59" href="#__codelineno-8-59"></a>  <span class="p">-</span><span class="n">-catalog</span> <span class="s2">"$Data\all-years.json"</span> <span class="p">`</span>
+<a id="__codelineno-8-60" name="__codelineno-8-60" href="#__codelineno-8-60"></a>  <span class="p">-</span><span class="n">-output</span> <span class="s2">"$Data\campaign-page"</span> <span class="p">`</span>
+<a id="__codelineno-8-61" name="__codelineno-8-61" href="#__codelineno-8-61"></a>  <span class="p">-</span><span class="n">-registry</span> <span class="s2">"$Data\calibration_registry.toml"</span> <span class="p">`</span>
+<a id="__codelineno-8-62" name="__codelineno-8-62" href="#__codelineno-8-62"></a>  <span class="p">-</span><span class="n">-calibrations</span> <span class="s2">"$Data\calibrations"</span> <span class="p">`</span>
+<a id="__codelineno-8-63" name="__codelineno-8-63" href="#__codelineno-8-63"></a>  <span class="p">-</span><span class="n">-drift</span> <span class="s2">"$Data\epoch-drift.json"</span>
+<a id="__codelineno-8-64" name="__codelineno-8-64" href="#__codelineno-8-64"></a>
+<a id="__codelineno-8-65" name="__codelineno-8-65" href="#__codelineno-8-65"></a><span class="nb">Invoke-Item</span> <span class="s2">"$Data\campaign-page\index.html"</span>
 </code></pre></div>
 <h3 id="macos-terminal">macOS Terminal<a class="headerlink" href="#macos-terminal" title="Permanent link">¶</a></h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="nv">data</span><span class="o">=</span><span class="s2">"/Volumes/NIFS"</span>
@@ -2014,40 +2139,62 @@ campaign data.</p>
 <a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a><span class="w">  </span>--runs<span class="w"> </span><span class="s2">"</span><span class="nv">$data</span><span class="s2">/runs"</span>
 <a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a>
 <a id="__codelineno-9-9" name="__codelineno-9-9" href="#__codelineno-9-9"></a><span class="c1"># 2. Open the live bench on the acquisition folder, then drag SIFs onto it.</span>
-<a id="__codelineno-9-10" name="__codelineno-9-10" href="#__codelineno-9-10"></a>./.venv/bin/echelle-calib<span class="w"> </span><span class="s2">"</span><span class="nv">$data</span><span class="s2">/incoming"</span><span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-9-11" name="__codelineno-9-11" href="#__codelineno-9-11"></a><span class="w">  </span>--output-root<span class="w"> </span><span class="s2">"</span><span class="nv">$data</span><span class="s2">/calibrations"</span><span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-9-12" name="__codelineno-9-12" href="#__codelineno-9-12"></a><span class="w">  </span>--config-root<span class="w"> </span><span class="s2">"</span><span class="nv">$data</span><span class="s2">/calibration-configs"</span>
-<a id="__codelineno-9-13" name="__codelineno-9-13" href="#__codelineno-9-13"></a>
-<a id="__codelineno-9-14" name="__codelineno-9-14" href="#__codelineno-9-14"></a><span class="c1"># 3. Recheck the completed snapshot.</span>
-<a id="__codelineno-9-15" name="__codelineno-9-15" href="#__codelineno-9-15"></a>./echelle<span class="w"> </span>snapshot<span class="w"> </span>validate<span class="w"> </span><span class="s2">"</span><span class="nv">$data</span><span class="s2">/calibrations/20260814_cmos"</span>
+<a id="__codelineno-9-10" name="__codelineno-9-10" href="#__codelineno-9-10"></a><span class="c1">#    The two roots below are only needed because this loop keeps them one</span>
+<a id="__codelineno-9-11" name="__codelineno-9-11" href="#__codelineno-9-11"></a><span class="c1">#    level up; without them the bench writes calibrations/ and</span>
+<a id="__codelineno-9-12" name="__codelineno-9-12" href="#__codelineno-9-12"></a><span class="c1">#    calibration-configs/ inside the folder argument itself.</span>
+<a id="__codelineno-9-13" name="__codelineno-9-13" href="#__codelineno-9-13"></a>./.venv/bin/echelle-calib<span class="w"> </span><span class="s2">"</span><span class="nv">$data</span><span class="s2">/incoming"</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-9-14" name="__codelineno-9-14" href="#__codelineno-9-14"></a><span class="w">  </span>--output-root<span class="w"> </span><span class="s2">"</span><span class="nv">$data</span><span class="s2">/calibrations"</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-9-15" name="__codelineno-9-15" href="#__codelineno-9-15"></a><span class="w">  </span>--config-root<span class="w"> </span><span class="s2">"</span><span class="nv">$data</span><span class="s2">/calibration-configs"</span>
 <a id="__codelineno-9-16" name="__codelineno-9-16" href="#__codelineno-9-16"></a>
-<a id="__codelineno-9-17" name="__codelineno-9-17" href="#__codelineno-9-17"></a><span class="c1"># 4. Preview the first sample before writing cubes or receipts.</span>
-<a id="__codelineno-9-18" name="__codelineno-9-18" href="#__codelineno-9-18"></a>./echelle<span class="w"> </span>process<span class="w"> </span><span class="s2">"</span><span class="nv">$data</span><span class="s2">/shots"</span><span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-9-19" name="__codelineno-9-19" href="#__codelineno-9-19"></a><span class="w">  </span>-o<span class="w"> </span><span class="s2">"</span><span class="nv">$data</span><span class="s2">/cubes"</span><span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-9-20" name="__codelineno-9-20" href="#__codelineno-9-20"></a><span class="w">  </span>--runs-dir<span class="w"> </span><span class="s2">"</span><span class="nv">$data</span><span class="s2">/runs"</span><span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-9-21" name="__codelineno-9-21" href="#__codelineno-9-21"></a><span class="w">  </span>--registry<span class="w"> </span><span class="s2">"</span><span class="nv">$data</span><span class="s2">/calibration_registry.toml"</span><span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-9-22" name="__codelineno-9-22" href="#__codelineno-9-22"></a><span class="w">  </span>--calibrations<span class="w"> </span><span class="s2">"</span><span class="nv">$data</span><span class="s2">/calibrations"</span><span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-9-23" name="__codelineno-9-23" href="#__codelineno-9-23"></a><span class="w">  </span>--volume-label<span class="w"> </span>NIFS-A<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-9-24" name="__codelineno-9-24" href="#__codelineno-9-24"></a><span class="w">  </span>--sample<span class="w"> </span><span class="m">5</span><span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-9-25" name="__codelineno-9-25" href="#__codelineno-9-25"></a><span class="w">  </span>--dry-run
-<a id="__codelineno-9-26" name="__codelineno-9-26" href="#__codelineno-9-26"></a>
-<a id="__codelineno-9-27" name="__codelineno-9-27" href="#__codelineno-9-27"></a><span class="c1"># 5. Take the sample for real by repeating step 4 without --dry-run.</span>
-<a id="__codelineno-9-28" name="__codelineno-9-28" href="#__codelineno-9-28"></a><span class="c1">#    Nothing else may run yet: these cubes are the audit's input.</span>
+<a id="__codelineno-9-17" name="__codelineno-9-17" href="#__codelineno-9-17"></a><span class="c1"># 3. Recheck the completed snapshot.</span>
+<a id="__codelineno-9-18" name="__codelineno-9-18" href="#__codelineno-9-18"></a>./echelle<span class="w"> </span>snapshot<span class="w"> </span>validate<span class="w"> </span><span class="s2">"</span><span class="nv">$data</span><span class="s2">/calibrations/20260814_cmos"</span>
+<a id="__codelineno-9-19" name="__codelineno-9-19" href="#__codelineno-9-19"></a>
+<a id="__codelineno-9-20" name="__codelineno-9-20" href="#__codelineno-9-20"></a><span class="c1"># 4. Preview the first sample before writing cubes or receipts.</span>
+<a id="__codelineno-9-21" name="__codelineno-9-21" href="#__codelineno-9-21"></a>./echelle<span class="w"> </span>process<span class="w"> </span><span class="s2">"</span><span class="nv">$data</span><span class="s2">/shots"</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-9-22" name="__codelineno-9-22" href="#__codelineno-9-22"></a><span class="w">  </span>-o<span class="w"> </span><span class="s2">"</span><span class="nv">$data</span><span class="s2">/cubes"</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-9-23" name="__codelineno-9-23" href="#__codelineno-9-23"></a><span class="w">  </span>--runs-dir<span class="w"> </span><span class="s2">"</span><span class="nv">$data</span><span class="s2">/runs"</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-9-24" name="__codelineno-9-24" href="#__codelineno-9-24"></a><span class="w">  </span>--registry<span class="w"> </span><span class="s2">"</span><span class="nv">$data</span><span class="s2">/calibration_registry.toml"</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-9-25" name="__codelineno-9-25" href="#__codelineno-9-25"></a><span class="w">  </span>--calibrations<span class="w"> </span><span class="s2">"</span><span class="nv">$data</span><span class="s2">/calibrations"</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-9-26" name="__codelineno-9-26" href="#__codelineno-9-26"></a><span class="w">  </span>--volume-label<span class="w"> </span>NIFS-A<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-9-27" name="__codelineno-9-27" href="#__codelineno-9-27"></a><span class="w">  </span>--sample<span class="w"> </span><span class="m">5</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-9-28" name="__codelineno-9-28" href="#__codelineno-9-28"></a><span class="w">  </span>--dry-run
 <a id="__codelineno-9-29" name="__codelineno-9-29" href="#__codelineno-9-29"></a>
-<a id="__codelineno-9-30" name="__codelineno-9-30" href="#__codelineno-9-30"></a><span class="c1"># 6. Audit the sample into one immutable verdict file. The audit takes the</span>
-<a id="__codelineno-9-31" name="__codelineno-9-31" href="#__codelineno-9-31"></a><span class="c1">#    cube folder itself, so no shell glob is involved.</span>
-<a id="__codelineno-9-32" name="__codelineno-9-32" href="#__codelineno-9-32"></a>./echelle<span class="w"> </span>drift<span class="w"> </span>audit<span class="w"> </span><span class="s2">"</span><span class="nv">$data</span><span class="s2">/cubes"</span><span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-9-33" name="__codelineno-9-33" href="#__codelineno-9-33"></a><span class="w">  </span>--calibrations<span class="w"> </span><span class="s2">"</span><span class="nv">$data</span><span class="s2">/calibrations"</span><span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-9-34" name="__codelineno-9-34" href="#__codelineno-9-34"></a><span class="w">  </span>-o<span class="w"> </span><span class="s2">"</span><span class="nv">$data</span><span class="s2">/epoch-drift.json"</span>
-<a id="__codelineno-9-35" name="__codelineno-9-35" href="#__codelineno-9-35"></a>
-<a id="__codelineno-9-36" name="__codelineno-9-36" href="#__codelineno-9-36"></a><span class="c1"># 7. Process the whole drive under that verdict.</span>
-<a id="__codelineno-9-37" name="__codelineno-9-37" href="#__codelineno-9-37"></a>./echelle<span class="w"> </span>process<span class="w"> </span><span class="s2">"</span><span class="nv">$data</span><span class="s2">/shots"</span><span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-9-38" name="__codelineno-9-38" href="#__codelineno-9-38"></a><span class="w">  </span>-o<span class="w"> </span><span class="s2">"</span><span class="nv">$data</span><span class="s2">/cubes"</span><span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-9-39" name="__codelineno-9-39" href="#__codelineno-9-39"></a><span class="w">  </span>--runs-dir<span class="w"> </span><span class="s2">"</span><span class="nv">$data</span><span class="s2">/runs"</span><span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-9-40" name="__codelineno-9-40" href="#__codelineno-9-40"></a><span class="w">  </span>--registry<span class="w"> </span><span class="s2">"</span><span class="nv">$data</span><span class="s2">/calibration_registry.toml"</span><span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-9-41" name="__codelineno-9-41" href="#__codelineno-9-41"></a><span class="w">  </span>--calibrations<span class="w"> </span><span class="s2">"</span><span class="nv">$data</span><span class="s2">/calibrations"</span><span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-9-42" name="__codelineno-9-42" href="#__codelineno-9-42"></a><span class="w">  </span>--volume-label<span class="w"> </span>NIFS-A<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-9-43" name="__codelineno-9-43" href="#__codelineno-9-43"></a><span class="w">  </span>--drift-verdict<span class="w"> </span><span class="s2">"</span><span class="nv">$data</span><span class="s2">/epoch-drift.json"</span>
+<a id="__codelineno-9-30" name="__codelineno-9-30" href="#__codelineno-9-30"></a><span class="c1"># 5. Take the sample for real by repeating step 4 without --dry-run.</span>
+<a id="__codelineno-9-31" name="__codelineno-9-31" href="#__codelineno-9-31"></a><span class="c1">#    Nothing else may run yet: these cubes are the audit's input.</span>
+<a id="__codelineno-9-32" name="__codelineno-9-32" href="#__codelineno-9-32"></a>
+<a id="__codelineno-9-33" name="__codelineno-9-33" href="#__codelineno-9-33"></a><span class="c1"># 6. Audit the sample into one immutable verdict file. The audit takes the</span>
+<a id="__codelineno-9-34" name="__codelineno-9-34" href="#__codelineno-9-34"></a><span class="c1">#    cube folder itself, so no shell glob is involved.</span>
+<a id="__codelineno-9-35" name="__codelineno-9-35" href="#__codelineno-9-35"></a>./echelle<span class="w"> </span>drift<span class="w"> </span>audit<span class="w"> </span><span class="s2">"</span><span class="nv">$data</span><span class="s2">/cubes"</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-9-36" name="__codelineno-9-36" href="#__codelineno-9-36"></a><span class="w">  </span>--calibrations<span class="w"> </span><span class="s2">"</span><span class="nv">$data</span><span class="s2">/calibrations"</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-9-37" name="__codelineno-9-37" href="#__codelineno-9-37"></a><span class="w">  </span>-o<span class="w"> </span><span class="s2">"</span><span class="nv">$data</span><span class="s2">/epoch-drift.json"</span>
+<a id="__codelineno-9-38" name="__codelineno-9-38" href="#__codelineno-9-38"></a>
+<a id="__codelineno-9-39" name="__codelineno-9-39" href="#__codelineno-9-39"></a><span class="c1"># 7. Process the whole drive under that verdict.</span>
+<a id="__codelineno-9-40" name="__codelineno-9-40" href="#__codelineno-9-40"></a>./echelle<span class="w"> </span>process<span class="w"> </span><span class="s2">"</span><span class="nv">$data</span><span class="s2">/shots"</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-9-41" name="__codelineno-9-41" href="#__codelineno-9-41"></a><span class="w">  </span>-o<span class="w"> </span><span class="s2">"</span><span class="nv">$data</span><span class="s2">/cubes"</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-9-42" name="__codelineno-9-42" href="#__codelineno-9-42"></a><span class="w">  </span>--runs-dir<span class="w"> </span><span class="s2">"</span><span class="nv">$data</span><span class="s2">/runs"</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-9-43" name="__codelineno-9-43" href="#__codelineno-9-43"></a><span class="w">  </span>--registry<span class="w"> </span><span class="s2">"</span><span class="nv">$data</span><span class="s2">/calibration_registry.toml"</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-9-44" name="__codelineno-9-44" href="#__codelineno-9-44"></a><span class="w">  </span>--calibrations<span class="w"> </span><span class="s2">"</span><span class="nv">$data</span><span class="s2">/calibrations"</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-9-45" name="__codelineno-9-45" href="#__codelineno-9-45"></a><span class="w">  </span>--volume-label<span class="w"> </span>NIFS-A<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-9-46" name="__codelineno-9-46" href="#__codelineno-9-46"></a><span class="w">  </span>--drift-verdict<span class="w"> </span><span class="s2">"</span><span class="nv">$data</span><span class="s2">/epoch-drift.json"</span>
+<a id="__codelineno-9-47" name="__codelineno-9-47" href="#__codelineno-9-47"></a>
+<a id="__codelineno-9-48" name="__codelineno-9-48" href="#__codelineno-9-48"></a><span class="c1"># 8. Index what this drive now holds, and fold it into the all-years index.</span>
+<a id="__codelineno-9-49" name="__codelineno-9-49" href="#__codelineno-9-49"></a>./echelle<span class="w"> </span>catalog<span class="w"> </span>build<span class="w"> </span><span class="s2">"</span><span class="nv">$data</span><span class="s2">/cubes"</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-9-50" name="__codelineno-9-50" href="#__codelineno-9-50"></a><span class="w">  </span>--volume-label<span class="w"> </span>NIFS-A<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-9-51" name="__codelineno-9-51" href="#__codelineno-9-51"></a><span class="w">  </span>--receipt-dir<span class="w"> </span><span class="s2">"</span><span class="nv">$data</span><span class="s2">/runs"</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-9-52" name="__codelineno-9-52" href="#__codelineno-9-52"></a><span class="w">  </span>--output<span class="w"> </span><span class="s2">"</span><span class="nv">$data</span><span class="s2">/cubes/catalog.json"</span>
+<a id="__codelineno-9-53" name="__codelineno-9-53" href="#__codelineno-9-53"></a>
+<a id="__codelineno-9-54" name="__codelineno-9-54" href="#__codelineno-9-54"></a>./echelle<span class="w"> </span>catalog<span class="w"> </span>merge<span class="w"> </span><span class="s2">"</span><span class="nv">$data</span><span class="s2">/cubes/catalog.json"</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-9-55" name="__codelineno-9-55" href="#__codelineno-9-55"></a><span class="w">  </span>-o<span class="w"> </span><span class="s2">"</span><span class="nv">$data</span><span class="s2">/all-years.json"</span>
+<a id="__codelineno-9-56" name="__codelineno-9-56" href="#__codelineno-9-56"></a>
+<a id="__codelineno-9-57" name="__codelineno-9-57" href="#__codelineno-9-57"></a><span class="c1"># 9. Build and open the campaign page.</span>
+<a id="__codelineno-9-58" name="__codelineno-9-58" href="#__codelineno-9-58"></a>./echelle<span class="w"> </span>web<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-9-59" name="__codelineno-9-59" href="#__codelineno-9-59"></a><span class="w">  </span>--catalog<span class="w"> </span><span class="s2">"</span><span class="nv">$data</span><span class="s2">/all-years.json"</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-9-60" name="__codelineno-9-60" href="#__codelineno-9-60"></a><span class="w">  </span>--output<span class="w"> </span><span class="s2">"</span><span class="nv">$data</span><span class="s2">/campaign-page"</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-9-61" name="__codelineno-9-61" href="#__codelineno-9-61"></a><span class="w">  </span>--registry<span class="w"> </span><span class="s2">"</span><span class="nv">$data</span><span class="s2">/calibration_registry.toml"</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-9-62" name="__codelineno-9-62" href="#__codelineno-9-62"></a><span class="w">  </span>--calibrations<span class="w"> </span><span class="s2">"</span><span class="nv">$data</span><span class="s2">/calibrations"</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-9-63" name="__codelineno-9-63" href="#__codelineno-9-63"></a><span class="w">  </span>--drift<span class="w"> </span><span class="s2">"</span><span class="nv">$data</span><span class="s2">/epoch-drift.json"</span>
+<a id="__codelineno-9-64" name="__codelineno-9-64" href="#__codelineno-9-64"></a>
+<a id="__codelineno-9-65" name="__codelineno-9-65" href="#__codelineno-9-65"></a>open<span class="w"> </span><span class="s2">"</span><span class="nv">$data</span><span class="s2">/campaign-page/index.html"</span>
 </code></pre></div>
 <p>Put every accepted snapshot ID into the ordered registry and verify its
 inclusive bounds with <code>echelle status</code> before processing. Use one
@@ -2057,18 +2204,56 @@ which processes at most N resolved files and marks its receipt and cubes as an
 unverified sample, or <code>--drift-verdict</code>, which spends the sampled evidence the
 audit wrote. A run with an explicit <code>--config</code> calibration and no registry stays
 legal and is recorded as <code>ungated (no registry)</code>.</p>
+<h2 id="where-the-bench-writes">Where the bench writes<a class="headerlink" href="#where-the-bench-writes" title="Permanent link">¶</a></h2>
+<p><code>echelle-calib</code> derives both of its output folders from the folder argument it
+was launched at. Launch it at <code>D:\NIFS\incoming</code> and it writes:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>D:\NIFS\incoming\calibrations\&lt;snapshot-id&gt;\        the immutable snapshot
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>D:\NIFS\incoming\calibration-configs\&lt;snapshot-id&gt;\ campaign/alignment/export settings
+</code></pre></div>
+<p>That is the fix for a bench started from a shortcut scattering its output into
+whatever directory the shortcut happened to begin in. To put them somewhere
+else — the trip loop above keeps them one level up, beside the shots —
+<code>--output-root</code> and <code>--config-root</code> override each independently.</p>
+<p>Either way the Save tab states both paths <strong>in full</strong>, so you can read where
+the files will go before pressing anything, and once a snapshot is saved an
+<strong>Open folder</strong> button appears beside the confirmation and shows it in the file
+manager. No path has to be retyped, which matters most on a network share.</p>
+<p>What each of those files is for, and which of them a cube is actually built
+from, is <a href="../calibration-to-cube/">From calibration to cube</a>.</p>
+<h2 id="the-campaign-page">The campaign page<a class="headerlink" href="#the-campaign-page" title="Permanent link">¶</a></h2>
+<p><code>echelle web</code> writes one self-contained <code>index.html</code>. There is no server and
+nothing is fetched: <strong>double-click the file</strong> to open it in a browser.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="p">.\</span><span class="n">echelle</span><span class="p">.</span><span class="n">ps1</span> <span class="n">web</span> <span class="p">`</span>
+<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>  <span class="p">-</span><span class="n">-catalog</span> <span class="s2">"$Data\all-years.json"</span> <span class="p">`</span>
+<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a>  <span class="p">-</span><span class="n">-output</span> <span class="s2">"$Data\campaign-page"</span> <span class="p">`</span>
+<a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a>  <span class="p">-</span><span class="n">-registry</span> <span class="s2">"$Data\calibration_registry.toml"</span> <span class="p">`</span>
+<a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a>  <span class="p">-</span><span class="n">-calibrations</span> <span class="s2">"$Data\calibrations"</span> <span class="p">`</span>
+<a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a>  <span class="p">-</span><span class="n">-drift</span> <span class="s2">"$Data\epoch-drift.json"</span>
+</code></pre></div>
+<ul>
+<li><code>--catalog</code> is required: the merged all-years index from <code>echelle catalog
+  merge</code>, or a single drive's catalog.</li>
+<li><code>--output</code> is required: the folder <code>index.html</code> is written into.</li>
+<li><code>--registry</code> and <code>--calibrations</code> name the epochs, and <code>--drift</code> supplies the
+  verdicts; together they are what let the Now tab place the campaign and say
+  what to do next. Without them the page still builds, with less to say.</li>
+<li><code>--document</code> appends one extra Markdown file after the packaged reading room.</li>
+</ul>
+<p>The page is a snapshot of the moment it was built. After processing more shots,
+rebuild the catalog and rerun <code>echelle web</code> over the same <code>--output</code> folder to
+refresh it. The page never controls a worker and never writes campaign data.</p>
 <h2 id="safe-inspection-versus-writing">Safe inspection versus writing<a class="headerlink" href="#safe-inspection-versus-writing" title="Permanent link">¶</a></h2>
 <p>These commands do not intentionally create campaign artifacts:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>echelle --help
-<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>echelle status
-<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a>echelle snapshot show DIR
-<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a>echelle snapshot validate DIR
-<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a>echelle process INPUT --dry-run
-<a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a>echelle catalog
-<a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a>echelle drift
-<a id="__codelineno-10-8" name="__codelineno-10-8" href="#__codelineno-10-8"></a>echelle-pattern SPHERE BACKGROUND
-<a id="__codelineno-10-9" name="__codelineno-10-9" href="#__codelineno-10-9"></a>echelle-align SIGNAL BACKGROUND SPHERE SPHERE_BG
-<a id="__codelineno-10-10" name="__codelineno-10-10" href="#__codelineno-10-10"></a>echelle-nist-overlay --list-lamps
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>echelle --help
+<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a>echelle status
+<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a>echelle snapshot show DIR
+<a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a>echelle snapshot validate DIR
+<a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a>echelle process INPUT --dry-run
+<a id="__codelineno-12-6" name="__codelineno-12-6" href="#__codelineno-12-6"></a>echelle catalog
+<a id="__codelineno-12-7" name="__codelineno-12-7" href="#__codelineno-12-7"></a>echelle drift
+<a id="__codelineno-12-8" name="__codelineno-12-8" href="#__codelineno-12-8"></a>echelle-pattern SPHERE BACKGROUND
+<a id="__codelineno-12-9" name="__codelineno-12-9" href="#__codelineno-12-9"></a>echelle-align SIGNAL BACKGROUND SPHERE SPHERE_BG
+<a id="__codelineno-12-10" name="__codelineno-12-10" href="#__codelineno-12-10"></a>echelle-nist-overlay --list-lamps
 </code></pre></div>
 <p>Bare <code>echelle snapshot</code>, <code>echelle catalog</code>, and <code>echelle drift</code> print their own
 help instead of failing, so a subcommand name never has to be remembered.</p>
@@ -2092,7 +2277,7 @@ overwrite option.</p>
 </ul>
 <p>As a development fallback, every command can be reached as a module. For the
 new bench:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="n">python</span> <span class="n">-m</span> <span class="n">echelle_spectra</span><span class="p">.</span><span class="n">calibration_bench_gui</span> <span class="p">-</span><span class="n">-help</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="n">python</span> <span class="n">-m</span> <span class="n">echelle_spectra</span><span class="p">.</span><span class="n">calibration_bench_gui</span> <span class="p">-</span><span class="n">-help</span>
 </code></pre></div>
 <h3 id="a-copied-multiline-command-fails">A copied multiline command fails<a class="headerlink" href="#a-copied-multiline-command-fails" title="Permanent link">¶</a></h3>
 <p>PowerShell continues a line with a backtick (<code>`</code>); macOS shells use a
@@ -2105,12 +2290,12 @@ is not below the current working directory. Status exits nonzero when it finds
 an invalid snapshot or a registry whose referenced snapshots, bounds, or
 digests do not validate.</p>
 <h3 id="processing-refuses-a-registry-run">Processing refuses a registry run<a class="headerlink" href="#processing-refuses-a-registry-run" title="Permanent link">¶</a></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>ERROR: registry-backed processing requires a sampled epoch audit
-<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a>(--drift-verdict) or an explicit unverified first sample (--sample N).
-<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a>  Take the sampled evidence this gate needs:
-<a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a>    echelle process "D:\NIFS\shots" --registry "D:\NIFS\calibration_registry.toml" ...
-<a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a>    echelle drift audit "D:\NIFS\cubes" -o drift-evidence.json
-<a id="__codelineno-12-6" name="__codelineno-12-6" href="#__codelineno-12-6"></a>  Then repeat this command with --drift-verdict drift-evidence.json
+<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a>ERROR: registry-backed processing requires a sampled epoch audit
+<a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a>(--drift-verdict) or an explicit unverified first sample (--sample N).
+<a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a>  Take the sampled evidence this gate needs:
+<a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a>    echelle process "D:\NIFS\shots" --registry "D:\NIFS\calibration_registry.toml" ...
+<a id="__codelineno-14-5" name="__codelineno-14-5" href="#__codelineno-14-5"></a>    echelle drift audit "D:\NIFS\cubes" -o drift-evidence.json
+<a id="__codelineno-14-6" name="__codelineno-14-6" href="#__codelineno-14-6"></a>  Then repeat this command with --drift-verdict drift-evidence.json
 </code></pre></div>
 <p>This is the calibration gate, not a broken installation. No drive is processed
 under an epoch nothing has checked. The refusal prints the exact sample and
@@ -2143,13 +2328,13 @@ before allowing writes.</p>
 </ul>
 <h2 id="version-check">Version check<a class="headerlink" href="#version-check" title="Permanent link">¶</a></h2>
 <p>Run this inside the active source environment:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a>python<span class="w"> </span>-c<span class="w"> </span><span class="s2">"import echelle_spectra; print(echelle_spectra.__version__)"</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a>python<span class="w"> </span>-c<span class="w"> </span><span class="s2">"import echelle_spectra; print(echelle_spectra.__version__)"</span>
 </code></pre></div>
 <p>For an unactivated portable Windows kit:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="p">&amp;</span> <span class="s2">".\.venv\Scripts\python.exe"</span> <span class="n">-c</span> <span class="s2">"import echelle_spectra; print(echelle_spectra.__version__)"</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a><span class="p">&amp;</span> <span class="s2">".\.venv\Scripts\python.exe"</span> <span class="n">-c</span> <span class="s2">"import echelle_spectra; print(echelle_spectra.__version__)"</span>
 </code></pre></div>
 <p>For an unactivated portable macOS kit:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a>./.venv/bin/python<span class="w"> </span>-c<span class="w"> </span><span class="s1">'import echelle_spectra; print(echelle_spectra.__version__)'</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a>./.venv/bin/python<span class="w"> </span>-c<span class="w"> </span><span class="s1">'import echelle_spectra; print(echelle_spectra.__version__)'</span>
 </code></pre></div>
 
 

@@ -9,7 +9,7 @@
         <link rel="prev" href="../operator-cheat-sheet/">
       
       
-        <link rel="next" href="../calibration-snapshots/">
+        <link rel="next" href="../calibration-to-cube/">
       
       
         
@@ -20,7 +20,7 @@
     
     
       
-        <title>Basic usage - Echelle Spectra</title>
+        <title>Single-SIF viewer - Echelle Spectra</title>
       
     
     
@@ -85,7 +85,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#basic-usage" class="md-skip">
+        <a href="#the-single-sif-viewer" class="md-skip">
           Skip to content
         </a>
       
@@ -118,7 +118,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Basic usage
+              Single-SIF viewer
             
           </span>
         </div>
@@ -253,7 +253,7 @@
     
     
       <li class="md-tabs__item md-tabs__item--active">
-        <a href="../operator-cheat-sheet/" class="md-tabs__link">
+        <a href="../usage-overview/" class="md-tabs__link">
           
   
   
@@ -544,6 +544,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../usage-overview/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Where to start
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../operator-cheat-sheet/" class="md-nav__link">
         
   
@@ -588,7 +616,7 @@
   <span class="md-ellipsis">
     
   
-    Basic usage
+    Single-SIF viewer
   
 
     
@@ -606,7 +634,7 @@
   <span class="md-ellipsis">
     
   
-    Basic usage
+    Single-SIF viewer
   
 
     
@@ -632,10 +660,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix="">
       
         <li class="md-nav__item">
-  <a href="#intended-workflow" class="md-nav__link">
+  <a href="#what-the-viewer-shows" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Intended workflow
+        What the viewer shows
       
     </span>
   </a>
@@ -643,10 +671,21 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#gui" class="md-nav__link">
+  <a href="#how-a-spectrum-is-built" class="md-nav__link">
     <span class="md-ellipsis">
       
-        GUI
+        How a spectrum is built
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#when-the-instrument-has-moved-a-little" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        When the instrument has moved a little
       
     </span>
   </a>
@@ -668,6 +707,34 @@
   
 </nav>
       
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../calibration-to-cube/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    From calibration to cube
+  
+
+    
+  </span>
+  
+  
+
+      </a>
     </li>
   
 
@@ -1354,10 +1421,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix="">
       
         <li class="md-nav__item">
-  <a href="#intended-workflow" class="md-nav__link">
+  <a href="#what-the-viewer-shows" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Intended workflow
+        What the viewer shows
       
     </span>
   </a>
@@ -1365,10 +1432,21 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#gui" class="md-nav__link">
+  <a href="#how-a-spectrum-is-built" class="md-nav__link">
     <span class="md-ellipsis">
       
-        GUI
+        How a spectrum is built
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#when-the-instrument-has-moved-a-little" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        When the instrument has moved a little
       
     </span>
   </a>
@@ -1406,63 +1484,105 @@
   
 
 
-<h1 id="basic-usage">Basic Usage<a class="headerlink" href="#basic-usage" title="Permanent link">¶</a></h1>
-<div class="admonition note">
-<p class="admonition-title">Note</p>
-<p>Detailed usage examples and API reference will be added in a future documentation pass. For now, see the example notebooks in <code>examples/workflows/black_cmos/</code>.</p>
-</div>
-<hr>
-<h2 id="intended-workflow">Intended workflow<a class="headerlink" href="#intended-workflow" title="Permanent link">¶</a></h2>
-<p>The general processing pipeline for an echelle spectrum is:</p>
-<ol>
-<li>
-<p><strong>Load a 2D echelle image</strong><br>
-   Read the raw detector image from file (FITS, TIFF, or camera-native format).</p>
-</li>
-<li>
-<p><strong>Define or load the order pattern</strong><br>
-   Either load a previously saved pattern calibration, or run order detection on a suitable image (flat-field or bright continuum source). This step is only needed when the optical setup changes.</p>
-</li>
-<li>
-<p><strong>Extract order spectra</strong><br>
-   Apply the pattern to slice each diffraction order from the 2D image into a 1D intensity array.</p>
-</li>
-<li>
-<p><strong>Calibrate wavelength</strong><br>
-   Map pixel positions to wavelengths using a calibration solution (polynomial fit derived from known emission lines). Again, this is only redone when the setup changes.</p>
-</li>
-<li>
-<p><strong>Inspect or analyze spectral windows</strong><br>
-   Use the defined wavelength windows (see <a href="../band-data/">Band data</a>) to locate and integrate lines of interest such as H-alpha, He-587, CII-515, etc.</p>
-</li>
-</ol>
-<p>For small detector or optics shifts, use the headless
-<a href="../calibration-alignment/">Calibration alignment</a> workflow to fit a rigid correction
-and write a separate adjusted wavelength table. Do not overwrite the historical
-calibration files.</p>
-<p>Before exporting a dataset, run the
-<a href="../line-validation/">Wavelength line validation</a> gate on real plasma lines. Start
-with Balmer lines, then use Fulcher-alpha line positions as supporting checks when
-the features are visible and not dominated by blends.</p>
-<p>After validation, use the
-<a href="../spectrocube-batch-workflow/">Batch SpectroCube workflow</a> to generate cropped,
-absolute <code>wmsr</code> SpectroCube products from the dataset plan.</p>
-<hr>
-<h2 id="gui">GUI<a class="headerlink" href="#gui" title="Permanent link">¶</a></h2>
-<p>Launch the graphical interface with:</p>
+<h1 id="the-single-sif-viewer">The single-SIF viewer<a class="headerlink" href="#the-single-sif-viewer" title="Permanent link">¶</a></h1>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>echelle_spectra
 </code></pre></div>
-<p>The GUI wraps the same extraction and calibration pipeline in an interactive window.</p>
+<p><code>echelle_spectra</code> is the <strong>viewer</strong>: it opens one SIF at a time and shows you
+what is in it — the detector image, the extracted orders, the calibrated
+spectrum, and known-line overlays on top. Use it to look at a shot.</p>
+<p>It is not where calibrations are made and not where drives are converted:</p>
+<ul>
+<li><strong>Making a calibration</strong> → the live bench, <code>echelle-calib</code>.
+  See <a href="../calibration-bench/">Live calibration bench</a>.</li>
+<li><strong>Converting SIFs to cubes and LHD text</strong> → the <code>echelle</code> umbrella command.
+  See <a href="../usage-overview/">Where to start</a> and the
+  <a href="../operator-cheat-sheet/">operator cheat sheet</a>.</li>
+</ul>
+<hr>
+<h2 id="what-the-viewer-shows">What the viewer shows<a class="headerlink" href="#what-the-viewer-shows" title="Permanent link">¶</a></h2>
+<ul>
+<li>The raw 2D echelle image, with the fitted order pattern over it.</li>
+<li>Each diffraction order extracted into a 1D spectrum.</li>
+<li>That spectrum on a wavelength axis, from the loaded calibration.</li>
+<li>Optional Balmer, Fulcher H₂, ThAr, Ne, and Hg line markers, each separately
+  toggleable. All overlays start off; labels thin out in wide views and reveal
+  local lines as you zoom. The viewer and <code>echelle-validate-lines</code> read the same
+  provenance-carrying tables — see
+  <a href="../known-line-overlays/">Known-line overlays</a>.</li>
+<li>The defined spectral windows for lines of interest — H-alpha, He-587,
+  CII-515, and the rest. See <a href="../band-data/">Band data</a>.</li>
+</ul>
+<hr>
+<h2 id="how-a-spectrum-is-built">How a spectrum is built<a class="headerlink" href="#how-a-spectrum-is-built" title="Permanent link">¶</a></h2>
+<p>The same five steps happen whether you are in the viewer, at the bench, or
+running <code>echelle process</code>:</p>
+<ol>
+<li><strong>Load the 2D image.</strong> The raw detector frame from the SIF.</li>
+<li><strong>Apply the order pattern.</strong> Where each diffraction order sits on the
+   detector. Only redetermined when the optics move.</li>
+<li><strong>Extract the orders.</strong> Slice each order out of the image into a 1D
+   intensity array.</li>
+<li><strong>Apply the wavelength solution.</strong> Map detector column to wavelength through
+   the per-order polynomial fit.</li>
+<li><strong>Read the windows.</strong> Locate and integrate the lines of interest.</li>
+</ol>
+<p>Steps 2 and 4 are the calibration. Where the files behind them come from, and
+what a finished cube records about them, is
+<a href="../calibration-to-cube/">From calibration to cube</a>.</p>
+<hr>
+<h2 id="when-the-instrument-has-moved-a-little">When the instrument has moved a little<a class="headerlink" href="#when-the-instrument-has-moved-a-little" title="Permanent link">¶</a></h2>
+<p>For a small detector or optics shift, fit a rigid correction rather than
+recalibrating from scratch. The live bench does this interactively; the same fit
+is available headlessly through
+<a href="../calibration-alignment/">Calibration alignment</a>, which writes a <strong>separate</strong>
+adjusted wavelength table. Never overwrite the historical calibration files.</p>
+<p>Before exporting a dataset, run the
+<a href="../line-validation/">Wavelength line validation</a> gate on real plasma lines:
+Balmer first, then Fulcher-alpha positions as supporting checks where the
+features are visible and not dominated by blends.</p>
 <hr>
 <h2 id="notebooks">Notebooks<a class="headerlink" href="#notebooks" title="Permanent link">¶</a></h2>
-<p>For scripted or batch workflows, see the example notebooks:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>examples/workflows/black_cmos/
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>├── 01_load_image.ipynb
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>├── 02_pattern_calibration.ipynb
-<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>├── 03_wavelength_calibration.ipynb
-<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>├── 04_extract_spectrum.ipynb    ← routine daily use
-<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>└── 05_calibration_alignment.ipynb
-</code></pre></div>
+<p>The notebooks in <code>examples/workflows/black_cmos/</code> are a <strong>manual and tuning
+reference</strong>, kept for the cases the packaged commands do not cover — a new
+optical setup, a pattern that needs to be talked into place by hand, a fit worth
+inspecting step by step.</p>
+<table>
+<thead>
+<tr>
+<th>Notebook</th>
+<th>Use it for</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>01_load_image.ipynb</code></td>
+<td>Sanity check: load an image, verify dimensions</td>
+</tr>
+<tr>
+<td><code>02_automated_pattern_extraction.ipynb</code></td>
+<td>Run packaged pattern extraction and compare traces</td>
+</tr>
+<tr>
+<td><code>02_pattern_calibration.ipynb</code></td>
+<td>Manual pattern tuning and debugging</td>
+</tr>
+<tr>
+<td><code>03_wavelength_calibration.ipynb</code></td>
+<td>Manual line identification and polynomial fit — new setup only</td>
+</tr>
+<tr>
+<td><code>04_extract_spectrum.ipynb</code></td>
+<td>Load → calibrate → extract → save, one file at a time</td>
+</tr>
+<tr>
+<td><code>05_calibration_alignment.ipynb</code></td>
+<td>Align an existing wavelength table against fresh lamp data</td>
+</tr>
+</tbody>
+</table>
+<p>For routine work, prefer the bench for calibration and <code>echelle process</code> for
+conversion: both record provenance the notebooks do not. Historical notebooks
+are in <code>examples/obsolete/</code>.</p>
 
 
 
