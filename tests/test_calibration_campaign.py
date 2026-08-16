@@ -497,21 +497,29 @@ def test_saturation_never_fails_a_lamp_frame_but_still_fails_a_sphere(tmp_path):
     triage = triage_exposure(_triage_frame(tmp_path, "Ne-dim.sif", _saturated_cluster))
     assert triage.state is ExposureState.SATURATED
 
-    for role in (MeasurementRole.LAMP, MeasurementRole.LAMP_BACKGROUND):
-        verdict = triage_for_role(triage, role)
-        assert verdict.state is ExposureState.SATURATED
-        assert not verdict.blocking
-        assert verdict.is_usable
-        assert "fit unsaturated lines only" in verdict.headline
-        assert "cluster(s)" in verdict.headline
-        assert "FAILED" not in verdict.headline.upper()
-        assert "lower the exposure" not in verdict.advice.casefold()
+    # The lamp SIGNAL is the frame this law is about: it is shot to saturate
+    # its strong lines, so clustered saturation there is information.
+    verdict = triage_for_role(triage, MeasurementRole.LAMP)
+    assert verdict.state is ExposureState.SATURATED
+    assert not verdict.blocking
+    assert verdict.is_usable
+    assert "fit unsaturated lines only" in verdict.headline
+    assert "cluster(s)" in verdict.headline
+    assert "FAILED" not in verdict.headline.upper()
+    assert "lower the exposure" not in verdict.advice.casefold()
 
-    for role in (MeasurementRole.SPHERE, MeasurementRole.SPHERE_BACKGROUND):
+    # A saturated BACKGROUND is a different animal and always was: a frame
+    # shot with the light off cannot legitimately reach full scale, so it is a
+    # fault rather than expected saturation, whichever pair it belongs to.
+    for role in (
+        MeasurementRole.SPHERE,
+        MeasurementRole.SPHERE_BACKGROUND,
+        MeasurementRole.LAMP_BACKGROUND,
+    ):
         verdict = triage_for_role(triage, role)
         assert verdict.blocking
         assert not verdict.is_usable
-        assert "SATURATED" in verdict.headline
+        assert "saturated" in verdict.headline.casefold()
 
     # A frame with no role yet keeps the front-door verdict untouched: triage
     # is the front door and needs nothing but a file.
@@ -1263,3 +1271,107 @@ def test_existing_settings_can_be_deliberately_rewritten(tmp_path):
     assert again["campaign"].read_text(encoding="utf-8") == original
     # No staging debris is left beside the bundle it replaced.
     assert [path.name for path in configs.iterdir()] == ["20250813_cmos"]
+
+
+def _peaked_frame(tmp_path, name, peak):
+    """A frame whose brightest raw pixel is *peak* counts."""
+
+    columns = 60
+    images = np.zeros((1, 20, columns), dtype=float)
+    images[0, 10, 30] = float(peak)
+    spectra = (np.full(columns, float(peak) / 10.0),)
+    return BenchFrame(tmp_path / name, images, images[0], spectra, {"ExposureTime": 0.1})
+
+
+class TestABackgroundIsJudgedAsABackground:
+    """The owner, deadpan, on a lamp background reading DIM with advice to
+    expose it for twenty seconds: "Background is dim. Wow, genius."
+
+    A background is shot with the light off. Dark is the whole of its job, so
+    DIM is its correct state and raising its exposure would spoil the pair.
+    What it can get wrong is the opposite, and that is what gets loud.
+    """
+
+    def _campaign(self, tmp_path):
+        sources = _sources(tmp_path)
+        return _campaign(tmp_path, sources), sources
+
+    def test_a_dim_background_praises_itself_and_never_says_expose_longer(
+        self, tmp_path
+    ):
+        triage = triage_exposure(_peaked_frame(tmp_path, "bg.sif", 200))
+        assert triage.state is ExposureState.DIM
+
+        for role in (
+            MeasurementRole.LAMP_BACKGROUND,
+            MeasurementRole.SPHERE_BACKGROUND,
+        ):
+            verdict = triage_for_role(triage, role, partner_peak=40000.0)
+
+            assert verdict.label == "background"
+            assert verdict.headline == "dark as it should be"
+            assert not verdict.blocking
+            assert verdict.is_usable
+            assert "increase" not in verdict.advice.casefold()
+            assert "increase" not in verdict.next_action.casefold()
+            assert "expose" not in verdict.next_action.casefold()
+
+    def test_a_background_approaching_its_signal_gets_loud(self, tmp_path):
+        # Half the signal's counts: a leak, an open shutter, or the wrong file.
+        triage = triage_exposure(_peaked_frame(tmp_path, "bg.sif", 20000))
+
+        verdict = triage_for_role(
+            triage, MeasurementRole.LAMP_BACKGROUND, partner_peak=40000.0
+        )
+
+        assert verdict.blocking
+        assert not verdict.is_usable
+        assert "50% of its lamp signal" in verdict.headline
+        assert "not dark" in verdict.headline
+        assert "light leak" in verdict.advice
+        assert "reshoot" in verdict.next_action.casefold()
+
+    def test_a_background_well_under_its_signal_stays_quiet(self, tmp_path):
+        # A tenth of the signal is an ordinary, healthy background.
+        triage = triage_exposure(_peaked_frame(tmp_path, "bg.sif", 4000))
+
+        verdict = triage_for_role(
+            triage, MeasurementRole.LAMP_BACKGROUND, partner_peak=40000.0
+        )
+
+        assert not verdict.blocking
+        assert verdict.headline == "dark as it should be"
+
+    def test_the_signal_frame_it_is_compared_against_is_its_own_partner(
+        self, tmp_path
+    ):
+        campaign, sources = self._campaign(tmp_path)
+        bright = _peaked_frame(tmp_path, "Ne-bright.sif", 40000)
+        dark = _peaked_frame(tmp_path, "Ne-bg.sif", 300)
+        for frame in (bright, dark):
+            frame.path.write_bytes(b"sif\n")
+        campaign.record_frame(bright)
+        campaign.record_frame(dark)
+        campaign.classify_file(
+            bright.path, MeasurementRole.LAMP, lamp_family="Ne", frame=bright
+        )
+        campaign.classify_file(
+            dark.path, MeasurementRole.LAMP_BACKGROUND, lamp_family="Ne", frame=dark
+        )
+
+        assert campaign.partner_peak(dark.path, MeasurementRole.LAMP_BACKGROUND) == (
+            pytest.approx(40000.0)
+        )
+        # A lamp signal of another element is not this background's partner.
+        assert campaign.partner_peak(bright.path, MeasurementRole.LAMP) is None
+        verdict = campaign.role_triage(dark.path)
+        assert verdict.headline == "dark as it should be"
+        assert not verdict.blocking
+
+    def test_without_a_partner_a_background_is_still_read_as_one(self, tmp_path):
+        triage = triage_exposure(_peaked_frame(tmp_path, "bg.sif", 200))
+
+        verdict = triage_for_role(triage, MeasurementRole.SPHERE_BACKGROUND)
+
+        assert verdict.headline == "dark as it should be"
+        assert not verdict.blocking

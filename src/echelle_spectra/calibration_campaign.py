@@ -133,6 +133,25 @@ class MeasurementRole(Enum):
 #: the bench without giving it any calibration meaning.
 LAMP_ROLES = (MeasurementRole.LAMP, MeasurementRole.LAMP_BACKGROUND)
 
+#: The two background roles.  A background is shot with the light off; being
+#: dark is the whole of its job, so DIM is its correct state and telling its
+#: operator to expose it longer is advice that would spoil it (owner, deadpan:
+#: "Background is dim. Wow, genius").
+BACKGROUND_ROLES = (MeasurementRole.LAMP_BACKGROUND, MeasurementRole.SPHERE_BACKGROUND)
+
+#: Which signal role a background belongs to, so its counts can be read against
+#: the frame it will be subtracted from.
+BACKGROUND_PARTNERS = {
+    MeasurementRole.LAMP_BACKGROUND: MeasurementRole.LAMP,
+    MeasurementRole.SPHERE_BACKGROUND: MeasurementRole.SPHERE,
+}
+
+#: The share of its partner's peak at which a background stops being a
+#: background.  A dark frame reading a third of the signal it is subtracted
+#: from is a light leak, a shutter that stayed open, or the wrong file — and
+#: that, not dimness, is what deserves to be loud.
+BACKGROUND_LEAK_FRACTION = 0.30
+
 
 class ExposureState(Enum):
     """Whole-frame exposure verdict used to name the next safe action."""
@@ -294,6 +313,11 @@ class RoleTriageVerdict:
     blocking: bool
     #: The longer explanation, for a tooltip or the details dock.
     advice: str
+    #: What to do next, when the role changes the answer.  Empty means the
+    #: role-blind exposure guidance already says it correctly; a background
+    #: frame is the case where it does not, because that guidance would have
+    #: the operator expose a dark frame for twenty seconds.
+    next_action: str = ""
 
     @property
     def is_usable(self) -> bool:
@@ -1006,18 +1030,87 @@ SPHERE_SATURATION_ADVICE = (
 )
 
 
+def _background_verdict(
+    triage: ExposureTriage,
+    role: MeasurementRole,
+    partner_peak: float | None,
+) -> RoleTriageVerdict:
+    """Read a background frame by the only standard that applies to it."""
+
+    kind = "lamp" if role is MeasurementRole.LAMP_BACKGROUND else "sphere"
+    peak = triage.peak_counts
+    partner = BACKGROUND_PARTNERS[role].value
+    leaking = (
+        peak is not None
+        and partner_peak is not None
+        and partner_peak > 0
+        and peak >= BACKGROUND_LEAK_FRACTION * partner_peak
+    )
+    if leaking:
+        share = 100.0 * peak / partner_peak
+        return RoleTriageVerdict(
+            role,
+            triage.state,
+            "background too bright",
+            f"reads {share:.0f}% of its {kind} signal — not dark",
+            True,
+            f"This {kind} background peaks at {peak:.0f} counts against the "
+            f"{partner_peak:.0f} counts of the {partner} it will be subtracted "
+            "from. A background is shot with the light off, so at that level "
+            "something is reaching the detector: a light leak, a shutter that "
+            "did not close, or the wrong file in this role. Subtracting it "
+            "would remove real signal. Check which file this is and reshoot "
+            "the background with the lamp off.",
+            f"Reshoot this background with the {kind} off, or correct which "
+            "file carries the background role.",
+        )
+    if triage.state is ExposureState.SATURATED:
+        return RoleTriageVerdict(
+            role,
+            triage.state,
+            "background saturated",
+            "saturated — it cannot be subtracted",
+            True,
+            f"A background at full scale is not a background. {triage.headline} "
+            "Reshoot it with the light off before using this pair.",
+            "Reshoot this background with the light off.",
+        )
+    return RoleTriageVerdict(
+        role,
+        triage.state,
+        "background",
+        "dark as it should be",
+        False,
+        f"This is a {kind} background, so dark is correct and DIM is the "
+        "reading to expect — it is subtracted from its "
+        f"{partner}, never measured for lines. Exposure is not raised on a "
+        "background; it is matched to the frame it partners. The reading worth "
+        "watching is the opposite one: a background approaching its signal's "
+        "own counts means light is getting in.",
+        "Nothing to change — a background is meant to read dark.",
+    )
+
+
 def triage_for_role(
-    triage: ExposureTriage, role: MeasurementRole | None
+    triage: ExposureTriage,
+    role: MeasurementRole | None,
+    partner_peak: float | None = None,
 ) -> RoleTriageVerdict:
     """Read one already-triaged frame again, in the light of its role.
 
-    Saturation is the only verdict a role changes, and it changes in one
-    direction only: a lamp frame is never failed for saturating the strong
-    lines it was shot to saturate.  Every other state, and every sphere frame,
-    reads exactly as the front-door triage read it.
+    Two roles change what a state means.  A lamp frame is never failed for
+    saturating the strong lines it was shot to saturate — that is precisely why
+    bright/dim pairs exist.  And a background frame is never scolded for being
+    dark: darkness is its entire purpose, so DIM reads as correct and the
+    advice never tells anybody to expose it longer.  What a background *can*
+    get wrong is being bright, which is why ``partner_peak`` is read against
+    it: a dark frame carrying a third of the signal it will be subtracted from
+    is a leak or the wrong file, and that gets loud.
     """
 
     clusters = triage.saturation
+    if role in BACKGROUND_ROLES and triage.state is not ExposureState.NO_DATA:
+        return _background_verdict(triage, role, partner_peak)
     if triage.state is ExposureState.SATURATED and role in LAMP_ROLES:
         headline = (
             f"saturated in {clusters.cluster_count} cluster(s) — fit "
@@ -1385,9 +1478,34 @@ class CalibrationCampaignSession:
         if record is None:
             return None
         measurement = self.measurements.get(source)
-        return triage_for_role(
-            record.triage, measurement.role if measurement is not None else None
-        )
+        role = measurement.role if measurement is not None else None
+        return triage_for_role(record.triage, role, self.partner_peak(source, role))
+
+    def partner_peak(
+        self, path: str | Path, role: MeasurementRole | None
+    ) -> float | None:
+        """The peak of the signal frame a background will be subtracted from.
+
+        A lamp background belongs to its own lamp's signal; a sphere background
+        to the sphere.  Absent a partner there is nothing to compare against,
+        and the background is simply read as a background.
+        """
+
+        partner_role = BACKGROUND_PARTNERS.get(role)
+        if partner_role is None:
+            return None
+        measurement = self.measurements.get(Path(path))
+        lamp = measurement.lamp_family if measurement is not None else ""
+        peaks = []
+        for source, other in self.measurements.items():
+            if other.role is not partner_role:
+                continue
+            if partner_role is MeasurementRole.LAMP and other.lamp_family != lamp:
+                continue
+            record = self.loaded.get(source)
+            if record is not None and record.triage.peak_counts is not None:
+                peaks.append(float(record.triage.peak_counts))
+        return max(peaks) if peaks else None
 
     def unconfirmed_suggestions(self) -> tuple[tuple[Path, MeasurementRole], ...]:
         """Files whose filename proposes one role that nobody has confirmed.

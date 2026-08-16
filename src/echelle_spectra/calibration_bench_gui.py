@@ -641,9 +641,24 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         # running to three lines put the Save tab into a scrollbar. The whole
         # sentence is a click away in the Why dock, which is F16's own rule for
         # readings.
+        # The step and the button that performs it, side by side.  They used to
+        # be on opposite diagonals of the window — the next-step line bottom
+        # left, its action top right — and the operator was expected to carry
+        # one to the other (owner, 2026-08-16: "Not this scatter of actions
+        # here and there!"). Whatever the checklist says is next, the button
+        # beside it does that.
+        next_panel = QtWidgets.QWidget()
+        next_panel.setObjectName("nextStep")
+        next_layout = QtWidgets.QHBoxLayout(next_panel)
+        next_layout.setContentsMargins(7, 5, 7, 5)
+        next_layout.setSpacing(8)
         self.next_step_value = _ElidingLabel("Drop a SIF onto the bench to begin.")
-        self.next_step_value.setObjectName("nextStep")
-        controls_layout.addWidget(self.next_step_value)
+        next_layout.addWidget(self.next_step_value, 1)
+        self.next_step_button = QtWidgets.QPushButton("Add SIF files…")
+        self.next_step_button.setObjectName("nextStepButton")
+        next_layout.addWidget(self.next_step_button)
+        controls_layout.addWidget(next_panel)
+        self.next_step_panel = next_panel
 
         self.controls_rail = controls
         root.addWidget(controls)
@@ -1435,7 +1450,23 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
             "either real ageing or an exposure-normalisation mismatch worth "
             "chasing before the trip. Only the sphere pair is needed — no lamp.",
         )
-        self.compare_button = QtWidgets.QPushButton("Compute factors")
+        # "Compute factors" names an intermediate array, not the thing the
+        # operator wants (owner, 2026-08-16: "the cryptic compare factors.
+        # Decrypt those"). The factors ARE the instrument's sensitivity against
+        # wavelength — what turns counts into physical intensity — measured
+        # from the sphere pair and compared with the previous campaign's.
+        self.compare_button = QtWidgets.QPushButton("Measure sensitivity")
+        self._explainable(
+            self.compare_button,
+            "Measuring how sensitive the instrument is right now",
+            "The integrating sphere emits a known, smooth spectrum, so "
+            "photographing it with the lamp off and on tells the bench how "
+            "many counts this instrument returns per unit of real light, at "
+            "every wavelength. That curve is what converts counts into "
+            "physical intensity in every cube produced afterwards, and "
+            "comparing it against the previous campaign's curve is how "
+            "lamp and sphere ageing show up. It needs only the sphere pair.",
+        )
         comparison_layout.addWidget(self.comparison_value)
         comparison_layout.addWidget(self.compare_button)
         self.sphere_factors_group = comparison_group
@@ -1693,6 +1724,25 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
             "lamp's own rows, and the panel warns when the two disagree.",
         )
 
+        row.addSpacing(10)
+        # The owner's own name for it, and his own placement: this changes how
+        # the detector reads, so it belongs in the strip that steers the view,
+        # not parked in a tab a column away. "1:1" costs almost no width, which
+        # is what let it come back.
+        self.equal_aspect_check = QtWidgets.QToolButton()
+        self.equal_aspect_check.setText("1:1")
+        self.equal_aspect_check.setCheckable(True)
+        self._explainable(
+            self.equal_aspect_check,
+            "Showing the detector at its true shape",
+            "The detector view stretches to fill the space it is given, which "
+            "is what makes the order traces far enough apart to aim at. Press "
+            "this and one detector pixel is drawn square in both directions, "
+            "so the frame appears at its real 2560x2160 proportions. Useful "
+            "for judging the geometry; unhelpful for clicking lines, which is "
+            "why it is off unless you ask.",
+        )
+        row.addWidget(self.equal_aspect_check)
         row.addStretch(1)
         return bar
 
@@ -1711,19 +1761,6 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         self.frame_combo.addItem("Mean of all frames", None)
         frame_row.addWidget(self.frame_combo, 1)
         layout.addLayout(frame_row)
-
-        self.equal_aspect_check = QtWidgets.QCheckBox("Square detector pixels")
-        self._explainable(
-            self.equal_aspect_check,
-            "Showing the detector at its true shape",
-            "The detector view stretches to fill the space it is given, which "
-            "is what makes the order traces far enough apart to aim at. Tick "
-            "this and one detector pixel is drawn square in both directions, "
-            "so the frame appears at its real 2560x2160 proportions. Useful "
-            "for judging the geometry; unhelpful for clicking lines, which is "
-            "why it is off unless you ask.",
-        )
-        layout.addWidget(self.equal_aspect_check)
 
         self.frame_choice_value = QtWidgets.QLabel("no acquisition open")
         self.frame_choice_value.setWordWrap(True)
@@ -1944,7 +1981,6 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         outer.addWidget(self.reference_value)
 
         self.fit_bar = self._build_fit_bar()
-        outer.addWidget(self.fit_bar)
 
         split = QtWidgets.QSplitter(QtCore.Qt.Vertical)
         split.setChildrenCollapsible(False)
@@ -1974,7 +2010,17 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         self.detector_image = pg.ImageItem(axisOrder="col-major")
         self.detector_plot.addItem(self.detector_image)
 
-        self.order_plot = graphics.addPlot(row=1, col=0, title="Selected order spectrum")
+        # The spectrum and its residuals live in their own graphics widget so
+        # the fit strip can sit between them and the detector image — directly
+        # above the trace whose lines are being clicked (owner, 2026-08-16:
+        # "the order scroll belongs to the bottom, next to the lines I'm
+        # supposed to click"). One widget for all three plots left no seam to
+        # put it in.
+        lower_graphics = pg.GraphicsLayoutWidget()
+        lower_graphics.setBackground("#10151b")
+        self.order_plot = lower_graphics.addPlot(
+            row=0, col=0, title="Selected order spectrum"
+        )
         self.order_plot.setLabel("bottom", "raw detector column", units="px")
         self.order_plot.setLabel("left", "mean extracted counts")
         self.order_plot.getAxis("bottom").enableAutoSIPrefix(False)
@@ -1998,7 +2044,7 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         )
         self.order_plot.addItem(self._anchor_scatter)
 
-        self.residual_plot = graphics.addPlot(row=2, col=0, title="Anchor residuals")
+        self.residual_plot = lower_graphics.addPlot(row=1, col=0, title="Anchor residuals")
         self.residual_plot.setMaximumHeight(180)
         self.residual_plot.setLabel("bottom", "accepted anchor")
         self.residual_plot.setLabel("left", "fit residual", units="px")
@@ -2006,7 +2052,15 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         self.residual_plot.getAxis("left").enableAutoSIPrefix(False)
         self.residual_plot.addLine(y=0, pen=pg.mkPen("#64748b", style=QtCore.Qt.DashLine))
         split.addWidget(graphics)
+        lower = QtWidgets.QWidget()
+        lower_layout = QtWidgets.QVBoxLayout(lower)
+        lower_layout.setContentsMargins(0, 0, 0, 0)
+        lower_layout.setSpacing(2)
+        lower_layout.addWidget(self.fit_bar)
+        lower_layout.addWidget(lower_graphics, 1)
+        split.addWidget(lower)
         split.setStretchFactor(0, 1)
+        split.setStretchFactor(1, 2)
         self.view_tabs.addTab(widget, "Lamp fit")
 
     def _build_expected_lines_panel(self) -> None:
@@ -2135,6 +2189,7 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         self.anchor_table.itemSelectionChanged.connect(self._anchor_row_selected)
         self.line_help_table.itemSelectionChanged.connect(self._expected_line_selected)
         self.compare_button.clicked.connect(self._start_sphere_comparison)
+        self.next_step_button.clicked.connect(self._run_next_action)
         self.generate_tomls_button.clicked.connect(lambda: self._generate_tomls())
         self.regenerate_tomls_button.clicked.connect(self._regenerate_tomls)
         self.save_snapshot_button.clicked.connect(self._save_snapshot)
@@ -2982,6 +3037,11 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         headline, it is shouting.
         """
 
+        if verdict.label.startswith("background"):
+            # A background's state word means nothing on its own — DIM is
+            # correct here and alarming everywhere else — so it always carries
+            # the half-sentence that says which it is.
+            return f"{verdict.label.upper()} · {verdict.headline}"
         if triage.state is ExposureState.SATURATED:
             clusters = triage.saturation.cluster_count
             return f"{verdict.label.upper()} · {clusters} saturated cluster(s)"
@@ -2996,9 +3056,8 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         assert self.campaign is not None
         triage = record.triage
         measurement = self.campaign.measurements.get(path)
-        verdict = triage_for_role(
-            triage, measurement.role if measurement is not None else None
-        )
+        role = measurement.role if measurement is not None else None
+        verdict = triage_for_role(triage, role, self.campaign.partner_peak(path, role))
         color = _TRIAGE_COLORS[triage.state]
         headline = triage.headline
         if triage.state is ExposureState.SATURATED and not verdict.blocking:
@@ -3024,7 +3083,11 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         peak = "—" if guidance.peak_value is None else f"{guidance.peak_value:.0f} counts"
         # The one line that decides the next action stays on screen; the four
         # lines of arithmetic behind it live in the dock.
-        self.triage_next_value.setText(guidance.next_action)
+        # A background must never be told to expose longer: its role decides
+        # the action, and the role-blind guidance only speaks when the role has
+        # nothing to add (owner, on a lamp background reading "increase toward
+        # 19.98 s": "Background is dim. Wow, genius").
+        self.triage_next_value.setText(verdict.next_action or guidance.next_action)
         self._explainable(
             self.triage_next_value,
             f"{path.name} — how the verdict was reached",
@@ -3245,6 +3308,26 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         self._follow_assigned_lamp_signal()
         self._pair_lamp_background()
 
+    @staticmethod
+    def _role_marks(measurement, verdict, is_suggested: bool) -> list[str]:
+        """What one row says about its role, without saying it twice."""
+
+        if measurement is None:
+            # One spot, not six (owner, 2026-08-16): "SUGGESTED ONLY — no role
+            # assigned" spelled out on every row filled the table with one
+            # sentence repeated, and it was already said twice over — by the
+            # amber border the Role control wears, and by the Confirm button
+            # that counts them. A row says what it is; the colour says whether
+            # anybody has confirmed it.
+            return [_SUGGESTED_BADGE.lower() if is_suggested else "no role yet"]
+        if verdict is not None and verdict.label.startswith("background"):
+            # The verdict already said "background"; the role would say it a
+            # second time, which is the duplication this table just lost.
+            return [measurement.lamp_family] if measurement.lamp_family else []
+        if measurement.lamp_family:
+            return [f"{measurement.lamp_family} {measurement.role.value}"]
+        return [measurement.role.value]
+
     def _refresh_file_table(self) -> None:
         """Show each loaded file's verdict and the role it currently carries."""
 
@@ -3256,27 +3339,16 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
             verdict = None
             marks = []
             if record is not None:
+                row_role = measurement.role if measurement is not None else None
                 verdict = triage_for_role(
                     record.triage,
-                    measurement.role if measurement is not None else None,
+                    row_role,
+                    self.campaign.partner_peak(path, row_role),
                 )
                 marks.append(verdict.label.upper())
                 if record.triage.saturation.anomalous_pixels:
                     marks.append(f"{record.triage.saturation.anomalous_pixels} anomalies")
-            if measurement is None:
-                # One spot, not six (owner, 2026-08-16): "SUGGESTED ONLY — no
-                # role assigned" spelled out on every row filled the table with
-                # one sentence repeated, and it was already said twice over —
-                # by the amber border the Role control wears, and by the
-                # Confirm button that counts them. A row says what it is; the
-                # colour says whether anybody has confirmed it.
-                marks.append(
-                    _SUGGESTED_BADGE.lower() if path in suggested else "no role yet"
-                )
-            elif measurement.lamp_family:
-                marks.append(f"{measurement.lamp_family} {measurement.role.value}")
-            else:
-                marks.append(measurement.role.value)
+            marks.extend(self._role_marks(measurement, verdict, path in suggested))
             if path == getattr(self.session.frame, "path", None):
                 marks.append("open")
             item = self.file_table.item(row, 0)
@@ -3409,6 +3481,49 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
             self._fit_checklist_row(row, label, width)
         self._refresh_next_step()
 
+    def _next_action_for(self, step) -> tuple[str, object] | None:
+        """The verb that performs one checklist step, and what performs it.
+
+        Every one of these already existed as a button somewhere on the bench.
+        What was missing was any relationship between the row that says a step
+        is next and the control that does it.
+        """
+
+        key = step.key
+        if key in {"files", "references"}:
+            return ("Add SIF files…", self._pick_files)
+        if self.campaign is not None and self.campaign.unconfirmed_suggestions():
+            # Whatever the row is, nothing can be assigned until the roles are.
+            pending = len(self.campaign.unconfirmed_suggestions())
+            return (f"Confirm {pending} role(s)", self._confirm_suggested_roles)
+        if key == "sphere-comparison":
+            return ("Measure sensitivity", self._start_sphere_comparison)
+        if key == "alignment":
+            return ("Auto-anchor lines", self._auto_anchor)
+        if key == "tomls":
+            return ("Save alignment settings", lambda: self._generate_tomls())
+        if key == "snapshot":
+            return ("Save and validate", self._save_snapshot)
+        return None
+
+    def _set_next_action(self, step) -> None:
+        """Put the verb for this step on the button beside it."""
+
+        action = None if step is None else self._next_action_for(step)
+        if action is None:
+            self.next_step_button.setVisible(False)
+            self._next_action = None
+            return
+        label, handler = action
+        self._next_action = handler
+        self.next_step_button.setText(label)
+        self.next_step_button.setVisible(True)
+
+    def _run_next_action(self) -> None:
+        handler = getattr(self, "_next_action", None)
+        if handler is not None:
+            handler()
+
     def _refresh_next_step(self) -> None:
         """The one line the checklist is usually consulted for.
 
@@ -3428,6 +3543,7 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
             self.next_step_value.setText(
                 "Next: nothing — every step of the procedure is done."
             )
+            self._set_next_action(None)
             self._explainable(
                 self.next_step_value,
                 "The procedure is complete",
@@ -3440,6 +3556,7 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         self.next_step_value.setText(
             f"Next: {step.label} — {step.unblocked_by or step.detail}"
         )
+        self._set_next_action(step)
         self._explainable(
             self.next_step_value,
             f"Next step — {step.label}",

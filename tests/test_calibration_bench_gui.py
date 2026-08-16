@@ -436,7 +436,14 @@ def test_confirming_the_prefilled_role_assigns_it(qt_app, tmp_path):
     assert (
         window.campaign.measurements[source].role is MeasurementRole.SPHERE_BACKGROUND
     )
-    assert "sphere-background" in window.file_table.item(0, 0).text()
+    # The confirmed role now reads as the verdict "BACKGROUND" rather than the
+    # role token repeated beside it: a background frame's verdict already names
+    # what it is, and saying "sphere-background" next to it was the same word
+    # twice (owner, 2026-08-16).
+    assert "BACKGROUND" in window.file_table.item(0, 0).text()
+    assert window.campaign.measurements[source].role is (
+        MeasurementRole.SPHERE_BACKGROUND
+    )
     assert not _SUGGESTED_COLOR_IN(role_combo)
     window.close()
 
