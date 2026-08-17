@@ -440,6 +440,10 @@ def test_overlay_toggle_marks_the_detector_image_where_the_spectrum_says(qt_app,
     has flipped them, because this fixture's wavelength falls with column as
     the black Echelle's does.  Agreement between the two is the flip
     convention holding end to end.
+
+    The spectrum shows an overlapping line once; the image shows both blobs the
+    overlap exposes.  So the coordinate the spectrum reports is the coordinate
+    of the **primary** box, and the twin is checked against the pattern only.
     """
 
     _settle_calibrations(qt_app, window)
@@ -452,6 +456,7 @@ def test_overlay_toggle_marks_the_detector_image_where_the_spectrum_says(qt_app,
     # Off by default, and costing nothing while it is off.
     assert not any(overlays.is_family_visible(family) for family in window.line_overlay_checks)
     assert all(overlays.item(family) is None for family in window.line_overlay_checks)
+    assert all(overlays.duplicate_item(family) is None for family in window.line_overlay_checks)
 
     window.line_overlay_checks["balmer"].setChecked(True)
 
@@ -464,20 +469,70 @@ def test_overlay_toggle_marks_the_detector_image_where_the_spectrum_says(qt_app,
 
     spectra = window.spectra
     for mark in marks:
-        index = int(np.argmin(np.abs(spectra.wavelength - mark.wavelength_nm)))
-        assert spectra.wavelength[index] == pytest.approx(mark.wavelength_nm, abs=0.5)
-        assert int(spectra.echelle_order[index]) == mark.order
-        assert float(spectra.detector_pixel[index]) == pytest.approx(mark.column, abs=1.0)
-        # The row band comes from the pattern, not from the wavelength table.
+        # Every box, twin included, sits on its own order's trace.
         column = int(round(mark.column))
         assert mark.row == pytest.approx(
             _order_centers(CMOS_SHAPE)[column, mark.order_index], abs=0.5
         )
+        # And its band reaches past the extraction rows toward the neighbour.
+        assert mark.half_height >= DV
+        if not mark.primary:
+            continue
+        index = int(np.argmin(np.abs(spectra.wavelength - mark.wavelength_nm)))
+        assert spectra.wavelength[index] == pytest.approx(mark.wavelength_nm, abs=0.5)
+        assert int(spectra.echelle_order[index]) == mark.order
+        assert float(spectra.detector_pixel[index]) == pytest.approx(mark.column, abs=1.0)
+
+    # This fixture's orders overlap by 20 nm, so some line is boxed twice — the
+    # blob the shipped single-ownership rule left unmarked.
+    duplicates = overlays.duplicate_marks("balmer")
+    assert duplicates
+    assert overlays.duplicate_item("balmer").isVisible()
+    assert "doubled in order overlaps" in window.statusBar().currentMessage()
+    for twin in duplicates:
+        siblings = [
+            mark for mark in overlays.primary_marks("balmer")
+            if mark.wavelength_nm == twin.wavelength_nm
+        ]
+        assert len(siblings) == 1
+        assert siblings[0].order_index != twin.order_index
 
     window.line_overlay_checks["balmer"].setChecked(False)
     assert overlays.marks("balmer") == ()
     assert not overlays.item("balmer").isVisible()
+    assert not overlays.duplicate_item("balmer").isVisible()
     assert not window.line_overlays.is_family_visible("balmer")
+
+
+def test_order_trace_toggle_draws_the_loaded_pattern(qt_app, window):
+    """The bench's order traces, on the main window's image, behind one check."""
+
+    _settle_calibrations(qt_app, window)
+    spy = LoadSpy(window)
+    _load(qt_app, window, "5008_cmos.SIF", spy, attempts=1)
+
+    traces = window.order_trace_overlay
+    assert window.order_trace_check.isChecked() is False
+    assert traces.is_visible is False
+    assert traces.item() is None
+
+    window.order_trace_check.setChecked(True)
+    assert traces.is_visible is True
+    assert traces.order_count() == ORDER_COUNT
+    assert traces.item().isVisible()
+    assert "Order traces shown" in window.statusBar().currentMessage()
+
+    columns, rows = traces.item().getData()
+    pattern = _order_centers(CMOS_SHAPE)
+    width = CMOS_SHAPE[0]
+    for order in range(ORDER_COUNT):
+        start = order * (width + 1)
+        assert rows[start : start + width] == pytest.approx(pattern[:, order] + 0.5)
+        assert np.isnan(rows[start + width])
+
+    window.order_trace_check.setChecked(False)
+    assert traces.order_count() == 0
+    assert not traces.item().isVisible()
 
 
 def test_failed_load_clears_the_detector_marks(qt_app, window):
@@ -487,8 +542,14 @@ def test_failed_load_clears_the_detector_marks(qt_app, window):
     spy = LoadSpy(window)
     _load(qt_app, window, "5007_cmos.SIF", spy, attempts=1)
     window.line_overlay_checks["balmer"].setChecked(True)
+    window.order_trace_check.setChecked(True)
     assert window.detector_line_overlays.marks("balmer")
+    assert window.order_trace_overlay.order_count() == ORDER_COUNT
 
     _load(qt_app, window, UNREADABLE_NAME, spy, attempts=2)
     assert window.detector_line_overlays.geometry is None
     assert window.detector_line_overlays.marks("balmer") == ()
+    # The pattern belongs to the frame that is gone, too.
+    assert window.order_trace_overlay.geometry is None
+    assert window.order_trace_overlay.order_count() == 0
+    assert not window.order_trace_overlay.item().isVisible()

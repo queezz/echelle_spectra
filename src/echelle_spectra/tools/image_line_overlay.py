@@ -7,7 +7,7 @@ per-order wavelength solution sampled at every column, and the order pattern
 giving that order's centre row at every column — so inverting the solution
 turns a catalog wavelength into a ``(column, row)`` on the sensor.
 
-Two conventions this module keeps rather than re-derives:
+Three conventions this module keeps rather than re-derives:
 
 * ``detector_pixel`` is the **pre-flip raw column**.  ``Spectrum`` flips its
   stitched 1-D arrays when ``direction < 0`` (wavelength falling with column on
@@ -15,9 +15,21 @@ Two conventions this module keeps rather than re-derives:
   The image is never flipped, and neither is ``clbr.order_wavel``, which is
   indexed by raw column.  Inverting it therefore lands on the raw column
   directly — applying the flip here would mirror every mark.
-* Which order owns a wavelength is decided by ``clbr.order_borders``, the same
-  mask that stitches the 1-D spectrum, so a line in the overlap of two orders
-  is marked on the order the spectrum plot actually shows it from.
+* In an echelle overlap the same wavelength is **physically exposed twice**, on
+  two adjacent orders, and the image shows both blobs.  So the image marks both:
+  ``clbr.order_borders`` — the mask that stitches the 1-D spectrum — decides
+  which of the two is the *primary* mark, and the twin is drawn beside it in a
+  secondary pen rather than hidden.  Hiding it, as this module first shipped,
+  left a real blob unmarked and made the mark on the stitch owner read as
+  misplaced.
+* The mark is a **box, not a bracket**.  The first shipping drew two ticks just
+  outside the extraction band, which on this instrument's fat PSF is inside the
+  blob: measured on ``local/20250926_calib/Ne-0.02s-x3-bright-lines.sif`` a Ne
+  line is ~6 px FWHM across columns but ~26 px FWHM down rows, while the
+  extraction band is only ``2*dv+1 = 17`` px.  Ticks at ±8..±12 rows were being
+  painted over the brightest pixels of the very blob they marked.  The box now
+  spans the order's band out to the neighbouring traces, so its edges land in
+  the dark gutter between orders where they can be seen.
 """
 
 from __future__ import annotations
@@ -26,14 +38,17 @@ from dataclasses import dataclass
 
 import numpy as np
 import pyqtgraph as pg
+from PyQt5 import QtCore
 
 from .line_catalog import LINE_FAMILIES, SpectralLine
 from .line_overlay import LINE_OVERLAY_STYLES, select_overlay_lines
 
 __all__ = [
+    "DEFAULT_LINE_WIDTH_PX",
     "DetectorGeometry",
     "DetectorLineMark",
     "DetectorLineOverlay",
+    "OrderTraceOverlay",
 ]
 
 #: A detector pixel spans ``[index, index + 1)`` in image coordinates, so a mark
@@ -42,10 +57,37 @@ __all__ = [
 #: wavelength solution, the pattern, and ``detector_pixel`` all speak.
 _PIXEL_CENTER = 0.5
 
+#: Rough line width in columns, the box's full width.  Measured on the owner's
+#: bright Ne frame ``local/20250926_calib/Ne-0.02s-x3-bright-lines.sif``: over 26
+#: unsaturated Ne blobs the column FWHM was 6.0 px (median, 6.0 px at the 90th
+#: percentile), so ~2x FWHM is 12 px.  Wide enough that a box wraps its blob with
+#: visible margin, narrow enough that neighbouring lines 20 px apart keep their
+#: own boxes.
+DEFAULT_LINE_WIDTH_PX = 12.0
+
+#: Order traces on the detector image, matching the calibration bench's own
+#: detector view (``calibration_bench_gui._refresh_pattern_traces``) so the two
+#: windows draw the same thing the same way.
+ORDER_TRACE_COLOR = "#7b91a4"
+ORDER_TRACE_WIDTH = 0.9
+
+
+def _brighter(color: str, amount: float = 0.45) -> str:
+    """Blend a family colour toward white so it reads over saturated pixels."""
+
+    red, green, blue, _alpha = pg.mkColor(color).getRgb()
+    lift = lambda value: int(round(value + (255 - value) * amount))
+    return "#{:02x}{:02x}{:02x}".format(lift(red), lift(green), lift(blue))
+
 
 @dataclass(frozen=True)
 class DetectorLineMark:
-    """Where one catalog line is expected to land on the sensor."""
+    """Where one catalog line is expected to land on the sensor.
+
+    ``primary`` is ``True`` for the order the stitched 1-D spectrum takes this
+    wavelength from, and ``False`` for the twin the overlap exposes on the
+    neighbouring order.
+    """
 
     family: str
     label: str
@@ -55,6 +97,8 @@ class DetectorLineMark:
     column: float
     row: float
     half_height: float
+    half_width: float = DEFAULT_LINE_WIDTH_PX / 2.0
+    primary: bool = True
 
 
 class DetectorGeometry:
@@ -68,6 +112,7 @@ class DetectorGeometry:
         order_ids=None,
         order_borders=None,
         half_height: float = 8.0,
+        line_width_px: float = DEFAULT_LINE_WIDTH_PX,
     ):
         pattern = np.asarray(pattern, dtype=float)
         order_wavel = np.asarray(order_wavel, dtype=float)
@@ -83,17 +128,25 @@ class DetectorGeometry:
         self.columns = int(pattern.shape[0])
         self.order_count = int(pattern.shape[1])
         self.half_height = float(half_height)
+        self.half_width = float(line_width_px) / 2.0
 
         ids = np.asarray(order_ids if order_ids is not None else range(self.order_count))
         if ids.size != self.order_count:
             ids = np.arange(self.order_count)
         self.order_ids = tuple(int(value) for value in ids)
 
-        # One inverted solution per order: wavelengths ascending beside the raw
-        # columns they came from, so a monotonically falling order inverts with
-        # the same interpolation as a rising one.
+        # Two inverted solutions per order, wavelengths ascending beside the raw
+        # columns they came from so a falling order inverts like a rising one.
+        # ``_carried`` is every column the order actually exposes — that is what
+        # the image shows, overlap twins included.  ``_owned`` is the same
+        # solution trimmed by the stitch mask, and answers only "which of the
+        # two orders does the 1-D spectrum read this wavelength from".
         self._grid = np.arange(self.columns, dtype=float)
-        self._solutions: list[tuple[np.ndarray, np.ndarray] | None] = []
+        self._carried = self._invert(None)
+        self._owned = self._carried if order_borders is None else self._invert(order_borders)
+
+    def _invert(self, order_borders):
+        solutions: list[tuple[np.ndarray, np.ndarray] | None] = []
         for index in range(self.order_count):
             wavelengths = self.order_wavel[index]
             usable = np.isfinite(wavelengths)
@@ -102,13 +155,16 @@ class DetectorGeometry:
             columns = self._grid[usable]
             values = wavelengths[usable]
             if values.size < 2:
-                self._solutions.append(None)
+                solutions.append(None)
                 continue
             ascending = np.argsort(values)
-            self._solutions.append((values[ascending], columns[ascending]))
+            solutions.append((values[ascending], columns[ascending]))
+        return solutions
 
     @classmethod
-    def from_calibration(cls, calibration) -> "DetectorGeometry | None":
+    def from_calibration(
+        cls, calibration, *, line_width_px: float = DEFAULT_LINE_WIDTH_PX
+    ) -> "DetectorGeometry | None":
         """Read a started :class:`~echelle_spectra.tools.echelle.Calibrations`.
 
         Returns ``None`` for anything that cannot answer the question — a
@@ -129,6 +185,7 @@ class DetectorGeometry:
                 order_ids=getattr(calibration, "order_ids", None),
                 order_borders=getattr(calibration, "order_borders", None),
                 half_height=float(getattr(calibration, "dv", 8)),
+                line_width_px=line_width_px,
             )
         except (ValueError, TypeError, IndexError):
             return None
@@ -136,7 +193,7 @@ class DetectorGeometry:
     def wavelength_span(self) -> tuple[float, float] | None:
         """The nanometre range the whole detector can show, or ``None``."""
 
-        spans = [solution[0] for solution in self._solutions if solution is not None]
+        spans = [solution[0] for solution in self._carried if solution is not None]
         if not spans:
             return None
         return (
@@ -147,7 +204,10 @@ class DetectorGeometry:
     def column_for(self, order_index: int, wavelength_nm: float) -> float | None:
         """Invert one order's wavelength solution; ``None`` when out of range."""
 
-        solution = self._solutions[order_index]
+        return self._column_from(self._carried[order_index], wavelength_nm)
+
+    @staticmethod
+    def _column_from(solution, wavelength_nm: float) -> float | None:
         if solution is None:
             return None
         values, columns = solution
@@ -161,52 +221,123 @@ class DetectorGeometry:
 
         return float(np.interp(column, self._grid, self.pattern[:, order_index]))
 
-    def mark_for(self, line: SpectralLine) -> DetectorLineMark | None:
-        """Place one catalog line, or ``None`` when no order carries it."""
+    def band_half_height(self, order_index: int, column: float) -> float:
+        """Half the order's band at one column: the reach to its neighbour.
 
+        The extraction band is only ``±dv`` rows, but the light is not — a line
+        on this instrument runs ~26 px FWHM down the rows against a 17-px
+        extraction band.  Taking half the distance to the nearer neighbouring
+        trace gives a box that wraps the whole blob and stops in the dark gutter
+        between orders, and never reaches into the neighbour's own band.  It is
+        floored at ``±dv`` so the box always contains the rows the spectrum was
+        actually extracted from, and falls back to it when there is no
+        neighbour to measure against.
+        """
+
+        center = self.row_at(order_index, column)
+        gaps = [
+            abs(self.row_at(index, column) - center)
+            for index in (order_index - 1, order_index + 1)
+            if 0 <= index < self.order_count
+        ]
+        if not gaps:
+            return self.half_height
+        return max(self.half_height, min(gaps) / 2.0)
+
+    def _mark(self, line: SpectralLine, index: int, column: float, primary: bool):
+        return DetectorLineMark(
+            family=line.family,
+            label=line.label,
+            wavelength_nm=float(line.wavelength_nm),
+            order=self.order_ids[index],
+            order_index=index,
+            column=column,
+            row=self.row_at(index, column),
+            half_height=self.band_half_height(index, column),
+            half_width=self.half_width,
+            primary=primary,
+        )
+
+    def owner_index(self, wavelength_nm: float) -> int | None:
+        """Which order the stitched 1-D spectrum reads this wavelength from."""
+
+        for index in range(self.order_count):
+            if self._column_from(self._owned[index], wavelength_nm) is not None:
+                return index
+        return None
+
+    def marks_for_line(self, line: SpectralLine) -> tuple[DetectorLineMark, ...]:
+        """Place one catalog line on **every** order that exposes it.
+
+        An echelle overlap puts the same line on two adjacent orders, and the
+        detector shows both blobs.  The one the stitch mask owns comes back
+        ``primary``; its twin comes back as a duplicate.  When the trimmed mask
+        owns none of them — a wavelength that falls in the seam itself — the
+        first carrying order is named primary so a line is never all-duplicate.
+        """
+
+        owner = self.owner_index(line.wavelength_nm)
+        placed = []
         for index in range(self.order_count):
             column = self.column_for(index, line.wavelength_nm)
             if column is None:
                 continue
-            return DetectorLineMark(
-                family=line.family,
-                label=line.label,
-                wavelength_nm=float(line.wavelength_nm),
-                order=self.order_ids[index],
-                order_index=index,
-                column=column,
-                row=self.row_at(index, column),
-                half_height=self.half_height,
-            )
+            placed.append((index, column))
+        if not placed:
+            return ()
+        if owner is None or owner not in [index for index, _ in placed]:
+            owner = placed[0][0]
+        return tuple(
+            self._mark(line, index, column, index == owner) for index, column in placed
+        )
+
+    def mark_for(self, line: SpectralLine) -> DetectorLineMark | None:
+        """The primary mark for one line, or ``None`` when no order carries it."""
+
+        for mark in self.marks_for_line(line):
+            if mark.primary:
+                return mark
         return None
 
     def marks_for(self, lines) -> tuple[DetectorLineMark, ...]:
-        """Place every catalog line that lands on the sensor, once each."""
+        """Place every catalog line that lands on the sensor, twins included."""
 
-        placed = (self.mark_for(line) for line in lines)
-        return tuple(mark for mark in placed if mark is not None)
+        return tuple(mark for line in lines for mark in self.marks_for_line(line))
 
 
 class DetectorLineOverlay:
-    """Pooled per-family tick marks over the 2-D detector image.
+    """Pooled per-family line boxes over the 2-D detector image.
 
-    One :class:`pyqtgraph.PlotDataItem` per family carries every mark of that
-    family as disconnected segments, so a family costs one item and one draw
-    call however many lines it places.  Nothing is created until a family is
-    first switched on, and nothing recomputes on pan or zoom: the marks depend
-    on the calibration and the toggles, and on nothing else.
+    At most two :class:`pyqtgraph.PlotDataItem` per family — one for the marks
+    the stitched spectrum owns, one for the twins an order overlap exposes on
+    the neighbouring order — each carrying every box of that kind as
+    disconnected segments.  So a family costs two items and two draw calls
+    however many lines it places.  Nothing is created until a family is first
+    switched on, and nothing recomputes on pan or zoom: the marks depend on the
+    calibration and the toggles, and on nothing else.
+
+    ``line_width_px`` is handed to any geometry this overlay builds itself from
+    a calibration.  A :class:`DetectorGeometry` passed in ready-made already
+    carries its own, and keeps it — the box's extent belongs to the geometry
+    that measured it, not to the widget drawing it.
     """
 
-    def __init__(self, plot, *, max_marks: int = 200, tick_px: float = 4.0):
+    def __init__(
+        self,
+        plot,
+        *,
+        max_marks: int = 200,
+        line_width_px: float = DEFAULT_LINE_WIDTH_PX,
+    ):
         self._plot = plot
         self._geometry: DetectorGeometry | None = None
         self._visible = {family: False for family in LINE_FAMILIES}
-        self._items: dict[str, pg.PlotDataItem] = {}
+        self._items: dict[tuple[str, bool], pg.PlotDataItem] = {}
         self._marks: dict[str, tuple[DetectorLineMark, ...]] = {
             family: () for family in LINE_FAMILIES
         }
         self.max_marks = int(max_marks)
-        self.tick_px = float(tick_px)
+        self.line_width_px = float(line_width_px)
 
     @property
     def geometry(self) -> DetectorGeometry | None:
@@ -222,12 +353,19 @@ class DetectorLineOverlay:
         if source is None or isinstance(source, DetectorGeometry):
             self._geometry = source
         else:
-            self._geometry = DetectorGeometry.from_calibration(source)
+            self._geometry = DetectorGeometry.from_calibration(
+                source, line_width_px=self.line_width_px
+            )
         self.refresh()
         return self._geometry is not None
 
     def set_family_visible(self, family: str, visible: bool) -> int:
-        """Show or hide one family; returns how many marks are now drawn."""
+        """Show or hide one family; returns how many **lines** are now drawn.
+
+        A line doubled across an order overlap is one line with two boxes, so
+        the count the status bar reports is the number of primary marks.  Ask
+        :meth:`duplicate_count` for the twins.
+        """
 
         key = family.strip().lower()
         if key not in self._visible:
@@ -235,20 +373,41 @@ class DetectorLineOverlay:
             raise ValueError(f"unknown line family {family!r}; known families: {known}")
         self._visible[key] = bool(visible)
         self.refresh(key)
-        return len(self._marks[key])
+        return self.line_count(key)
 
     def is_family_visible(self, family: str) -> bool:
         return self._visible[family]
 
     def marks(self, family: str) -> tuple[DetectorLineMark, ...]:
-        """The marks currently drawn for one family, primarily for QA."""
+        """Every box currently drawn for one family, primarily for QA."""
 
         return self._marks[family]
 
-    def item(self, family: str) -> pg.PlotDataItem | None:
-        """The pooled item for one family, or ``None`` while it costs nothing."""
+    def primary_marks(self, family: str) -> tuple[DetectorLineMark, ...]:
+        return tuple(mark for mark in self._marks[family] if mark.primary)
 
-        return self._items.get(family)
+    def duplicate_marks(self, family: str) -> tuple[DetectorLineMark, ...]:
+        return tuple(mark for mark in self._marks[family] if not mark.primary)
+
+    def line_count(self, family: str) -> int:
+        """How many catalog lines this family currently marks."""
+
+        return len(self.primary_marks(family))
+
+    def duplicate_count(self, family: str) -> int:
+        """How many of those lines are doubled onto a neighbouring order."""
+
+        return len(self.duplicate_marks(family))
+
+    def item(self, family: str) -> pg.PlotDataItem | None:
+        """The pooled primary item, or ``None`` while it costs nothing."""
+
+        return self._items.get((family, True))
+
+    def duplicate_item(self, family: str) -> pg.PlotDataItem | None:
+        """The pooled overlap-twin item, or ``None`` while it costs nothing."""
+
+        return self._items.get((family, False))
 
     def refresh(self, family: str | None = None) -> None:
         """Redraw after a toggle or a calibration change — never on a view change."""
@@ -259,17 +418,19 @@ class DetectorLineOverlay:
     def _refresh_family(self, family: str) -> None:
         marks = self._compute(family) if self._visible[family] else ()
         self._marks[family] = marks
-        item = self._items.get(family)
-        if not marks:
-            if item is not None:
-                item.setData(x=[], y=[])
-                item.setVisible(False)
-            return
-        if item is None:
-            item = self._create_item(family)
-        columns, rows = self._segments(marks)
-        item.setData(x=columns, y=rows, connect="pairs")
-        item.setVisible(True)
+        for primary in (True, False):
+            subset = [mark for mark in marks if mark.primary is primary]
+            item = self._items.get((family, primary))
+            if not subset:
+                if item is not None:
+                    item.setData(x=[], y=[])
+                    item.setVisible(False)
+                continue
+            if item is None:
+                item = self._create_item(family, primary)
+            columns, rows = self._segments(subset)
+            item.setData(x=columns, y=rows, connect="pairs")
+            item.setVisible(True)
 
     def _compute(self, family: str) -> tuple[DetectorLineMark, ...]:
         if self._geometry is None:
@@ -280,27 +441,147 @@ class DetectorLineOverlay:
         lines = select_overlay_lines(family, span[0], span[1], max_labels=self.max_marks)
         return self._geometry.marks_for(lines)
 
-    def _create_item(self, family: str) -> pg.PlotDataItem:
+    def _create_item(self, family: str, primary: bool) -> pg.PlotDataItem:
         style = LINE_OVERLAY_STYLES[family]
-        item = pg.PlotDataItem(pen=pg.mkPen(style.color, width=1.2), connect="pairs")
-        item.setZValue(20)
+        if primary:
+            pen = pg.mkPen(_brighter(style.color), width=2.0)
+        else:
+            # Same hue, unmistakably secondary: the twin an overlap exposes is
+            # real light, but the stitched spectrum is not reading it from here.
+            pen = pg.mkPen(style.color, width=2.0, style=QtCore.Qt.DashLine)
+            pen.setDashPattern([float(value) for value in style.dash])
+        item = pg.PlotDataItem(pen=pen, connect="pairs", antialias=False)
+        item.setZValue(20 if primary else 19)
         self._plot.addItem(item, ignoreBounds=True)
-        self._items[family] = item
+        self._items[(family, primary)] = item
         return item
 
     def _segments(self, marks) -> tuple[np.ndarray, np.ndarray]:
-        """Bracket each line with two short ticks, leaving the order band clear."""
+        """One open rectangle per line: four ``connect="pairs"`` edges.
 
-        columns = np.repeat([mark.column + _PIXEL_CENTER for mark in marks], 4)
-        rows = np.empty(len(marks) * 4, dtype=float)
+        Width is a rough line width; height is the order's band at that column.
+        The box is not filled — the point is to ring the blob, never to hide it.
+        """
+
+        columns = np.empty(len(marks) * 8, dtype=float)
+        rows = np.empty(len(marks) * 8, dtype=float)
         for index, mark in enumerate(marks):
-            center = mark.row + _PIXEL_CENTER
-            low = center - mark.half_height
-            high = center + mark.half_height
-            rows[4 * index : 4 * index + 4] = (
-                low - self.tick_px,
-                low,
-                high,
-                high + self.tick_px,
+            left = mark.column + _PIXEL_CENTER - mark.half_width
+            right = mark.column + _PIXEL_CENTER + mark.half_width
+            low = mark.row + _PIXEL_CENTER - mark.half_height
+            high = mark.row + _PIXEL_CENTER + mark.half_height
+            columns[8 * index : 8 * index + 8] = (
+                left, right,  # bottom edge
+                right, right,  # right edge
+                right, left,  # top edge
+                left, left,  # left edge
             )
+            rows[8 * index : 8 * index + 8] = (
+                low, low,
+                low, high,
+                high, high,
+                high, low,
+            )
+        return columns, rows
+
+
+class OrderTraceOverlay:
+    """The order pattern drawn over the detector image, as one pooled curve.
+
+    The calibration bench shows the same traces on its own detector view; this
+    is that view's answer for the main window, where the operator is checking
+    that the frame in front of him sits on the calibration he loaded.  Every
+    order lives in a single :class:`pyqtgraph.PlotDataItem` joined by ``NaN``
+    gaps and ``connect="finite"``, so the whole pattern costs one item and one
+    draw call.  Off by default, nothing built until it is switched on, and
+    nothing recomputed on pan or zoom.
+    """
+
+    def __init__(
+        self,
+        plot,
+        *,
+        color: str = ORDER_TRACE_COLOR,
+        width: float = ORDER_TRACE_WIDTH,
+    ):
+        self._plot = plot
+        self._geometry: DetectorGeometry | None = None
+        self._item: pg.PlotDataItem | None = None
+        self._visible = False
+        self.color = color
+        self.width = float(width)
+
+    @property
+    def geometry(self) -> DetectorGeometry | None:
+        return self._geometry
+
+    @property
+    def is_visible(self) -> bool:
+        return self._visible
+
+    def item(self) -> pg.PlotDataItem | None:
+        """The pooled curve, or ``None`` while the overlay costs nothing."""
+
+        return self._item
+
+    def order_count(self) -> int:
+        """How many traces are currently drawn."""
+
+        if not self._visible or self._geometry is None:
+            return 0
+        return self._geometry.order_count
+
+    def set_geometry(self, source) -> bool:
+        """Adopt a freshly loaded calibration's pattern, or drop a stale one."""
+
+        if source is None or isinstance(source, DetectorGeometry):
+            self._geometry = source
+        else:
+            self._geometry = DetectorGeometry.from_calibration(source)
+        self.refresh()
+        return self._geometry is not None
+
+    def set_visible(self, visible: bool) -> int:
+        """Show or hide the traces; returns how many orders are now drawn."""
+
+        self._visible = bool(visible)
+        self.refresh()
+        return self.order_count()
+
+    def refresh(self) -> None:
+        columns, rows = self._curve()
+        if columns is None:
+            if self._item is not None:
+                self._item.setData(x=[], y=[])
+                self._item.setVisible(False)
+            return
+        if self._item is None:
+            self._item = pg.PlotDataItem(
+                pen=pg.mkPen(self.color, width=self.width),
+                connect="finite",
+                antialias=False,
+            )
+            self._item.setZValue(10)
+            self._plot.addItem(self._item, ignoreBounds=True)
+        self._item.setData(x=columns, y=rows, connect="finite")
+        self._item.setVisible(True)
+
+    def _curve(self):
+        """Every trace end to end, separated by a ``NaN`` the pen does not cross."""
+
+        if not self._visible or self._geometry is None:
+            return None, None
+        pattern = self._geometry.pattern
+        span = np.arange(pattern.shape[0], dtype=float) + _PIXEL_CENTER
+        gap = np.array([np.nan])
+        columns = np.concatenate(
+            [value for _ in range(pattern.shape[1]) for value in (span, gap)]
+        )
+        rows = np.concatenate(
+            [
+                value
+                for index in range(pattern.shape[1])
+                for value in (pattern[:, index] + _PIXEL_CENTER, gap)
+            ]
+        )
         return columns, rows

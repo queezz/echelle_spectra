@@ -14,7 +14,7 @@ from .resources import window_layout
 from .tools import echelle as ech
 from .tools import emissionbands as eb
 from .tools import emissiondata as ebd
-from .tools.image_line_overlay import DetectorLineOverlay
+from .tools.image_line_overlay import DetectorLineOverlay, OrderTraceOverlay
 from .tools.line_overlay import LineOverlayManager
 
 # What one camera's attempt at one file ended up seeing.  A single "it did not
@@ -99,6 +99,8 @@ class EchelleSpectraGUI(QMainWindow, window_layout.Ui_MainWindow):
         # The same five toggles also drive the 2-D image: one control per
         # family, both views.  Nothing is drawn until a family is switched on.
         self.detector_line_overlays = DetectorLineOverlay(self.p1)
+        # And its own toggle for the order pattern underneath them.
+        self.order_trace_overlay = OrderTraceOverlay(self.p1)
 
         # define initial class attributes
         self.config = config
@@ -177,11 +179,13 @@ class EchelleSpectraGUI(QMainWindow, window_layout.Ui_MainWindow):
             checkbox.toggled.connect(
                 lambda visible, key=family: self.set_line_overlay(key, visible)
             )
+        self.order_trace_check.toggled.connect(self.set_order_traces)
 
     def set_line_overlay(self, family, visible):
         """Toggle one known-line family on both the spectra and the image."""
         self.line_overlays.set_family_visible(family, visible)
-        marks = self.detector_line_overlays.set_family_visible(family, visible)
+        lines = self.detector_line_overlays.set_family_visible(family, visible)
+        doubled = self.detector_line_overlays.duplicate_count(family)
         label = self.line_overlay_checks[family].text()
         if not visible:
             self.statusBar().showMessage(f"{label} lines hidden.")
@@ -190,8 +194,25 @@ class EchelleSpectraGUI(QMainWindow, window_layout.Ui_MainWindow):
                 f"{label} lines shown; the detector image is marked once an image loads."
             )
         else:
+            # An order overlap exposes the same line twice, and the image boxes
+            # both — so say how many lines, then how many are doubled.
+            twins = f", {doubled} doubled in order overlaps" if doubled else ""
             self.statusBar().showMessage(
-                f"{label} lines shown — {marks} on the detector image."
+                f"{label} lines shown — {lines} on the detector image{twins}."
+            )
+
+    def set_order_traces(self, visible):
+        """Toggle the calibration's order pattern over the detector image."""
+        orders = self.order_trace_overlay.set_visible(visible)
+        if not visible:
+            self.statusBar().showMessage("Order traces hidden.")
+        elif self.order_trace_overlay.geometry is None:
+            self.statusBar().showMessage(
+                "Order traces shown; the pattern is drawn once an image loads."
+            )
+        else:
+            self.statusBar().showMessage(
+                f"Order traces shown — {orders} orders on the detector image."
             )
 
     def update_paths(self):
@@ -562,6 +583,7 @@ class EchelleSpectraGUI(QMainWindow, window_layout.Ui_MainWindow):
         # The calibration this frame was extracted with is the one that says
         # where a wavelength lands on the sensor.
         self.detector_line_overlays.set_geometry(getattr(self.em, "clbr", None))
+        self.order_trace_overlay.set_geometry(getattr(self.em, "clbr", None))
 
         self._reset_frame()
         self._setup_frame()
@@ -595,6 +617,7 @@ class EchelleSpectraGUI(QMainWindow, window_layout.Ui_MainWindow):
         # No image, no geometry: stale marks must not outlive the frame they
         # were placed for.
         self.detector_line_overlays.set_geometry(None)
+        self.order_trace_overlay.set_geometry(None)
         message = self._load_failure_text(outcome)
         self.image_info_bw.setText(
             '<font size = 4 color = "#d1451b">{}</font>'.format(message)

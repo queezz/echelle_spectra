@@ -169,11 +169,24 @@ class Ui_MainWindow(object):
             checkbox.setObjectName(f"overlay_{family}")
             checkbox.setToolTip(
                 "Show markers from the shared, provenance-carrying line table:\n"
-                "labeled wavelength lines on the spectra, and expected line\n"
-                "positions bracketed on the 2-D detector image"
+                "labeled wavelength lines on the spectra, and a box around each\n"
+                "expected line position on the 2-D detector image.  A line an\n"
+                "order overlap exposes twice is boxed on both orders: solid on\n"
+                "the order the stitched spectrum reads it from, dashed on the twin"
             )
             self.line_overlay_checks[family] = checkbox
             self.w3.addWidget(checkbox, 13 + index // 2, index % 2)
+
+        # The order pattern itself, the same traces the calibration bench draws
+        # on its detector view.  Independent of the line boxes: it says where
+        # the orders are, not where a wavelength is.
+        self.order_trace_check = QtWidgets.QCheckBox("Order traces")
+        self.order_trace_check.setObjectName("overlay_order_traces")
+        self.order_trace_check.setToolTip(
+            "Draw the loaded calibration's order pattern over the detector\n"
+            "image, one trace per diffraction order, as on the calibration bench"
+        )
+        self.w3.addWidget(self.order_trace_check, 16, 0, 1, 2)
 
         self.controls_open = [
             self.btn_open,
