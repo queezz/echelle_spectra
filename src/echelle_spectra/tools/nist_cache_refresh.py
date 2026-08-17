@@ -57,7 +57,18 @@ DEFAULT_LOW_NM = 380.0
 DEFAULT_HIGH_NM = 810.0
 
 #: Species the package ships a cache for, in the order the files are written.
-PACKAGED_SPECIES = ("NeI", "NeII", "HgI", "HgII", "ArI", "ArII", "ThI", "ThII")
+PACKAGED_SPECIES = (
+    "NeI",
+    "NeII",
+    "HgI",
+    "HgII",
+    "ArI",
+    "ArII",
+    "ThI",
+    "ThII",
+    "XeI",
+    "XeII",
+)
 
 #: The exact ASD form settings that produce the packaged six-column export:
 #: ``obs_wl_air(nm) ritz_wl_air(nm) intens Aki(s^-1) Acc Type``.

@@ -313,6 +313,28 @@ class TestThePassIsHonestWhenItCannotRun:
         assert "no line catalog for Kr" in result.reason
         assert not session.anchors
 
+    def test_a_xenon_lamp_reports_that_nobody_has_vetted_a_xenon_line(self, tmp_path):
+        """The Xe catalog now exists; the vetting for it does not, and that is
+        what an auto pass says.
+
+        Xe is not Kr.  Krypton has no packaged catalog at all, and the bench
+        blames the package.  Xenon has one — 957 cached rows over the whole
+        detector — and what it does not have is a single row in the curated
+        wavelength table that somebody measured on this instrument and signed
+        for.  The refusal names that, rather than erroring or, worse, anchoring
+        against database lines under the vetted set's pedigree.
+        """
+
+        session = _session(tmp_path, lamp="Xe")
+
+        result = session.auto_anchor()
+
+        assert not result.ran
+        assert "packaged Xe catalog" in result.reason
+        assert "XeI, XeII" in result.reason
+        assert "cannot be auto-referenced" in result.reason
+        assert not session.anchors
+
     def test_a_table_carrying_no_vetted_rows_offers_the_manual_path(self, tmp_path):
         unvetted = tuple(
             CalibrationTableLine(0, 35.0, 45.0, 40.0, 640.0, "NeI", "?")

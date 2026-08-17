@@ -3521,3 +3521,167 @@ def test_the_saved_snapshot_confirmation_names_its_folder_and_opens_it(
 
     assert opened == [_Saved.root]
     window.close()
+
+
+# ----------------------------------------------------------------------
+# The Save tab answers its own buttons
+# ----------------------------------------------------------------------
+
+
+def _signal_only_window(tmp_path: Path) -> CalibrationBenchWindow:
+    """The owner's live 2019 state: sphere pair, Ne signal, no lamp background."""
+
+    window = _window(tmp_path)
+    paths = {}
+    for name in (
+        "pattern.txt",
+        "wavelength.txt",
+        "integral.txt",
+        "IS-1s.sif",
+        "IS_bg.sif",
+        "Ne_1s_10fr.sif",
+        "previous_sphere.sif",
+        "previous_sphere_bg.sif",
+    ):
+        path = tmp_path / name
+        path.write_text(name, encoding="utf-8")
+        paths[name] = path
+    campaign = CalibrationCampaignSession(
+        pattern_source=paths["pattern.txt"],
+        wavelength_source=paths["wavelength.txt"],
+        integral_source=paths["integral.txt"],
+        suggested_lamps=("Ne",),
+        previous_sphere=paths["previous_sphere.sif"],
+        previous_sphere_background=paths["previous_sphere_bg.sif"],
+    )
+    frame = window.session.frame
+    campaign.classify_file(paths["IS-1s.sif"], MeasurementRole.SPHERE, frame=frame)
+    campaign.classify_file(
+        paths["IS_bg.sif"], MeasurementRole.SPHERE_BACKGROUND, frame=frame
+    )
+    campaign.classify_file(
+        paths["Ne_1s_10fr.sif"], MeasurementRole.LAMP, lamp_family="Ne", frame=frame
+    )
+
+    def calculator(**values):
+        scale = 1.08 if "previous" not in values["sphere"].name else 1.0
+        return AbsoluteCalibrationResult(np.linspace(400, 700, 60), np.full(60, scale))
+
+    campaign.compute_sphere_comparison(calculator)
+    window.campaign = campaign
+    window.config_root = tmp_path / "configs"
+    window.output_root = tmp_path / "snapshots"
+    window.snapshot_id_edit.setText("20190314_cmos")
+    # The fit the owner had already solved when he pressed Save: it ran on the
+    # lamp signal alone, which is the whole point of the state under test.
+    assert window.session.fit_anchor_at(0, 26).accepted
+    assert window.session.fit_anchor_at(1, 56).accepted
+    window.refresh()
+    return window
+
+
+def _open_save_tab(window: CalibrationBenchWindow, qt_app) -> None:
+    tabs = window.control_tabs
+    names = [tabs.tabText(index) for index in range(tabs.count())]
+    tabs.setCurrentIndex(names.index("Save"))
+    qt_app.processEvents()
+
+
+def test_a_refused_save_is_read_where_the_button_that_refused_it_is(qt_app, tmp_path):
+    """Owner, live: "Doesn't save. No errors, terminal is silent."
+
+    It was never silent.  The bench refused in a full sentence and put it on
+    ``message_value``, which lives on the Lamp fit tab — so a press made from
+    the Save tab answered itself on a page nobody was looking at.  Both lines
+    carry the answer now, and the Save tab's one is on screen when the press
+    happens.
+    """
+
+    window = _signal_only_window(tmp_path)
+    # Nothing is classified as a lamp: this is a genuine refusal, not the
+    # signal-only case, which saves.
+    for path, record in list(window.campaign.measurements.items()):
+        if record.role is MeasurementRole.LAMP:
+            window.campaign.remove_classification(path)
+    window.show()
+    _open_save_tab(window, qt_app)
+
+    assert not window.message_value.isVisible(), "the fit tab's line is not on screen"
+    assert window.save_message_value.isVisible()
+
+    window._generate_tomls()
+    qt_app.processEvents()
+
+    refusal = window.save_message_value.text()
+    assert "were not saved" in refusal
+    assert "lamp signal" in refusal
+    # The one message line carries it too, and nothing suppressed it.
+    assert window.message_value.text() == refusal
+    assert window._role_notice == ""
+    window.close()
+
+
+def test_the_save_answer_is_set_after_the_refresh_that_could_bury_it(qt_app, tmp_path):
+    """A refusal is put on screen last, so no follow-up narration lands on top."""
+
+    window = _signal_only_window(tmp_path)
+    window.show()
+    _open_save_tab(window, qt_app)
+    # The bench's own narration, in the state where it would fire during the
+    # refresh that follows the press.
+    window._say_roles("Roles assigned from filenames: 3 file(s)")
+    narrated = []
+    original = window.refresh_campaign
+
+    def refresh_and_narrate():
+        original()
+        window._bench_says("Opened the assigned lamp signal for fitting.")
+        narrated.append(True)
+
+    window.refresh_campaign = refresh_and_narrate
+    window._generate_tomls()
+    qt_app.processEvents()
+
+    assert narrated, "the refresh under test never ran"
+    assert "Saved the alignment settings" in window.save_message_value.text()
+    assert window.save_message_value.text() == window.message_value.text()
+    window.close()
+
+
+def test_a_signal_only_2019_folder_saves_from_the_bench(qt_app, tmp_path):
+    """The whole live blocker, end to end through the surface."""
+
+    window = _signal_only_window(tmp_path)
+    window.show()
+    _open_save_tab(window, qt_app)
+
+    assert window.campaign.lamps_without_background() == ("Ne",)
+    window._generate_tomls()
+    qt_app.processEvents()
+
+    assert window.save_state_value.text() == "READY"
+    assert window.save_snapshot_button.isEnabled()
+    assert "Saved the alignment settings" in window.save_message_value.text()
+    assert window.toml_preview.toPlainText().startswith("#")
+    assert "background_shot = false" in window.toml_preview.toPlainText()
+    # And the next-step strip no longer points at a frame that does not exist.
+    assert "background" not in window.next_step_value.text()
+    window.close()
+
+
+def test_a_refused_save_from_the_bench_leaves_no_folders_behind(qt_app, tmp_path):
+    """The empty ``calibrations/configs`` a refusal used to leave is gone."""
+
+    window = _signal_only_window(tmp_path)
+    for path, record in list(window.campaign.measurements.items()):
+        if record.role is MeasurementRole.LAMP:
+            window.campaign.remove_classification(path)
+    window.show()
+    _open_save_tab(window, qt_app)
+
+    window._generate_tomls()
+    qt_app.processEvents()
+
+    assert not Path(window.config_root).exists()
+    assert "were not saved" in window.save_message_value.text()
+    window.close()

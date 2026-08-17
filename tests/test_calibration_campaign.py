@@ -49,6 +49,11 @@ from echelle_spectra.tools.calibration_alignment import (
     load_alignment_settings,
     load_wavelength_table,
 )
+from echelle_spectra.tools.line_catalog import load_line_table
+from echelle_spectra.tools.nist_lamp_calibration import (
+    lamp_species,
+    normalize_species_key,
+)
 
 try:
     import tomllib
@@ -1896,3 +1901,306 @@ class TestSphereFactorsCarryEachSpheresOwnExposure:
             np.asarray(short.wmsr, dtype=float),
             rtol=1e-12,
         )
+
+
+#: The owner's real 2019 folder, in its own dialect: "IS" is how he says
+#: integrating sphere, and the lamp was shot signal-only because in 2019 nobody
+#: shot lamp backgrounds.  Neither fact can be changed now — the frames are
+#: seven years old — so the bench has to read both.
+_REAL_2019_NAMES = (
+    "IS-1s.sif",
+    "IS_bg.sif",
+    "Ne_1s_10fr.sif",
+)
+
+
+def _real_2019_folder(tmp_path: Path) -> dict[str, Path]:
+    folder = tmp_path / "20190314"
+    folder.mkdir()
+    sources = {}
+    for name in _REAL_2019_NAMES:
+        path = folder / name
+        path.write_bytes((name + "\n").encode())
+        sources[name] = path
+    for name, text in (
+        ("pattern.txt", "pattern\n"),
+        ("wavelength.txt", _CURATED_TABLE),
+        ("integral.txt", "integral\n"),
+    ):
+        path = folder / name
+        path.write_text(text, encoding="utf-8")
+        sources[name] = path
+    return sources
+
+
+def _2019_campaign(sources: dict[str, Path]) -> CalibrationCampaignSession:
+    return CalibrationCampaignSession(
+        pattern_source=sources["pattern.txt"],
+        wavelength_source=sources["wavelength.txt"],
+        integral_source=sources["integral.txt"],
+        suggested_lamps=("Ne",),
+    )
+
+
+def _signal_only_campaign(tmp_path: Path):
+    """The owner's live state: sphere pair, one lamp signal, no lamp background."""
+
+    sources = _real_2019_folder(tmp_path)
+    campaign = _2019_campaign(sources)
+    campaign.classify_file(sources["IS-1s.sif"], MeasurementRole.SPHERE)
+    campaign.classify_file(sources["IS_bg.sif"], MeasurementRole.SPHERE_BACKGROUND)
+    campaign.classify_file(
+        sources["Ne_1s_10fr.sif"], MeasurementRole.LAMP, lamp_family="Ne"
+    )
+    campaign.compute_sphere_comparison(_calculator)
+    return campaign, sources
+
+
+# ---------------------------------------------------------------------------
+# Xenon is a real lamp
+# ---------------------------------------------------------------------------
+
+
+def test_xenon_no_longer_walls_at_the_lamp_preset_registry():
+    """Regression pin for the wall: the three refusals a Xe lamp used to hit.
+
+    Assigning the lamp always worked — ``normalize_lamp_name`` accepts any
+    path-safe name — and everything downstream of it refused: no ``xe`` preset,
+    no ``XeI``/``XeII`` species, no ``xe`` catalog family.  The operator could
+    name the lamp and then had nothing to fit against.
+    """
+
+    assert normalize_lamp_name("Xe") == "Xe"
+    assert normalize_lamp_name("xenon") == "Xe"
+    assert lamp_species(["xe"]) == ("XeI", "XeII")
+    assert normalize_species_key("Xe I") == "XeI"
+    assert normalize_species_key("XeII") == "XeII"
+    assert campaign_module.catalog_family_for_lamp("Xe") == "xe"
+    assert load_line_table("xe")
+
+
+def test_an_assigned_xenon_lamp_gets_expected_lines_and_a_fit_reference(tmp_path):
+    """The panel and the click-to-fit reach the new cache through the ordinary path."""
+
+    sources = _curated_sources(tmp_path)
+    rows = load_wavelength_table(sources["wavelength.txt"])
+    order = rows[0].order_idx
+
+    listed = catalog_lines_for_order(rows, order, "Xe")
+    assert listed, "an assigned Xe lamp draws no expected lines"
+    assert {entry.line.family for entry in listed} == {"xe"}
+    assert all(entry.line.species.startswith("Xe ") for entry in listed)
+    assert all(entry.line.relative_intensity is not None for entry in listed)
+    # Same door as any other lamp: nothing about Xe is special-cased.
+    assert catalog_lines_for_order(rows, order, "xenon") == listed
+
+    reference = lamp_reference_set("Xe", rows)
+    assert reference.lamp == "Xe"
+    assert reference.catalog_family == "xe"
+    assert reference.catalog_label == "Xe"
+    assert reference.species == ("XeI", "XeII")
+
+
+def test_a_xenon_lamp_says_the_vetted_set_carries_no_xenon_rows(tmp_path):
+    """F19's pedigree statement, not an error: nobody has vetted a xenon line.
+
+    Before this packet the answer was "no line catalog for Xe", which blamed
+    the package for a gap that belongs to the wavelength table.  The catalog
+    exists now; what is missing is anybody's signature on a xenon measurement,
+    and that is what the bench says.
+    """
+
+    sources = _curated_sources(tmp_path)
+    rows = load_wavelength_table(sources["wavelength.txt"])
+    reference = lamp_reference_set("Xe", rows)
+
+    assert reference.state is ReferenceState.NO_ROWS
+    assert not reference.is_referenceable
+    assert "packaged Xe catalog" in reference.message
+    assert "XeI, XeII" in reference.message
+    assert reference.lines == ()
+    # And it contributes nothing to the panel rather than raising there.
+    assert expected_lines_for_order(reference, rows[0].order_idx) == ()
+
+
+# ---------------------------------------------------------------------------
+# "IS" means integrating sphere
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "name, role",
+    [
+        ("IS-1s.sif", MeasurementRole.SPHERE),
+        ("IS_1s.sif", MeasurementRole.SPHERE),
+        ("is-0.5s-x3.sif", MeasurementRole.SPHERE),
+        ("IS.sif", MeasurementRole.SPHERE),
+        ("IS-bg.sif", MeasurementRole.SPHERE_BACKGROUND),
+        ("IS_bg.sif", MeasurementRole.SPHERE_BACKGROUND),
+        ("is_background.sif", MeasurementRole.SPHERE_BACKGROUND),
+    ],
+)
+def test_the_is_prefix_prefills_the_sphere_roles(name, role):
+    """The owner's shorthand joins the suggestion vocabulary, as a pre-fill only."""
+
+    suggestion = suggest_file_roles(name)
+    assert suggestion.roles == (role,)
+    assert suggestion.is_unambiguous
+    assert "integrating-sphere" in suggestion.reason
+    assert "confirm" in suggestion.reason
+
+
+@pytest.mark.parametrize(
+    "name", ["isotope-scan.sif", "island.sif", "issue-42.sif", "Ne-is-bright.sif"]
+)
+def test_a_word_that_merely_starts_with_is_is_not_a_sphere_frame(name):
+    """Only the head of the name, and only where no letter follows it."""
+
+    suggestion = suggest_file_roles(name)
+    sphere_named = (
+        suggestion.is_unambiguous and suggestion.roles[0] is MeasurementRole.SPHERE
+    )
+    assert not sphere_named
+
+
+def test_a_folder_of_is_xe_and_ne_names_assigns_itself(tmp_path):
+    """The unanimous rule reads the new vocabulary like any other suggestion."""
+
+    sources = _curated_sources(tmp_path)
+    campaign = _campaign(tmp_path, sources)
+    names = (
+        "IS-1s.sif",
+        "IS-1s-bg.sif",
+        "Xe-2s.sif",
+        "Xe-2s_bg.sif",
+        "Ne-0.5s.sif",
+        "Ne-0.5s_bg.sif",
+    )
+    for name in names:
+        (tmp_path / name).write_bytes((name + "\n").encode())
+        campaign.record_frame(_triage_frame(tmp_path, name, _bright_line))
+
+    applied = {
+        record.path.name: record for record in campaign.apply_unanimous_suggestions()
+    }
+
+    assert set(applied) == set(names)
+    assert applied["IS-1s.sif"].role is MeasurementRole.SPHERE
+    assert applied["IS-1s-bg.sif"].role is MeasurementRole.SPHERE_BACKGROUND
+    assert applied["Xe-2s.sif"].role is MeasurementRole.LAMP
+    assert applied["Xe-2s.sif"].lamp_family == "Xe"
+    assert applied["Xe-2s_bg.sif"].role is MeasurementRole.LAMP_BACKGROUND
+    assert applied["Xe-2s_bg.sif"].lamp_family == "Xe"
+    assert applied["Ne-0.5s.sif"].lamp_family == "Ne"
+    assert campaign.assigned_lamps == ("Ne", "Xe")
+
+
+# ---------------------------------------------------------------------------
+# A signal-only lamp folder can be saved
+# ---------------------------------------------------------------------------
+
+
+def test_a_signal_only_lamp_campaign_saves_and_records_the_absent_background(tmp_path):
+    """The 2019 folder has no lamp background and never will; the save proceeds.
+
+    Demanding a complete lamp pair meant a historical folder could solve an
+    alignment and then never write it down.  The sphere pair is still required
+    — the absolute factor is computed from the difference of those two frames —
+    but a lamp background is an improvement to a fit, not a licence to record
+    the fit that was made without it.
+    """
+
+    alignment = _aligned_session(tmp_path)
+    campaign, _named = _signal_only_campaign(tmp_path)
+
+    assert campaign.lamps_without_background() == ("Ne",)
+
+    paths = campaign.write_tomls(tmp_path / "configs", "20190314_cmos", alignment)
+
+    assert campaign.toml_state is TomlState.GENERATED
+    assert campaign.save_state is SaveState.READY
+    assert campaign.ready_for_snapshot("20190314_cmos", alignment)
+
+    text = paths["campaign"].read_text(encoding="utf-8")
+    assert "background_shot = false" in text
+    assert "no Ne lamp background frame exists in this campaign" in text
+    assert "unsubtracted" in text
+    payload = tomllib.loads(text)
+    lamp = [row for row in payload["measurements"] if row["role"] == "lamp"]
+    assert len(lamp) == 1
+    assert lamp[0]["lamp_family"] == "Ne"
+    assert lamp[0]["background_shot"] is False
+
+    # And the snapshot the settings unlock is reachable, not merely composed.
+    snapshot = campaign.save_snapshot(
+        tmp_path / "calibrations",
+        snapshot_id="20190314_cmos",
+        detector="cmos",
+        alignment=alignment,
+    )
+    assert snapshot.snapshot_id == "20190314_cmos"
+    assert campaign.save_state is SaveState.VALIDATED
+
+
+def test_a_complete_lamp_pair_still_records_its_background(tmp_path):
+    """The pair-complete path is unchanged, and now says so in the record."""
+
+    sources = _curated_sources(tmp_path)
+    alignment = _aligned_session(tmp_path)
+    campaign = _campaign(tmp_path, sources)
+    _classify_complete(campaign, sources, alignment.frame)
+    campaign.compute_sphere_comparison(_calculator)
+
+    paths = campaign.write_tomls(tmp_path / "configs", "20250813_cmos", alignment)
+
+    assert campaign.lamps_without_background() == ()
+    payload = tomllib.loads(paths["campaign"].read_text(encoding="utf-8"))
+    lamp = [row for row in payload["measurements"] if row["role"] == "lamp"]
+    assert lamp and all(row["background_shot"] is True for row in lamp)
+    assert all("background_note" not in row for row in lamp)
+
+
+def test_a_missing_lamp_background_is_a_note_and_never_the_next_step(tmp_path):
+    """The checklist states the fact and blocks nothing with it."""
+
+    alignment = _aligned_session(tmp_path)
+    campaign, _named = _signal_only_campaign(tmp_path)
+
+    checklist = {item.key: item for item in campaign.checklist(alignment)}
+    row = checklist["lamp-Ne-background"]
+    assert row.state is ChecklistState.SUGGESTION
+    assert not row.blocking
+    assert "signal only" in row.detail
+    assert "no background shot" in row.detail
+    assert checklist["lamp-Ne-signal"].state is ChecklistState.DONE
+    # Nothing blocking is left pointing at a frame that does not exist.
+    blocking = [
+        item
+        for item in campaign.checklist(alignment)
+        if item.blocking and item.state is not ChecklistState.DONE
+    ]
+    assert all("background" not in item.label for item in blocking)
+
+
+def test_a_refused_save_leaves_no_folders_standing(tmp_path):
+    """Nothing is created on disk until the bundle composes.
+
+    An empty ``calibrations/configs/`` beside a bench that had just refused was
+    the only trace the refusal left anywhere, and it read as a half-written
+    save rather than as no save at all.
+    """
+
+    sources = _real_2019_folder(tmp_path)
+    campaign = _2019_campaign(sources)
+    campaign.classify_file(sources["IS-1s.sif"], MeasurementRole.SPHERE)
+    alignment = _aligned_session(tmp_path)
+    root = tmp_path / "calibrations" / "configs"
+
+    with pytest.raises(SnapshotError) as refusal:
+        campaign.write_tomls(root, "20190314_cmos", alignment)
+
+    assert "sphere pair" in str(refusal.value)
+    assert "one lamp signal" in str(refusal.value)
+    assert not root.exists()
+    assert not root.parent.exists()
+    assert campaign.toml_state is TomlState.FAILED

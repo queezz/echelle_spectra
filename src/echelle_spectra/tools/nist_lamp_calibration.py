@@ -122,6 +122,8 @@ COMMON_NIST_SPECIES: dict[str, NistSpecies] = {
         _species("Ne", "II", "singly ionized neon"),
         _species("Th", "I", "neutral thorium"),
         _species("Th", "II", "singly ionized thorium"),
+        _species("Xe", "I", "neutral xenon"),
+        _species("Xe", "II", "singly ionized xenon"),
     )
 }
 
@@ -135,6 +137,7 @@ COMMON_LAMP_PRESETS: dict[str, NistLampPreset] = {
     "ne": NistLampPreset("ne", ("NeI", "NeII"), "neon lamp"),
     "th": NistLampPreset("th", ("ThI", "ThII"), "thorium lamp"),
     "thar": NistLampPreset("thar", ("ThI", "ThII", "ArI", "ArII"), "thorium-argon lamp"),
+    "xe": NistLampPreset("xe", ("XeI", "XeII"), "xenon lamp"),
 }
 
 

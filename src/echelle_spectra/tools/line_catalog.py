@@ -27,6 +27,7 @@ from .nist_lamp_calibration import (
 )
 
 __all__ = [
+    "CATALOG_LINE_FAMILIES",
     "CURATED_LINE_TABLE",
     "CURATED_MATCH_TOLERANCE_NM",
     "LAMP_LINE_FAMILIES",
@@ -40,23 +41,46 @@ __all__ = [
 ]
 
 
+#: The families the *overlays* draw: one checkbox and one hue each, in both the
+#: 1-D and 2-D views.  It is a closed set on purpose — the palette in
+#: :data:`~.line_overlay.LINE_OVERLAY_STYLES` seats exactly these five in the
+#: cool arc, and a sixth cannot be added without redesigning it.
 LINE_FAMILIES = ("balmer", "fulcher", "thar", "ne", "hg")
+
+#: Every family :func:`load_line_table` will serve, which is a wider set.
+#:
+#: ``xe`` is here and not in :data:`LINE_FAMILIES` because the two tuples answer
+#: different questions.  A xenon lamp on the calibration bench needs its lines —
+#: the expected-lines panel, the fit reference, and the identification help all
+#: read this catalog — and it needs them whether or not the main viewer has a
+#: sixth overlay toggle to spare.  Which lamps the bench can serve is a
+#: question about physics and cached data; how many hues fit between the red and
+#: yellow-green spectrum curves is a question about one window's palette, and
+#: letting the second answer the first is what would have kept xenon out.
+CATALOG_LINE_FAMILIES = (*LINE_FAMILIES, "xe")
 
 #: The families whose tables are NIST lamp exports rather than a hand-kept list.
 #: These are the ones a curated wavelength table can vouch for, and the ones the
 #: overlays filter by strength.
-LAMP_LINE_FAMILIES = ("thar", "ne", "hg")
+#:
+#: ``xe`` is one of them and is vouched for by nothing: the curated table was
+#: written from ThAr, Ne, Hg and H2 frames and carries no xenon row at all.
+#: That is not a defect in the family — it is the honest state of a lamp whose
+#: cache the package ships and whose vetting nobody has done, and every surface
+#: that reads :func:`load_line_table` says so rather than inventing a pedigree.
+LAMP_LINE_FAMILIES = ("thar", "ne", "hg", "xe")
 LINE_FAMILY_LABELS = {
     "balmer": "Balmer",
     "fulcher": "Fulcher H2",
     "thar": "ThAr",
     "ne": "Ne",
     "hg": "Hg",
+    "xe": "Xe",
 }
 
 #: Which hydrogen isotopologues each family can be asked for.  Only the two
 #: hydrogen families have an isotopologue at all; a lamp family carries none, so
-#: naming one for ThAr, Ne, or Hg is a question the catalog answers with an
+#: naming one for ThAr, Ne, Hg, or Xe is a question the catalog answers with an
 #: empty table rather than with the table that was not asked for.
 #:
 #: The Fulcher entry says ``("H",)`` because the bundled Q-branch anchors are
@@ -69,6 +93,7 @@ LINE_FAMILY_ISOTOPES: dict[str, tuple[str, ...]] = {
     "thar": (),
     "ne": (),
     "hg": (),
+    "xe": (),
 }
 
 #: The isotopologue a family returns when a caller names none.  Every table
@@ -381,7 +406,7 @@ def load_line_table(family: str, *, isotope: str | None = None) -> tuple[Spectra
     Parameters
     ----------
     family:
-        One of ``balmer``, ``fulcher``, ``thar``, ``ne``, or ``hg``.
+        One of ``balmer``, ``fulcher``, ``thar``, ``ne``, ``hg``, or ``xe``.
     isotope:
         Optional hydrogen isotopologue facet, ``"H"`` or ``"D"``.  Omit it to
         receive the family's established table, which is the hydrogen one.  A
@@ -391,8 +416,8 @@ def load_line_table(family: str, *, isotope: str | None = None) -> tuple[Spectra
     """
 
     key = family.strip().lower()
-    if key not in LINE_FAMILIES:
-        known = ", ".join(LINE_FAMILIES)
+    if key not in CATALOG_LINE_FAMILIES:
+        known = ", ".join(CATALOG_LINE_FAMILIES)
         raise ValueError(f"unknown line family {family!r}; known families: {known}")
     available = LINE_FAMILY_ISOTOPES[key]
     if not available:

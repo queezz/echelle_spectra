@@ -6,6 +6,7 @@ import pytest
 
 from echelle_spectra import load_line_table
 from echelle_spectra.tools.line_catalog import (
+    CATALOG_LINE_FAMILIES,
     CURATED_LINE_TABLE,
     LINE_FAMILIES,
     filter_line_table,
@@ -138,3 +139,55 @@ def test_a_lamp_prefers_its_neutral_lines_to_its_ions():
 def test_unknown_line_family_is_rejected():
     with pytest.raises(ValueError, match="known families"):
         load_line_table("xenon")
+
+
+def test_xenon_is_a_served_catalog_family_without_an_overlay_toggle():
+    """The bench serves Xe lines; the viewer's five-hue palette is untouched.
+
+    Which lamps the catalog can answer for and how many overlay colours fit
+    between the two spectrum curves are separate questions, and the second one
+    is not allowed to decide the first.
+    """
+
+    assert "xe" not in LINE_FAMILIES
+    assert "xe" in CATALOG_LINE_FAMILIES
+    assert set(LINE_FAMILIES) < set(CATALOG_LINE_FAMILIES)
+    assert load_line_table("xe")
+
+
+def test_the_packaged_xenon_cache_spans_the_instrument_with_a_strength_on_every_row():
+    """Xe I and Xe II, 380-810 nm, every row rankable — the wall's other half.
+
+    A cache that stopped short of the detector's range, or a row with no
+    strength, would put the xenon lamp back where it was: assignable in name
+    and useless in the panel that has to choose which lines to show.
+    """
+
+    lines = load_line_table("xe")
+    species = {line.species for line in lines}
+    assert species == {"Xe I", "Xe II"}
+    assert all(line.relative_intensity is not None for line in lines)
+    assert all(line.relative_intensity > 0.0 for line in lines)
+    wavelengths = [line.wavelength_nm for line in lines]
+    assert min(wavelengths) < 385.0
+    assert max(wavelengths) > 800.0
+    # The lamp-stage prior applies to xenon exactly as to neon and mercury:
+    # the ion sits a decade below the neutral rather than beside it.
+    strongest = {
+        name: max(
+            line.relative_intensity for line in lines if line.species == name
+        )
+        for name in species
+    }
+    assert strongest["Xe I"] > strongest["Xe II"]
+    assert strongest["Xe II"] == pytest.approx(0.1 * strongest["Xe I"])
+    # Cached from the packaged files, named so their span is legible.
+    assert {
+        line.source_resource.rsplit("/", 1)[-1] for line in lines
+    } == {"nist_xe_i_380_810.csv", "nist_xe_ii_380_810.csv"}
+
+
+def test_no_curated_row_vouches_for_a_xenon_line():
+    """Nobody has vetted a xenon line on this instrument, and the table says so."""
+
+    assert not any(line.curated for line in load_line_table("xe"))

@@ -2316,6 +2316,22 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         confirmation.addWidget(self.open_snapshot_button)
         confirmation.addStretch(1)
         layout.addLayout(confirmation)
+        # The bench's message line lives on the Lamp fit tab, and a save is
+        # pressed from this one.  A refusal set on a widget the operator cannot
+        # see is a silent refusal: the owner pressed Save on a signal-only 2019
+        # folder, was told "sphere/lamp pairs … are required" one tab away, and
+        # reported that nothing happened at all.  Whatever the save says, it
+        # says here too, where the button that caused it is.
+        #
+        # One line that shortens itself, for the same reason the next-step
+        # strip is one: a wrapping label on this tab is charged its full
+        # wrapped height, and three lines of refusal put the Save tab into the
+        # scrollbar this bench was rebuilt to abolish.  The whole sentence is
+        # the tooltip, and the message line on the Lamp fit tab carries it in
+        # full.
+        self.save_message_value = _ElidingLabel("Nothing has been saved yet.")
+        self.save_message_value.setObjectName("benchHelp")
+        layout.addWidget(self.save_message_value)
         self.toml_preview = QtWidgets.QPlainTextEdit()
         self.toml_preview.setReadOnly(True)
         self.toml_preview.setPlaceholderText(
@@ -2920,6 +2936,23 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         self._role_notice = text
         self.message_value.setText(text)
 
+    def _save_says(self, text: str) -> None:
+        """Answer a Save-tab press where the Save tab can be read.
+
+        The bench has one message line and it lives on the Lamp fit tab, so a
+        refusal raised by a button on the Save tab landed somewhere the
+        operator was not looking — which is how "doesn't save, no errors" was a
+        truthful report of a bench that had refused in full sentences.  Both
+        lines carry it: the Save tab because that is where the press was, the
+        message line because that is where the bench's running account is.  It
+        also clears the held role notice, so this can never be suppressed as a
+        follow-up narration by :meth:`_bench_says`.
+        """
+
+        self._role_notice = ""
+        self.save_message_value.setText(text)
+        self.message_value.setText(text)
+
     def _apply_unambiguous_suggestions(self) -> None:
         """Assign a whole drop's roles when its filenames leave nothing to ask.
 
@@ -3467,7 +3500,7 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
             self._saved_snapshot_root = saved_root
             self.open_snapshot_button.setVisible(True)
             self.open_snapshot_button.setToolTip(f"Open {saved_root} in the file manager")
-            self.message_value.setText(
+            self._save_says(
                 f"Snapshot {result.snapshot_id} saved and validated through "
                 f"Packet 0 in {saved_root}.{detail}"
             )
@@ -3486,7 +3519,9 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
 
     @QtCore.pyqtSlot(str)
     def _campaign_task_failed(self, reason: str) -> None:
-        self.message_value.setText(f"Campaign action failed safely: {reason}")
+        # Every campaign task is started from a button on the Save tab, so its
+        # refusal is said there as well as on the message line.
+        self._save_says(f"Campaign action failed safely: {reason}")
         self.refresh()
 
     @QtCore.pyqtSlot()
@@ -3512,7 +3547,7 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
                 snapshot_root=self.output_root / snapshot_id,
             )
         except (OSError, SnapshotError, ValueError) as exc:
-            self.message_value.setText(f"Alignment settings were not saved: {exc}")
+            outcome = f"Alignment settings were not saved: {exc}"
             # An existing bundle is a choice to offer, not a dead end: the
             # button that can get past it appears beside the one that refused.
             # The offer is recorded against the identity that was refused, so
@@ -3523,7 +3558,7 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         else:
             self._refused_identity = ""
             self.regenerate_tomls_button.setVisible(False)
-            self.message_value.setText(
+            outcome = (
                 "Saved the alignment settings, the campaign, and the export "
                 f"configuration as commented files you can edit: {paths['campaign'].parent}."
                 if not overwrite
@@ -3533,7 +3568,11 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
             self.toml_preview.setPlainText(
                 paths["campaign"].read_text(encoding="utf-8")
             )
+        # The refresh below re-reads the roles and may narrate what the bench
+        # did about them; the answer to the press is what the operator needs to
+        # read, so it is put on screen last and cannot be narrated over.
         self.refresh_campaign()
+        self._save_says(outcome)
 
     def _regenerate_tomls(self) -> None:
         """Rewrite settings files that already exist, on a deliberate press."""
@@ -3545,7 +3584,7 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
             # id field says at the moment of the press.
             self._refused_identity = ""
             self.regenerate_tomls_button.setVisible(False)
-            self.message_value.setText(
+            self._save_says(
                 "The snapshot identity changed since the bench refused to "
                 "overwrite; press Save alignment settings again for this one."
             )

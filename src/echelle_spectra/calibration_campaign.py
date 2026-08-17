@@ -104,7 +104,7 @@ FULL_SCALE_COUNTS = 65535.0
 
 #: Lamp names the bench offers as ready-made choices.  Any other name is
 #: accepted as free text; the list is convenience, never a permitted set.
-KNOWN_LAMP_NAMES = ("ThAr", "Ne", "Hg", "H2")
+KNOWN_LAMP_NAMES = ("ThAr", "Ne", "Hg", "H2", "Xe")
 
 #: What the previous campaign actually measured, offered as a suggestion.
 PREVIOUS_CAMPAIGN_LAMPS = ("Ne",)
@@ -505,11 +505,19 @@ _LAMP_ALIASES = {
     "fulcher": "H2",
     "deuterium": "D2",
     "d2": "D2",
+    "xe": "Xe",
+    "xenon": "Xe",
 }
 
 _LAMP_NAME_EXTRA_CHARACTERS = "+-_."
 
-_CATALOG_FAMILIES = {"ThAr": "thar", "Ne": "ne", "Hg": "hg", "H2": "fulcher"}
+_CATALOG_FAMILIES = {
+    "ThAr": "thar",
+    "Ne": "ne",
+    "Hg": "hg",
+    "H2": "fulcher",
+    "Xe": "xe",
+}
 
 #: Which curated wavelength-table species each lamp may legitimately emit.
 #:
@@ -518,11 +526,19 @@ _CATALOG_FAMILIES = {"ThAr": "thar", "Ne": "ne", "Hg": "hg", "H2": "fulcher"}
 #: weighted compound centroid of two transitions rather than one line, so it is
 #: never an anchor.  H2 carries the molecular Fulcher rows together with the
 #: atomic Balmer rows a hydrogen discharge shows beside them.
+#:
+#: Xe is here for the same reason as the rest and with an outcome none of the
+#: rest have: the packaged Xe catalog exists, so a xenon lamp is scoped like any
+#: other lamp — and the curated wavelength table carries no ``XeI``/``XeII`` row
+#: for it to keep, so the scoping resolves to
+#: :attr:`ReferenceState.NO_ROWS` and says out loud that nobody has vetted a
+#: xenon line on this instrument.  That is the answer, not a gap in the table.
 LAMP_TABLE_SPECIES: dict[str, tuple[str, ...]] = {
     "ThAr": ("ThI", "ThII", "ArI", "ArII"),
     "Ne": ("NeI", "NeII"),
     "Hg": ("HgI", "HgII"),
     "H2": ("H2", "H-a", "H-g"),
+    "Xe": ("XeI", "XeII"),
 }
 
 
@@ -665,6 +681,15 @@ def _lamp_name_in_filename(stem: str) -> str:
     return ""
 
 
+#: The operator's own shorthand for the integrating sphere: the 2019 campaign
+#: folder names its sphere frames ``IS-1s.sif`` and ``IS_bg.sif``, and "IS" is
+#: simply how he says "integrating sphere" out loud.  Only at the head of the
+#: name, and only when no letter follows, so ``isotope`` and ``island`` stay
+#: words instead of becoming sphere frames.  Like every other token read here,
+#: it pre-fills a control and gates nothing.
+_SPHERE_SHORTHAND = re.compile(r"^is(?![a-z])")
+
+
 def suggest_file_roles(path: str | Path) -> FileRoleSuggestion:
     """Suggest a likely role from a filename without ever accepting it.
 
@@ -676,7 +701,9 @@ def suggest_file_roles(path: str | Path) -> FileRoleSuggestion:
     stem = Path(path).stem
     folded = stem.casefold()
     background = any(token in folded for token in ("background", "_bg", "-bg", "bkg", "dark"))
-    sphere = any(token in folded for token in ("sphere", "sphr", "absolute"))
+    sphere = any(token in folded for token in ("sphere", "sphr", "absolute")) or bool(
+        _SPHERE_SHORTHAND.match(folded)
+    )
     lamp_name = _lamp_name_in_filename(stem)
     lamp = bool(lamp_name) or "lamp" in folded
     if sphere and background:
@@ -2119,17 +2146,44 @@ class CalibrationCampaignSession:
                 (MeasurementRole.LAMP_BACKGROUND, "background", "background"),
             ):
                 records = self._records(role, lamp)
+                if records:
+                    items.append(
+                        ChecklistItem(
+                            f"lamp-{lamp}-{suffix}",
+                            f"{lamp} lamp {label}",
+                            ChecklistState.DONE,
+                            ", ".join(record.path.name for record in records),
+                        )
+                    )
+                    continue
+                if role is MeasurementRole.LAMP_BACKGROUND and self._records(
+                    MeasurementRole.LAMP, lamp
+                ):
+                    # A lamp that was shot signal-only is a fact about the
+                    # folder, not a step somebody forgot: the 2019 campaign
+                    # shot no lamp backgrounds and never will.  The row states
+                    # it, blocks nothing, and leaves the next-step strip to
+                    # point at something the operator can actually do.
+                    items.append(
+                        ChecklistItem(
+                            f"lamp-{lamp}-{suffix}",
+                            f"{lamp} lamp {label}",
+                            ChecklistState.SUGGESTION,
+                            "signal only — no background shot; the signal is used "
+                            "unsubtracted and the campaign record says so",
+                            blocking=False,
+                            unblocked_by=f"shoot a {lamp} background at the same "
+                            "exposure if the lamp is still on the bench",
+                        )
+                    )
+                    continue
                 items.append(
                     ChecklistItem(
                         f"lamp-{lamp}-{suffix}",
                         f"{lamp} lamp {label}",
-                        ChecklistState.DONE if records else ChecklistState.WAITING,
-                        ", ".join(record.path.name for record in records)
-                        if records
-                        else f"no file carries the {lamp} {label} role yet",
-                        unblocked_by=""
-                        if records
-                        else f"assign the {lamp} lamp {label} role to a loaded file",
+                        ChecklistState.WAITING,
+                        f"no file carries the {lamp} {label} role yet",
+                        unblocked_by=f"assign the {lamp} lamp {label} role to a loaded file",
                     )
                 )
         items.append(self._lamp_suggestion_item(assigned))
@@ -2228,7 +2282,7 @@ class CalibrationCampaignSession:
                 ),
                 ", ".join(path.name for path in self.toml_paths.values())
                 if self.toml_paths
-                else "generate once the sphere pair, one lamp pair, and the fit are in",
+                else "generate once the sphere pair, one lamp signal, and the fit are in",
                 unblocked_by=""
                 if self.toml_state is TomlState.GENERATED
                 else "complete the rows above, then press Save alignment settings",
@@ -2274,14 +2328,48 @@ class CalibrationCampaignSession:
         assigned = self.assigned_lamps
         return assigned[0] if assigned else ""
 
+    def _lamps_with_signal(self) -> tuple[str, ...]:
+        """Lamps that carry a signal frame, whether or not a background exists."""
+
+        return tuple(
+            lamp
+            for lamp in self.assigned_lamps
+            if self._records(MeasurementRole.LAMP, lamp)
+        )
+
+    def lamps_without_background(self) -> tuple[str, ...]:
+        """Lamps shot signal-only this campaign, named so the record can say so."""
+
+        return tuple(
+            lamp
+            for lamp in self._lamps_with_signal()
+            if not self._records(MeasurementRole.LAMP_BACKGROUND, lamp)
+        )
+
     def _measurement_pairs_ready(self) -> bool:
-        """One sphere pair and one complete lamp pair are the whole demand."""
+        """The sphere pair, and one lamp *signal*.  A lamp background is not asked for.
+
+        Demanding a complete lamp pair here was F11's jail reborn one level
+        down: the fit runs happily on a signal-only lamp — the owner's 2019
+        folder solved 37 anchors at RMS 0.527 px on frames that have no
+        background at all, because in 2019 nobody shot one — and then the save
+        refused the very alignment it had just produced, over frames that
+        cannot be reshot seven years later.  A background is a subtraction that
+        improves a fit, never a licence to write down the fit that was made
+        without it, and :meth:`lamps_without_background` carries its absence
+        into the record rather than into a gate.
+
+        The sphere pair is a different matter and stays required: the absolute
+        factor is computed *from* the difference of those two frames, so a
+        missing sphere background is not a missing improvement, it is a missing
+        measurement.
+        """
 
         if self._one(MeasurementRole.SPHERE) is None:
             return False
         if self._one(MeasurementRole.SPHERE_BACKGROUND) is None:
             return False
-        return bool(self._complete_lamps())
+        return bool(self._lamps_with_signal())
 
     def _composition_ready(self, alignment: CalibrationBenchSession) -> bool:
         return (
@@ -2309,7 +2397,8 @@ class CalibrationCampaignSession:
 
         if not self._composition_ready(alignment):
             raise SnapshotError(
-                "sphere/lamp pairs, sphere-factor result, and aligned anchors are required"
+                "the sphere pair, one lamp signal, the sphere-factor result, and "
+                "a solved alignment are required"
             )
         sphere = self._one(MeasurementRole.SPHERE)
         sphere_background = self._one(MeasurementRole.SPHERE_BACKGROUND)
@@ -2322,6 +2411,7 @@ class CalibrationCampaignSession:
         )
         transform = alignment.transform
         assert transform is not None
+        signal_only_lamps = set(self.lamps_without_background())
 
         campaign_lines = [
             "# Generated by echelle-calib from explicitly classified measurements.",
@@ -2351,6 +2441,21 @@ class CalibrationCampaignSession:
             )
             if record.lamp_family:
                 campaign_lines.append(f"lamp_family = {_toml_string(record.lamp_family)}")
+            if record.role is MeasurementRole.LAMP:
+                # Whether this lamp's signal was subtracted is a property of the
+                # campaign, not of the fit, and a reader years later must not
+                # have to infer it from which files happen to be listed.  A
+                # signal-only lamp says so in its own block.
+                shot = record.lamp_family not in signal_only_lamps
+                campaign_lines.append(f"background_shot = {'true' if shot else 'false'}")
+                if not shot:
+                    campaign_lines.append(
+                        "background_note = "
+                        + _toml_string(
+                            f"no {record.lamp_family} lamp background frame exists "
+                            "in this campaign; the signal is recorded unsubtracted"
+                        )
+                    )
             if record.exposure and record.exposure.exposure_s is not None:
                 campaign_lines.append(f"exposure_s = {record.exposure.exposure_s:.12g}")
             if record.exposure and record.exposure.peak_value is not None:
@@ -2456,10 +2561,15 @@ class CalibrationCampaignSession:
         is the deliberate second press: the new bundle is still staged and
         parsed in full before anything existing is touched, so a failure part
         way through leaves the old files exactly where they were.
+
+        Nothing is created on disk until the bundle composes.  The destination
+        tree used to be made first, so a refused save left ``calibrations/`` and
+        ``calibrations/configs/`` standing empty beside a bench that had just
+        said no — folders that read as a half-finished save and were in fact
+        the only trace the refusal left anywhere the operator could see.
         """
 
         destination_parent = Path(destination_root)
-        destination_parent.mkdir(parents=True, exist_ok=True)
         destination = destination_parent / snapshot_id
         if destination.exists() and not overwrite:
             self.toml_state = TomlState.FAILED
@@ -2469,6 +2579,7 @@ class CalibrationCampaignSession:
         rescued = None
         try:
             texts = self.compose_tomls(snapshot_id, alignment, snapshot_root=snapshot_root)
+            destination_parent.mkdir(parents=True, exist_ok=True)
             staging_parent = Path(
                 tempfile.mkdtemp(prefix=f".{snapshot_id}.configs-", dir=destination_parent)
             )
