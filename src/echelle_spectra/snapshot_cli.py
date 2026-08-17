@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 
 from .snapshot import (
+    Snapshot,
     SnapshotError,
     SnapshotValidationError,
     create_snapshot,
@@ -138,6 +139,30 @@ def _lamp_files(values: list[str]) -> list[tuple[str, str]]:
     return parsed
 
 
+def _print_summary(snapshot: Snapshot) -> None:
+    """Print the compact ``show`` view, references and all."""
+
+    print(f"id:        {snapshot.snapshot_id}")
+    print(f"detector:  {snapshot.detector}")
+    print(f"lamps:     {', '.join(snapshot.lamps)}")
+    print(f"artifacts: {len(snapshot.artifacts)}")
+    for artifact in snapshot.artifacts:
+        if not artifact.is_reference:
+            continue
+        # Where the frames really are, said out loud: an operator asking what a
+        # snapshot uses should not have to open the binder to learn that the
+        # bytes are one folder over.
+        label = f"{artifact.role}/{artifact.label}" if artifact.label else artifact.role
+        print(f"reference: {label} -> {snapshot.path_for(artifact)}")
+    base = snapshot.manifest.get("base_snapshot")
+    if base:
+        print(f"base:      {base}")
+    validity = snapshot.manifest.get("validity")
+    if validity:
+        values = ", ".join(f"{key}={value}" for key, value in validity.items())
+        print(f"validity:  {values}")
+
+
 def main(argv: list[str] | None = None, *, prog: str = "echelle-snapshot") -> int:
     """Run the snapshot CLI and return a process exit code."""
 
@@ -218,24 +243,19 @@ def main(argv: list[str] | None = None, *, prog: str = "echelle-snapshot") -> in
             Path(args.snapshot),
             verify_files=not getattr(args, "no_digest_check", False),
         )
+        references = [artifact for artifact in snapshot.artifacts if artifact.is_reference]
         if args.snapshot_command == "validate":
             print(
                 f"Snapshot {snapshot.snapshot_id} is valid: "
                 f"{len(snapshot.artifacts)} artifact(s), all digests verified"
             )
+            if references:
+                print(
+                    f"  {len(references)} referenced source(s) verified where they live"
+                )
             return 0
 
-        print(f"id:        {snapshot.snapshot_id}")
-        print(f"detector:  {snapshot.detector}")
-        print(f"lamps:     {', '.join(snapshot.lamps)}")
-        print(f"artifacts: {len(snapshot.artifacts)}")
-        base = snapshot.manifest.get("base_snapshot")
-        if base:
-            print(f"base:      {base}")
-        validity = snapshot.manifest.get("validity")
-        if validity:
-            values = ", ".join(f"{key}={value}" for key, value in validity.items())
-            print(f"validity:  {values}")
+        _print_summary(snapshot)
         return 0
     except SnapshotValidationError as exc:
         _print_validation_error(exc)

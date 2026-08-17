@@ -71,6 +71,11 @@ whatever directory a shortcut happened to start in. With no folder argument at
 all there is nothing better than the working directory, and the bench falls back
 to it.
 
+Because that folder already holds the raw frames, the snapshot **references
+them where they lie and never copies them**: it records the path back to each
+sphere and lamp SIF beside the SHA-256 and size that say the frames are still
+the ones it measured.
+
 Everything the bench generates lives under that single `calibrations\` folder:
 the snapshot identity folders, and one `configs\` subfolder holding the settings
 bundles. A calibration folder therefore gains exactly one generated child, not
@@ -428,26 +433,36 @@ marked as inherited. Review those values before the next LHD campaign; see
 [From calibration to cube](calibration-to-cube.md).
 
 **Save and validate snapshot** calls `create_snapshot()` from the established
-snapshot API. That API copies read-only source inputs into an atomic staging
-directory, digests them, validates them, and refuses to replace an existing
-identity. The bench then calls `load_snapshot()` explicitly for the completed
-snapshot and reports **VALIDATED** only after that validator succeeds. Lamp signal
-and background SIFs are both retained under `lamps/` with their explicit family.
-The bench does not build a competing manifest or duplicate validation rules.
+snapshot API. That API writes the computed files into an atomic staging
+directory, digests every input, validates the result, and refuses to replace an
+existing identity. The bench then calls `load_snapshot()` explicitly for the
+completed snapshot and reports **VALIDATED** only after that validator succeeds.
+Every raw frame — the sphere pair and both the signal and background SIF of each
+lamp — is digested where it lies and recorded as a reference with its explicit
+family. The bench does not build a competing manifest or duplicate validation
+rules.
 
 ## The saved snapshot carries the measured calibration
 
 ```text
-calibrations/20260901_cmos/
-├── snapshot.toml
-├── pattern.txt
-├── wavelength.txt   # base table moved by the solved transform
-├── alignment.toml   # transform, RMS, fitted-line count
-├── integral.txt
-├── sphere.sif
-├── sphere_bg.sif
-└── lamps/
+20260901_calib/                        the calibration folder you launched on
+├── sphere-0.1s-x3.sif                 the frames stay here, and only here
+├── sphere-0.1s-x3-bg.sif
+├── ThAr-0.3s-x3.sif
+├── ThAr-0.3s-x3-bg.sif
+└── calibrations/20260901_cmos/
+    ├── snapshot.toml   # …and this points back at them, with their digests
+    ├── pattern.txt
+    ├── wavelength.txt  # base table moved by the solved transform
+    ├── alignment.toml  # transform, RMS, fitted-line count
+    └── integral.txt
 ```
+
+The snapshot holds what the bench computed and points at what it read. Moving
+or copying the whole calibration folder keeps every reference true, because a
+reference to a frame in the same folder is stored relative to the snapshot
+(`../../sphere-0.1s-x3.sif`). Moving the snapshot folder out on its own does
+not, and validation says so by the full path it looked in.
 
 The snapshot's `wavelength.txt` is not a copy of the base table. Before
 `create_snapshot()` runs, the bench applies the solved rigid transform to every

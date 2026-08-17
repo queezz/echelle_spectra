@@ -27,9 +27,15 @@ processing ever reads.
 | `snapshot.toml` | The binder. Lists every file with its role, size, and SHA-256, plus the alignment and QC record of the session that produced it. |
 | `pattern.txt` | The extraction geometry — where each diffraction order sits on the detector. |
 | `wavelength.txt` | The wavelength solution. **Already rigid-corrected**: the shift the bench solved is baked in at Save, so the file is the calibration the bench measured, not the table it started from. |
-| `sphere.sif` + `sphere_bg.sif` | The integrating-sphere exposure and its background. |
-| `integral.txt` | The sphere's own spectral reference. Together with the sphere pair, these three give the absolute-factor curve. |
+| `integral.txt` | The sphere's own spectral reference. Together with the referenced sphere pair, these give the absolute-factor curve. |
 | `alignment.toml` | A copy of the solved alignment, saved beside the calibration it belongs to. |
+
+The raw frames are **not** in here. The sphere pair and every lamp SIF stay in
+the calibration folder two levels up, and the binder records the path back to
+each one with its size and SHA-256. The folder holds the light; the snapshot
+holds what was computed from it, and points back. Validation re-reads and
+re-hashes each referenced frame where it is named, so a moved or edited frame
+is a refusal, not a silent substitution.
 
 ### The configuration bundle — `calibrations/configs/<id>/`
 
@@ -92,8 +98,9 @@ Once the snapshot is chosen, its files do the work:
 
 - `pattern.txt` gives the extraction geometry;
 - `wavelength.txt` gives the wavelength solution;
-- `sphere.sif`, `sphere_bg.sif` and `integral.txt` give the absolute-factor
-  curve applied to the counts.
+- `integral.txt` and the referenced sphere pair give the absolute-factor curve
+  applied to the counts — the run opens the sphere frames in the calibration
+  folder the binder points at.
 
 A registry-backed run is also **gated**: it needs either `--sample N` (a first,
 explicitly unverified sample) or `--drift-verdict` (the evidence a
@@ -195,7 +202,7 @@ does not measure — `trigger_delay_s`, `time_axis_reference`,
 | Where the orders were cut out of the image | `pattern.txt` in the snapshot | the bench's pattern source |
 | The wavelength of every point | `wavelength.txt` in the snapshot (already rigid-corrected) | the bench's alignment fit, applied at Save |
 | How well the wavelengths are known | the manifest's `[alignment] rms_px` (fallback: `alignment.toml`) | the bench's alignment fit |
-| The absolute intensity factors | `sphere.sif` + `sphere_bg.sif` + `integral.txt` in the snapshot | the sphere exposures of that bench session |
+| The absolute intensity factors | `integral.txt` in the snapshot, plus the sphere pair it references in the calibration folder | the sphere exposures of that bench session |
 | Which snapshot was used at all | the epoch registry, from the shot's date and number | your registry entries — or `--config`, which skips this |
 | The wavelength crop and the units | `[export]` in `export.toml` | edited by hand in the config bundle |
 | The LHD text timing (`trigger_delay_s`, frame times) | `[metadata]` in `export.toml` | carried forward from the previous campaign; **review it** |

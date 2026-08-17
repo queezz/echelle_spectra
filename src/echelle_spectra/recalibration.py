@@ -79,7 +79,7 @@ def _require_unchanged_unapplied_roles(
 
 
 def _wavelength_solution(snapshot: Snapshot) -> dict[int, list[float]]:
-    table = snapshot.root / snapshot.artifact_for_role("wavelength").path
+    table = snapshot.source_path("wavelength")
     try:
         rows = np.loadtxt(table, comments="#", usecols=(0, 3, 4), ndmin=2)
     except (OSError, ValueError) as exc:

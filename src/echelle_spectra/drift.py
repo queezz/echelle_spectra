@@ -1405,7 +1405,7 @@ def create_refinement_snapshot(
     with tempfile.TemporaryDirectory(prefix="echelle-refinement-") as temporary:
         adjusted = Path(temporary) / "wavelength.txt"
         moved = _shift_wavelength_table(
-            base.root / base.artifact_for_role("wavelength").path,
+            base.source_path("wavelength"),
             adjusted,
             shift_px=measured,
             metadata=[
@@ -1417,18 +1417,18 @@ def create_refinement_snapshot(
             ],
         )
         files = {
-            role: (
-                adjusted
-                if role == "wavelength"
-                else base.root / base.artifact_for_role(role).path
-            )
+            role: (adjusted if role == "wavelength" else base.source_path(role))
             for role in REQUIRED_ROLES
         }
         lamps = [
-            (artifact.label, base.root / artifact.path)
+            (artifact.label, base.path_for(artifact))
             for artifact in base.artifacts
             if artifact.role == "lamp"
         ]
+        # A refinement only re-solves the wavelength table.  If the base points
+        # at its raw frames rather than holding them, the refinement points at
+        # the same ones instead of hoarding a second copy.
+        references_raw = any(artifact.is_reference for artifact in base.artifacts)
         snapshot = create_snapshot(
             root,
             snapshot_id=refined_id,
@@ -1438,6 +1438,7 @@ def create_refinement_snapshot(
             lamp_files=lamps,
             notes=f"Accepted science-line refinement from {evidence_file.name}.",
             base_snapshot=base.snapshot_id,
+            reference_raw=references_raw,
             validity=base.manifest.get("validity"),
             alignment={
                 "method": "sampled Balmer/Fulcher rigid detector shift",

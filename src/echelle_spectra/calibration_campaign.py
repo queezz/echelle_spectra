@@ -34,7 +34,13 @@ except ModuleNotFoundError:  # pragma: no cover - Python 3.9/3.10
     import tomli as tomllib
 
 from .calibration_bench import AlignmentState, BenchFrame, CalibrationBenchSession
-from .snapshot import Snapshot, SnapshotError, create_snapshot, load_snapshot
+from .snapshot import (
+    Snapshot,
+    SnapshotError,
+    create_snapshot,
+    load_snapshot,
+    reference_path,
+)
 from .tools.calibration_alignment import (
     AlignmentSettings,
     CalibrationTableLine,
@@ -1415,6 +1421,20 @@ def _toml_string(value: object) -> str:
     return json.dumps(str(value), ensure_ascii=False)
 
 
+def _snapshot_reference(snapshot_root: str | Path | None, source: Path) -> str:
+    """Name *source* from inside a snapshot folder, the way the binder does.
+
+    With the snapshot folder known the path is computed exactly.  Without it,
+    the bench's own layout is the honest assumption: the snapshot lands in
+    ``<calibration folder>/calibrations/<id>`` and the frames stay in the
+    calibration folder two levels up.
+    """
+
+    if snapshot_root is None:
+        return f"../../{source.name}"
+    return reference_path(snapshot_root, source)
+
+
 class CalibrationCampaignSession:
     """Campaign-memory state transitions independent of Qt."""
 
@@ -2276,8 +2296,16 @@ class CalibrationCampaignSession:
         self,
         snapshot_id: str,
         alignment: CalibrationBenchSession,
+        *,
+        snapshot_root: str | Path | None = None,
     ) -> dict[str, str]:
-        """Compose commented ordinary TOML from the measured session state."""
+        """Compose commented ordinary TOML from the measured session state.
+
+        ``snapshot_root`` is where the snapshot for this identity will be
+        written.  The export configuration points at the sphere pair the way the
+        snapshot itself does — back out to the calibration folder — so knowing
+        the folder makes those two paths exact instead of assumed.
+        """
 
         if not self._composition_ready(alignment):
             raise SnapshotError(
@@ -2366,6 +2394,13 @@ class CalibrationCampaignSession:
             f"Inherited from {INHERITED_EXPORT_CONFIG_ID}; not measured by this "
             "bench session. Review before the next LHD campaign."
         )
+        # The snapshot references the sphere frames rather than copying them, so
+        # this configuration names them the same way: out of the snapshot folder
+        # and back into the calibration folder that holds the light.
+        sphere_reference = _snapshot_reference(snapshot_root, sphere.path)
+        sphere_background_reference = _snapshot_reference(
+            snapshot_root, sphere_background.path
+        )
         export_lines = [
             "# Generated SpectroCube export configuration for this snapshot.",
             "# Paths are relative to the snapshot folder and remain hand-editable.",
@@ -2389,8 +2424,8 @@ class CalibrationCampaignSession:
             f"calibration_dir = {_toml_string(snapshot_id)}",
             'order_pattern = "pattern.txt"',
             'wavelength = "wavelength.txt"',
-            'sphere = "sphere.sif"',
-            'sphere_background = "sphere_bg.sif"',
+            f"sphere = {_toml_string(sphere_reference)}",
+            f"sphere_background = {_toml_string(sphere_background_reference)}",
             'integral = "integral.txt"',
             "",
             "[export]",
@@ -2413,6 +2448,7 @@ class CalibrationCampaignSession:
         alignment: CalibrationBenchSession,
         *,
         overwrite: bool = False,
+        snapshot_root: str | Path | None = None,
     ) -> dict[str, Path]:
         """Atomically publish a new identity's generated TOML bundle.
 
@@ -2432,7 +2468,7 @@ class CalibrationCampaignSession:
         superseded_parent = None
         rescued = None
         try:
-            texts = self.compose_tomls(snapshot_id, alignment)
+            texts = self.compose_tomls(snapshot_id, alignment, snapshot_root=snapshot_root)
             staging_parent = Path(
                 tempfile.mkdtemp(prefix=f".{snapshot_id}.configs-", dir=destination_parent)
             )
@@ -2692,6 +2728,10 @@ class CalibrationCampaignSession:
                 },
                 lamps=self.assigned_lamps,
                 lamp_files=lamp_files,
+                # The calibration folder already holds the lamp and sphere
+                # frames; the snapshot records where they are and what they
+                # hash to, and copies none of their bytes.
+                reference_raw=True,
                 notes=notes,
                 base_snapshot=base_snapshot,
                 validity=epoch,

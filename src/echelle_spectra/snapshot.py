@@ -4,10 +4,23 @@ A snapshot directory is identified by its folder name and contains one
 ``snapshot.toml`` binder.  The binder names every calibration input by role and
 records a SHA-256 digest, so downstream cubes and run receipts can refer to one
 stable snapshot id instead of a loose collection of filenames.
+
+An artifact reaches the binder in one of two ways, and the binder says which.
+A *copied* artifact lives inside the snapshot folder at a relative path that
+cannot leave it — that is what the computed files (the pattern, the corrected
+wavelength table, the sphere's spectral reference) always are.  A *referenced*
+artifact keeps living where it was measured, and the binder records the path
+back to it beside the same digest and size.  Raw detector frames are referenced:
+the calibration folder already holds the lamp and sphere SIFs, and a snapshot
+sitting two levels below them has nothing to gain from a second copy of 380 MB.
+
+The digest stays the identity authority either way.  The path only says where
+the bytes live, and validation re-reads them there.
 """
 
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import json
 import os
@@ -38,6 +51,20 @@ ROLE_FILENAMES = {
 }
 REQUIRED_ROLES = frozenset(ROLE_FILENAMES)
 
+#: An artifact whose bytes were copied into the snapshot folder.  This is what a
+#: binder means when it states no ``kind`` at all, which is what every snapshot
+#: written before references existed does.
+ARTIFACT_COPIED = "copied"
+#: An artifact the snapshot points back at instead of copying.  ``path`` is then
+#: POSIX-relative to the snapshot root (``../../sphere-0.1s-x3.sif``) when the
+#: source shares the calibration folder, and absolute when it does not.
+ARTIFACT_REFERENCED = "referenced"
+ARTIFACT_KINDS = (ARTIFACT_COPIED, ARTIFACT_REFERENCED)
+
+#: The raw detector frames a thin snapshot references rather than copies.  The
+#: computed files are not here on purpose: the snapshot owns those outright.
+RAW_SOURCE_ROLES = frozenset({"sphere", "sphere_background", "lamp"})
+
 
 class SnapshotError(ValueError):
     """Base error for an invalid snapshot request or artifact."""
@@ -53,7 +80,13 @@ class SnapshotValidationError(SnapshotError):
 
 @dataclass(frozen=True)
 class Artifact:
-    """One file recorded in a snapshot manifest."""
+    """One file recorded in a snapshot manifest.
+
+    ``path`` is read according to ``kind``: inside the snapshot for a copied
+    artifact, and back out to the measured file for a referenced one.
+    ``resolved_path`` is filled in by :func:`load_snapshot`, which is the moment
+    the manifest text becomes one absolute location on this machine.
+    """
 
     role: str
     path: str
@@ -61,6 +94,14 @@ class Artifact:
     size_bytes: int
     source_name: str = ""
     label: str = ""
+    kind: str = ARTIFACT_COPIED
+    resolved_path: Path | None = None
+
+    @property
+    def is_reference(self) -> bool:
+        """Whether the bytes live outside the snapshot folder."""
+
+        return self.kind == ARTIFACT_REFERENCED
 
 
 @dataclass(frozen=True)
@@ -93,15 +134,43 @@ class Snapshot:
             )
         return matches[0]
 
+    def path_for(self, artifact: Artifact) -> Path:
+        """Return where *artifact*'s bytes actually are on this machine."""
+
+        if artifact.resolved_path is not None:
+            return artifact.resolved_path
+        if artifact.is_reference:
+            return reference_target(self.root, artifact.path)
+        return self.root / artifact.path
+
+    def source_path(self, role: str) -> Path:
+        """Return the readable location of the unique artifact for *role*."""
+
+        return self.path_for(self.artifact_for_role(role))
+
+    def _calibration_name(self, role: str) -> str:
+        """Name one role the way ``build_calibration`` wants to receive it.
+
+        A copied artifact keeps its bare role filename, which the loader
+        resolves inside the snapshot folder and therefore cannot be shadowed by
+        the working directory.  A referenced one is handed over already resolved,
+        because no folder-relative name could reach it.
+        """
+
+        artifact = self.artifact_for_role(role)
+        if artifact.is_reference:
+            return str(self.path_for(artifact))
+        return artifact.path
+
     def calibration_files(self) -> dict[str, str]:
         """Return the established ``Calibrations`` filename vocabulary."""
 
         return {
-            "orders": self.artifact_for_role("pattern").path,
-            "wavelength": self.artifact_for_role("wavelength").path,
-            "sphr": self.artifact_for_role("sphere").path,
-            "bkgr": self.artifact_for_role("sphere_background").path,
-            "integral": self.artifact_for_role("integral").path,
+            "orders": self._calibration_name("pattern"),
+            "wavelength": self._calibration_name("wavelength"),
+            "sphr": self._calibration_name("sphere"),
+            "bkgr": self._calibration_name("sphere_background"),
+            "integral": self._calibration_name("integral"),
         }
 
     def provenance_attrs(self) -> dict[str, str]:
@@ -114,6 +183,10 @@ class Snapshot:
                 "path": artifact.path,
                 "sha256": artifact.sha256,
                 "size_bytes": artifact.size_bytes,
+                # Stated only when it is not the historical default, so a cube
+                # written from an all-copied snapshot carries the same
+                # provenance string it always did.
+                **({"kind": artifact.kind} if artifact.is_reference else {}),
                 **({"source_name": artifact.source_name} if artifact.source_name else {}),
                 **({"label": artifact.label} if artifact.label else {}),
             }
@@ -160,6 +233,54 @@ def file_digest(path: Path) -> tuple[str, int]:
             digest.update(block)
             size += len(block)
     return digest.hexdigest(), size
+
+
+def _is_absolute_text(text: str) -> bool:
+    """Whether *text* names an absolute path in either path flavour."""
+
+    windows = PureWindowsPath(text)
+    return PurePosixPath(text).is_absolute() or windows.is_absolute() or bool(windows.drive)
+
+
+def reference_target(snapshot_root: str | Path, recorded: str) -> Path:
+    """Resolve a referenced artifact's recorded path to one absolute location.
+
+    Relative references are read against the snapshot folder rather than the
+    working directory, so a snapshot resolves to the same files whatever
+    directory the process was started in.
+    """
+
+    text = str(recorded)
+    if _is_absolute_text(text):
+        return Path(text).resolve()
+    parts = PurePosixPath(text).parts
+    return Path(snapshot_root).joinpath(*parts).resolve()
+
+
+def reference_path(snapshot_root: str | Path, source: str | Path) -> str:
+    """Return the manifest text pointing from a snapshot back at *source*.
+
+    A source inside the calibration folder that holds the snapshot is recorded
+    relative to the snapshot root — ``../../sphere-0.1s-x3.sif`` for the ordinary
+    bench layout — so the whole calibration folder can be moved or copied to
+    another machine without a single edit.  A source from anywhere else is
+    recorded absolutely, because a relative path across unrelated trees would
+    only pretend to be portable.
+    """
+
+    root = Path(snapshot_root).resolve()
+    target = Path(source).resolve()
+    parents = list(root.parents)
+    # The calibration folder is the snapshot root's grandparent in the bench
+    # layout, <calibration folder>/calibrations/<id>; a shallower root simply
+    # offers less tree to stay inside.
+    tree = parents[1] if len(parents) >= 2 else root.parent
+    try:
+        target.relative_to(tree)
+        relative = os.path.relpath(target, root)
+    except ValueError:
+        return target.as_posix()
+    return PurePosixPath(*Path(relative).parts).as_posix()
 
 
 def _toml_string(value: object) -> str:
@@ -226,11 +347,13 @@ def render_manifest(  # noqa: C901 - explicit TOML value kinds stay legible here
             lines.append(f"{key} = {rendered}")
 
     for artifact in artifacts:
+        lines.extend(["", "[[artifacts]]", f"role = {_toml_string(artifact.role)}"])
+        if artifact.is_reference:
+            # Said out loud, because a reader must never have to guess from the
+            # shape of a path whether the bytes are in here or out there.
+            lines.append(f"kind = {_toml_string(artifact.kind)}")
         lines.extend(
             [
-                "",
-                "[[artifacts]]",
-                f"role = {_toml_string(artifact.role)}",
                 f"path = {_toml_string(artifact.path)}",
                 f"sha256 = {_toml_string(artifact.sha256)}",
                 f"size_bytes = {artifact.size_bytes}",
@@ -261,19 +384,33 @@ def _parse_artifact(item: object, index: int, errors: list[str]) -> Artifact | N
     role = str(item.get("role", "")).strip()
     path = str(item.get("path", "")).strip()
     sha256 = str(item.get("sha256", "")).strip().lower()
+    # No key means the artifact was copied in, which is what every binder
+    # written before references existed says by saying nothing.
+    kind = str(item.get("kind", ARTIFACT_COPIED)).strip().lower()
     try:
         size_bytes = int(item.get("size_bytes", -1))
     except (TypeError, ValueError):
         size_bytes = -1
     if not role:
         errors.append(f"artifact {index} has no role")
-    if _safe_relative_path(path) is None:
-        errors.append(f"artifact {index} path must stay inside the snapshot: {path!r}")
+    if kind not in ARTIFACT_KINDS:
+        errors.append(
+            f"artifact {index} has an unknown kind {kind!r}; expected one of "
+            + ", ".join(ARTIFACT_KINDS)
+        )
+        return None
+    path_ok = bool(path) if kind == ARTIFACT_REFERENCED else _safe_relative_path(path) is not None
+    if not path_ok:
+        errors.append(
+            f"artifact {index} has no path"
+            if kind == ARTIFACT_REFERENCED
+            else f"artifact {index} path must stay inside the snapshot: {path!r}"
+        )
     if not re.fullmatch(r"[0-9a-f]{64}", sha256):
         errors.append(f"artifact {index} has an invalid SHA-256 digest")
     if size_bytes < 0:
         errors.append(f"artifact {index} has an invalid size_bytes")
-    if not role or _safe_relative_path(path) is None or size_bytes < 0:
+    if not role or not path_ok or size_bytes < 0:
         return None
     return Artifact(
         role=role,
@@ -282,13 +419,70 @@ def _parse_artifact(item: object, index: int, errors: list[str]) -> Artifact | N
         size_bytes=size_bytes,
         source_name=str(item.get("source_name", "")),
         label=str(item.get("label", "")),
+        kind=kind,
     )
 
 
+def _verify_artifact(  # noqa: C901 - one artifact, every way it can be wrong
+    artifact: Artifact,
+    *,
+    root: Path,
+    reference_root: Path,
+    verify_files: bool,
+    errors: list[str],
+) -> Artifact:
+    """Locate one artifact, check it, and return it carrying that location."""
+
+    if artifact.is_reference:
+        target = reference_target(reference_root, artifact.path)
+        if not target.is_file():
+            # The absolute path, because "not found: ../../sphere.sif" tells an
+            # operator nothing about which folder was actually looked in.
+            errors.append(f"referenced {artifact.role} source not found: {target}")
+            return artifact
+        if verify_files:
+            actual_sha256, actual_size = file_digest(target)
+            if actual_sha256 != artifact.sha256:
+                errors.append(f"referenced {artifact.role} source digest mismatch: {target}")
+            if actual_size != artifact.size_bytes:
+                errors.append(f"referenced {artifact.role} source size mismatch: {target}")
+        return dataclasses.replace(artifact, resolved_path=target)
+
+    relative = _safe_relative_path(artifact.path)
+    if relative is None:
+        return artifact
+    artifact_path = root / relative
+    try:
+        resolved = artifact_path.resolve()
+    except OSError as exc:
+        errors.append(f"cannot resolve artifact {artifact.path}: {exc}")
+        return artifact
+    root_resolved = root.resolve()
+    if root_resolved != resolved and root_resolved not in resolved.parents:
+        errors.append(f"artifact resolves outside the snapshot: {artifact.path}")
+        return artifact
+    if not artifact_path.is_file():
+        errors.append(f"artifact file not found: {artifact.path}")
+        return artifact
+    if verify_files:
+        actual_sha256, actual_size = file_digest(artifact_path)
+        if actual_sha256 != artifact.sha256:
+            errors.append(f"artifact digest mismatch: {artifact.path}")
+        if actual_size != artifact.size_bytes:
+            errors.append(f"artifact size mismatch: {artifact.path}")
+    return dataclasses.replace(artifact, resolved_path=resolved)
+
+
 def load_snapshot(  # noqa: C901 - one pass accumulates every validation failure
-    path: str | Path, *, verify_files: bool = True
+    path: str | Path, *, verify_files: bool = True, reference_root: str | Path | None = None
 ) -> Snapshot:
-    """Load and validate a snapshot directory or its manifest path."""
+    """Load and validate a snapshot directory or its manifest path.
+
+    ``reference_root`` states where referenced sources should be resolved from
+    when the folder is not yet standing in its final place — which is exactly
+    the situation :func:`create_snapshot` validates from, one staging directory
+    away from where the snapshot is about to live.
+    """
 
     supplied = Path(path)
     manifest_path = supplied if supplied.is_file() else supplied / "snapshot.toml"
@@ -370,34 +564,25 @@ def load_snapshot(  # noqa: C901 - one pass accumulates every validation failure
         if roles.count(role) > 1:
             errors.append(f"required artifact role appears more than once: {role}")
 
-    root_resolved = root.resolve()
+    resolution_root = Path(reference_root) if reference_root is not None else root
     seen_paths: set[str] = set()
+    located: list[Artifact] = []
     for artifact in artifacts:
         if artifact.path in seen_paths:
             errors.append(f"artifact path appears more than once: {artifact.path}")
+            located.append(artifact)
             continue
         seen_paths.add(artifact.path)
-        relative = _safe_relative_path(artifact.path)
-        if relative is None:
-            continue
-        artifact_path = root / relative
-        try:
-            resolved = artifact_path.resolve()
-        except OSError as exc:
-            errors.append(f"cannot resolve artifact {artifact.path}: {exc}")
-            continue
-        if root_resolved != resolved and root_resolved not in resolved.parents:
-            errors.append(f"artifact resolves outside the snapshot: {artifact.path}")
-            continue
-        if not artifact_path.is_file():
-            errors.append(f"artifact file not found: {artifact.path}")
-            continue
-        if verify_files:
-            actual_sha256, actual_size = file_digest(artifact_path)
-            if actual_sha256 != artifact.sha256:
-                errors.append(f"artifact digest mismatch: {artifact.path}")
-            if actual_size != artifact.size_bytes:
-                errors.append(f"artifact size mismatch: {artifact.path}")
+        located.append(
+            _verify_artifact(
+                artifact,
+                root=root,
+                reference_root=resolution_root,
+                verify_files=verify_files,
+                errors=errors,
+            )
+        )
+    artifacts = tuple(located)
 
     if errors:
         raise SnapshotValidationError(errors)
@@ -418,12 +603,18 @@ def create_snapshot(  # noqa: C901 - atomic assembly keeps all cleanup in one sc
     alignment: Mapping[str, object] | None = None,
     qc: Mapping[str, object] | None = None,
     imported: Mapping[str, object] | None = None,
+    reference_raw: bool = False,
 ) -> Snapshot:
     """Assemble an immutable snapshot folder and validate it before publish.
 
     Construction occurs in a temporary sibling directory.  The final directory
     appears only after every copy, digest, manifest write, and validation has
     succeeded.  An existing snapshot is always refused.
+
+    With ``reference_raw`` the raw detector frames — the sphere pair and every
+    lamp — are digested where they are and recorded as references instead of
+    being copied in.  The computed files are still copied, so the snapshot owns
+    everything it computed and points at everything it merely read.
     """
 
     normalized_id = validate_snapshot_id(snapshot_id)
@@ -464,7 +655,8 @@ def create_snapshot(  # noqa: C901 - atomic assembly keeps all cleanup in one sc
         if not source.is_file():
             raise SnapshotError(f"lamp source is not a file: {source}")
     names = [source.name.casefold() for _, source in lamp_sources]
-    if len(names) != len(set(names)):
+    if not reference_raw and len(names) != len(set(names)):
+        # Only copies collide: two referenced lamps keep their own folders.
         raise SnapshotError("lamp source filenames must be unique")
 
     destination_parent = Path(destination_root)
@@ -480,36 +672,51 @@ def create_snapshot(  # noqa: C901 - atomic assembly keeps all cleanup in one sc
     staging.mkdir()
     try:
         artifacts: list[Artifact] = []
-        for role, filename in ROLE_FILENAMES.items():
-            source = source_files[role]
-            target = staging / filename
+
+        def referenced(role: str, source: Path, label: str = "") -> Artifact:
+            """Digest *source* where it lies and point the manifest at it."""
+
+            sha256, size_bytes = file_digest(source)
+            return Artifact(
+                role=role,
+                # Relative to the published folder, never to the staging one it
+                # is assembled in: the recorded path must survive the rename.
+                path=reference_path(destination, source),
+                sha256=sha256,
+                size_bytes=size_bytes,
+                source_name=source.name,
+                label=label,
+                kind=ARTIFACT_REFERENCED,
+            )
+
+        def copied(role: str, source: Path, target: Path, label: str = "") -> Artifact:
             shutil.copy2(source, target)
             sha256, size_bytes = file_digest(target)
-            artifacts.append(
-                Artifact(
-                    role=role,
-                    path=target.relative_to(staging).as_posix(),
-                    sha256=sha256,
-                    size_bytes=size_bytes,
-                    source_name=source.name,
-                )
+            return Artifact(
+                role=role,
+                path=target.relative_to(staging).as_posix(),
+                sha256=sha256,
+                size_bytes=size_bytes,
+                source_name=source.name,
+                label=label,
             )
-        if lamp_sources:
+
+        for role, filename in ROLE_FILENAMES.items():
+            source = source_files[role]
+            if reference_raw and role in RAW_SOURCE_ROLES:
+                artifacts.append(referenced(role, source))
+            else:
+                artifacts.append(copied(role, source, staging / filename))
+        if lamp_sources and reference_raw:
+            artifacts.extend(
+                referenced("lamp", source, label=label) for label, source in lamp_sources
+            )
+        elif lamp_sources:
             lamps_dir = staging / "lamps"
             lamps_dir.mkdir()
             for label, source in lamp_sources:
-                target = lamps_dir / source.name
-                shutil.copy2(source, target)
-                sha256, size_bytes = file_digest(target)
                 artifacts.append(
-                    Artifact(
-                        role="lamp",
-                        path=target.relative_to(staging).as_posix(),
-                        sha256=sha256,
-                        size_bytes=size_bytes,
-                        source_name=source.name,
-                        label=label,
-                    )
+                    copied("lamp", source, lamps_dir / source.name, label=label)
                 )
 
         manifest_text = render_manifest(
@@ -525,7 +732,7 @@ def create_snapshot(  # noqa: C901 - atomic assembly keeps all cleanup in one sc
             imported=imported,
         )
         (staging / "snapshot.toml").write_text(manifest_text, encoding="utf-8")
-        load_snapshot(staging)
+        load_snapshot(staging, reference_root=destination)
         os.replace(staging, destination)
         shutil.rmtree(staging_parent, ignore_errors=True)
     except Exception:

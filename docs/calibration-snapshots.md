@@ -1,24 +1,62 @@
 # Calibration snapshots
 
-A calibration snapshot is one immutable folder containing the files needed to
+A calibration snapshot is one immutable folder naming every file needed to
 extract and calibrate spectra. Its folder name is the identity used by cubes,
 registries, catalogs, and run receipts:
 
 ```text
-calibrations/20260901_cmos/
-├── snapshot.toml
-├── pattern.txt
-├── wavelength.txt
-├── sphere.sif
-├── sphere_bg.sif
-├── integral.txt
-└── lamps/
-    ├── h2.sif
-    └── thar.sif
+20260901_calib/                        the calibration folder
+├── sphere-0.1s-x3.sif                 raw frames, referenced from below
+├── sphere-0.1s-x3-bg.sif
+├── thar.sif
+└── calibrations/20260901_cmos/        the snapshot
+    ├── snapshot.toml
+    ├── pattern.txt
+    ├── wavelength.txt
+    └── integral.txt
 ```
 
 The ID format is `YYYYMMDD_<detector>[-rev]`. A refinement derived later from
 science lines can use a revision suffix such as `20260901_cmos-r1`.
+
+## The folder holds the light; the snapshot holds what was computed
+
+A snapshot records two kinds of artifact, and `snapshot.toml` says plainly which
+each one is:
+
+| `kind` | Where the bytes are | Which files |
+| --- | --- | --- |
+| `copied` (the default, written by saying nothing) | inside the snapshot folder, at a relative path that cannot leave it | `pattern.txt`, `wavelength.txt`, `integral.txt` |
+| `referenced` | wherever they were measured, named by `path` | the sphere pair and every lamp signal and background SIF |
+
+```toml
+[[artifacts]]
+role = "wavelength"
+path = "wavelength.txt"
+sha256 = "1f0c…"
+size_bytes = 20416
+
+[[artifacts]]
+role = "sphere"
+kind = "referenced"
+path = "../../sphere-0.1s-x3.sif"
+sha256 = "9ab4…"
+size_bytes = 398458880
+source_name = "sphere-0.1s-x3.sif"
+```
+
+The digest is the identity either way. The path only says where the bytes live,
+and validation reads them there and hashes them again. A reference is stored
+relative to the snapshot folder when the source is inside the same calibration
+folder, so the whole folder can be moved or copied to another machine with no
+edit; a source from anywhere else is stored as an absolute path, because a
+relative path across unrelated trees would only pretend to be portable.
+
+Referencing is why raw frames are not duplicated. A calibration folder already
+holds its lamp and sphere SIFs — hundreds of megabytes of them — and a snapshot
+two levels below has nothing to gain from a second copy sitting beside the
+first. Older snapshots that do hold copies are still perfectly valid and are
+read exactly as before: an entry with no `kind` is a copied one.
 
 ## Create a snapshot
 
@@ -49,6 +87,11 @@ The source files are opened read-only. Construction happens in a temporary
 sibling directory and the final folder appears only after every copy, digest,
 manifest write, and integrity check succeeds.
 
+`echelle snapshot create` copies every role, which is what assembling a snapshot
+out of scattered files should do. The live bench references the raw frames
+instead, because it is standing in the folder that already holds them; see
+[the calibration bench](calibration-bench.md).
+
 ## Validate or inspect
 
 ```powershell
@@ -63,9 +106,24 @@ Validation checks:
 - detector consistency with the snapshot ID;
 - required roles (`pattern`, `wavelength`, `sphere`, `sphere_background`, and
   `integral`);
-- relative paths that cannot leave the snapshot directory;
-- presence, byte size, and SHA-256 digest of every artifact;
+- relative paths that cannot leave the snapshot directory, for copied artifacts;
+- presence, byte size, and SHA-256 digest of every artifact, copied or
+  referenced — a referenced source is re-read and re-hashed where it is named;
 - base-snapshot identity and self-reference.
+
+A referenced source that has gone missing or changed is a plain validation
+failure that names the full path it looked in:
+
+```text
+Snapshot is invalid:
+  - referenced sphere source not found: T:\2025-LHD-BH\Echelle\20260901_calib\sphere-0.1s-x3.sif
+```
+
+Relative references are read from the snapshot folder, never from the working
+directory, so `echelle snapshot validate` gives the same answer from anywhere.
+`echelle snapshot show` prints each referenced frame with the full path it
+resolves to, so you can see what a snapshot actually uses without opening the
+binder.
 
 `snapshot.toml` begins with comments explaining that it remains ordinary
 hand-editable TOML. If it is edited, run the validator again. A changed artifact

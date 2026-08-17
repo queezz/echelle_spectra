@@ -903,6 +903,76 @@ def test_complete_rehearsal_saves_and_validates_through_snapshot_api(tmp_path):
     }
 
 
+def test_the_bench_saves_a_snapshot_that_points_at_the_frames_it_measured(tmp_path):
+    """The calibration folder holds the light; the snapshot holds the arithmetic.
+
+    A bench save used to leave a second copy of every sphere and lamp SIF one
+    folder away from the originals.  It records where they are and what they
+    hash to instead, so the folder that already held them completely is still
+    the only place they live.
+    """
+
+    sources = _curated_sources(tmp_path)
+    alignment = _aligned_session(tmp_path)
+
+    _campaign_obj, snapshot = _saved_snapshot(tmp_path, sources, alignment)
+
+    inside = {path.name for path in snapshot.root.rglob("*")}
+    assert not any(name.lower().endswith(".sif") for name in inside)
+    assert "lamps" not in inside
+    assert inside == {
+        "snapshot.toml",
+        "pattern.txt",
+        "wavelength.txt",
+        "integral.txt",
+        "alignment.toml",
+    }
+
+    referenced = {
+        artifact.path: artifact
+        for artifact in snapshot.artifacts
+        if artifact.is_reference
+    }
+    assert set(referenced) == {
+        "../../sphere.sif",
+        "../../sphere_bg.sif",
+        "../../thar.sif",
+        "../../thar_bg.sif",
+    }
+    for path, artifact in referenced.items():
+        source = sources[Path(path).name]
+        assert snapshot.path_for(artifact) == source.resolve()
+        assert artifact.sha256 == hashlib.sha256(source.read_bytes()).hexdigest()
+        assert artifact.size_bytes == source.stat().st_size
+
+    # And the whole folder still passes the same validator, unchanged.
+    assert load_snapshot(snapshot.root).snapshot_id == "20250813_cmos"
+
+
+def test_the_generated_export_config_names_the_sphere_where_it_really_is(tmp_path):
+    """The config bundle points back out too, or it would name a copy nobody made."""
+
+    sources = _curated_sources(tmp_path)
+    alignment = _aligned_session(tmp_path)
+    campaign = _campaign(tmp_path, sources)
+    _classify_complete(campaign, sources, alignment.frame)
+    campaign.compute_sphere_comparison(_calculator)
+
+    paths = campaign.write_tomls(
+        tmp_path / "calibrations" / "configs",
+        "20250813_cmos",
+        alignment,
+        snapshot_root=tmp_path / "calibrations" / "20250813_cmos",
+    )
+
+    with paths["export"].open("rb") as stream:
+        calibration = tomllib.load(stream)["calibration"]
+    assert calibration["sphere"] == "../../sphere.sif"
+    assert calibration["sphere_background"] == "../../sphere_bg.sif"
+    # The computed files are the snapshot's own and are still named plainly.
+    assert calibration["order_pattern"] == "pattern.txt"
+
+
 def test_existing_snapshot_refusal_is_recoverable_with_new_identity(tmp_path):
     sources = _sources(tmp_path)
     alignment = _aligned_session(tmp_path)

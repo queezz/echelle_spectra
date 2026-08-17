@@ -3506,6 +3506,10 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
                 snapshot_id,
                 self.session,
                 overwrite=overwrite,
+                # Where Save will put the snapshot, so the generated export
+                # configuration can name the sphere frames from there exactly
+                # as the snapshot's own binder does.
+                snapshot_root=self.output_root / snapshot_id,
             )
         except (OSError, SnapshotError, ValueError) as exc:
             self.message_value.setText(f"Alignment settings were not saved: {exc}")
