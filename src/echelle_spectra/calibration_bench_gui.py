@@ -29,6 +29,7 @@ from .calibration_bench import (
 from .calibration_campaign import (
     KNOWN_LAMP_NAMES,
     PREVIOUS_CAMPAIGN_LAMPS,
+    SELF_COMPARISON_NOTE,
     CalibrationCampaignSession,
     ChecklistState,
     ComparisonState,
@@ -61,9 +62,24 @@ _DEFAULT_WAVELENGTH = (
     / "Th_wavelength_CMOS_20240305_aligned_to_20250926.txt"
 )
 _DEFAULT_INTEGRAL = _CALIBRATION_DIR / "integrating_sphere.txt"
+#: The packaged 2024-03-05 sphere pair, used as the previous campaign unless
+#: the operator names another.  It is a *copy* of frames from a real folder,
+#: which is why the comparison checks content and says so when the folder
+#: being calibrated is that same folder.
 _DEFAULT_PREVIOUS_SPHERE = _CALIBRATION_DIR / "sphere_cmos_20240305.sif"
 _DEFAULT_PREVIOUS_SPHERE_BACKGROUND = (
     _CALIBRATION_DIR / "sphere_cmos_20240305_bkg.sif"
+)
+
+_SPHERE_FACTORS_TITLE = "Absolute calibration factors"
+_SPHERE_FACTORS_EXPLANATION = (
+    "The sphere signal minus its background, divided by the integrating "
+    "sphere's known radiance, gives the factor curve that turns counts into "
+    "W m⁻² sr⁻¹ nm⁻¹. The median ratio compares this campaign's curve with "
+    "the previous one: near 1 means the instrument's response has not moved, "
+    "and a large departure is either real ageing or an exposure-normalisation "
+    "mismatch worth chasing before the trip. Only the sphere pair is needed — "
+    "no lamp."
 )
 
 #: The one folder everything the bench generates lives under, wherever its
@@ -2027,14 +2043,8 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         self.comparison_value.setObjectName("stateBadge")
         self._explainable(
             self.comparison_value,
-            "Absolute calibration factors",
-            "The sphere signal minus its background, divided by the "
-            "integrating sphere's known radiance, gives the factor curve that "
-            "turns counts into W m⁻² sr⁻¹ nm⁻¹. The median ratio compares this "
-            "campaign's curve with the previous one: near 1 means the "
-            "instrument's response has not moved, and a large departure is "
-            "either real ageing or an exposure-normalisation mismatch worth "
-            "chasing before the trip. Only the sphere pair is needed — no lamp.",
+            _SPHERE_FACTORS_TITLE,
+            _SPHERE_FACTORS_EXPLANATION,
         )
         comparison_layout.addWidget(self.comparison_value)
         # No button on the readings strip.  Bench state, Alignment and Sphere
@@ -3887,7 +3897,12 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
             return
         state = getattr(result, "state", None)
         if state is ComparisonState.READY:
-            self.message_value.setText("Sphere factors computed and compared.")
+            self.message_value.setText(
+                "Sphere factors computed, but the previous pair is a copy of "
+                "this campaign's own sphere — the ratio proves nothing."
+                if getattr(result, "self_comparison", False)
+                else "Sphere factors computed and compared."
+            )
         elif state is ComparisonState.INSUFFICIENT_DATA:
             self.message_value.setText(
                 "Candidate factors computed; previous comparison is insufficient data."
@@ -4897,16 +4912,48 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         assert self.campaign is not None
         comparison = self.campaign.comparison
         if comparison.state is ComparisonState.READY:
-            self.comparison_value.setText(
+            text = (
                 "READY · new/previous median "
                 f"{comparison.median_ratio:.3f}; 5–95% "
                 f"{comparison.p05_ratio:.3f}–{comparison.p95_ratio:.3f} "
                 f"({comparison.sample_count} samples)."
             )
+            # The ratio and the pair it was measured against are one reading:
+            # a median of 1.000 said alone is unfalsifiable, and the operator
+            # who read exactly that off his own folder was right to doubt it.
+            if comparison.reference_name:
+                text += f"\nvs {comparison.reference_name}"
+            if comparison.self_comparison:
+                text += f"\nSELF-CHECK · {SELF_COMPARISON_NOTE}."
+            self.comparison_value.setText(text)
         else:
             self.comparison_value.setText(
                 f"{comparison.state.value.replace('-', ' ').upper()} · {comparison.reason}"
             )
+        self._explain_comparison(comparison)
+
+    def _explain_comparison(self, comparison) -> None:
+        """Keep the Why dock's sphere-factor text on the real reference files.
+
+        The panel names the pair; the dock carries the absolute paths, which
+        is what settles whether "previous" is really previous.
+        """
+
+        text = _SPHERE_FACTORS_EXPLANATION
+        hint = ""
+        if comparison.reference_name:
+            text += (
+                "\n\nCompared against the previous pair:\n"
+                f"{comparison.previous_sphere}\n"
+                f"{comparison.previous_sphere_background}"
+            )
+            hint = f"Compared against {comparison.reference_name}"
+        if comparison.self_comparison:
+            text += f"\n\nSELF-CHECK: {SELF_COMPARISON_NOTE}."
+            hint = f"Self-check — {comparison.reference_name} is a copy of this sphere pair"
+        self._explainable(
+            self.comparison_value, _SPHERE_FACTORS_TITLE, text, hint=hint
+        )
 
     def _refresh_checklist(self) -> None:
         assert self.campaign is not None
@@ -5676,11 +5723,25 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument("--integral", type=Path, default=_DEFAULT_INTEGRAL)
-    parser.add_argument("--previous-sphere", type=Path, default=_DEFAULT_PREVIOUS_SPHERE)
+    parser.add_argument(
+        "--previous-sphere",
+        type=Path,
+        default=_DEFAULT_PREVIOUS_SPHERE,
+        help=(
+            "sphere signal of the campaign to compare against (default: the "
+            f"packaged 2024-03-05 pair, {_DEFAULT_PREVIOUS_SPHERE.name}); "
+            "point this elsewhere when calibrating the folder those packaged "
+            "frames were copied from"
+        ),
+    )
     parser.add_argument(
         "--previous-sphere-background",
         type=Path,
         default=_DEFAULT_PREVIOUS_SPHERE_BACKGROUND,
+        help=(
+            "background of that previous sphere (default: the packaged "
+            f"2024-03-05 pair, {_DEFAULT_PREVIOUS_SPHERE_BACKGROUND.name})"
+        ),
     )
     parser.add_argument(
         "--lamp",

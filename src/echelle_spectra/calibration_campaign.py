@@ -45,6 +45,7 @@ from .snapshot import (
     Snapshot,
     SnapshotError,
     create_snapshot,
+    file_digest,
     load_snapshot,
     reference_path,
 )
@@ -68,6 +69,7 @@ __all__ = [
     "KNOWN_LAMP_NAMES",
     "LAMP_TABLE_SPECIES",
     "PREVIOUS_CAMPAIGN_LAMPS",
+    "SELF_COMPARISON_NOTE",
     "AbsoluteCalibrationResult",
     "BandCenterOffsets",
     "CalibrationCampaignSession",
@@ -121,6 +123,19 @@ KNOWN_LAMP_NAMES = ("ThAr", "Ne", "Hg", "H2", "Xe")
 
 #: What the previous campaign actually measured, offered as a suggestion.
 PREVIOUS_CAMPAIGN_LAMPS = ("Ne",)
+
+#: Said whenever the previous pair turns out to be a copy of the pair this
+#: campaign just measured.  Owner, 2026-08-18, reading a flawless 1.000 median
+#: over 42601 samples off his own 2024 folder: "I think the comparison compares
+#: new vs new now :)" — and it did, because the packaged previous sphere is a
+#: copy of the very file he had assigned.  A ratio nothing contradicts is not a
+#: result; the panel now says which, rather than leaving 1.000 to be read as
+#: agreement.
+SELF_COMPARISON_NOTE = (
+    "this compared the sphere against a copy of itself, so the ratio is a "
+    "self-check, not physics; choose a different previous pair for a real "
+    "comparison"
+)
 
 # Below this the correction would only reformat the table, never move a row.
 IDENTITY_SHIFT_PX = 1e-6
@@ -412,6 +427,21 @@ class SphereComparison:
     median_ratio: float | None = None
     p05_ratio: float | None = None
     p95_ratio: float | None = None
+    #: The previous-campaign pair the ratio was actually measured against.  A
+    #: ratio without its reference is a number nobody downstream can check.
+    previous_sphere: Path | None = None
+    previous_sphere_background: Path | None = None
+    #: True when that pair is the same measurement as this campaign's own
+    #: sphere pair, byte for byte — see :data:`SELF_COMPARISON_NOTE`.
+    self_comparison: bool = False
+
+    @property
+    def reference_name(self) -> str:
+        """The previous pair by filename, or ``""`` when there was none."""
+
+        if self.previous_sphere is None or self.previous_sphere_background is None:
+            return ""
+        return f"{self.previous_sphere.name} + {self.previous_sphere_background.name}"
 
 
 @dataclass(frozen=True)
@@ -1357,6 +1387,32 @@ def expected_lines_for_order(
     return tuple(expected)
 
 
+def _same_sphere_pair(
+    candidate: tuple[Path, Path], previous: tuple[Path | None, Path | None]
+) -> bool:
+    """Whether two sphere pairs are one measurement, byte for byte.
+
+    Content, never the filename: the packaged previous-campaign sphere is a
+    *copy* of a real folder's frames under a curated name, so comparing names
+    would miss precisely the case that matters — the operator re-calibrating
+    the folder those frames were copied from.  Four SHA-256 passes cost
+    nothing beside the two factor curves that have just been computed.
+    """
+
+    if any(path is None for path in previous):
+        return False
+    try:
+        return all(
+            file_digest(left)[0] == file_digest(right)[0]
+            for left, right in zip(candidate, previous)
+        )
+    except OSError:
+        # A file that cannot be read cannot be proved a copy.  The comparison
+        # itself succeeded, so this stays quiet rather than turning an IO
+        # hiccup into a verdict about the physics.
+        return False
+
+
 def compute_absolute_calibration(
     *,
     pattern: Path,
@@ -2099,6 +2155,9 @@ class CalibrationCampaignSession:
                 candidate=candidate,
             )
             return self.comparison
+        reference = (
+            f"{self.previous_sphere.name} + {self.previous_sphere_background.name}"
+        )
         try:
             previous = calculator(
                 pattern=self.pattern_source,
@@ -2110,10 +2169,20 @@ class CalibrationCampaignSession:
         except Exception as exc:
             self.comparison = SphereComparison(
                 ComparisonState.INSUFFICIENT_DATA,
-                f"previous factors could not be computed: {exc}",
+                f"previous factors ({reference}) could not be computed: {exc}",
                 candidate=candidate,
+                previous_sphere=self.previous_sphere,
+                previous_sphere_background=self.previous_sphere_background,
             )
             return self.comparison
+
+        # Whether the "previous" pair is this very campaign's pair, wearing a
+        # packaged name.  Checked here, where both pairs are known and the
+        # expensive part (two factor curves) has already been paid for.
+        self_comparison = _same_sphere_pair(
+            (sphere.path, background.path),
+            (self.previous_sphere, self.previous_sphere_background),
+        )
 
         count = min(candidate.factors_wmsr.size, previous.factors_wmsr.size)
         candidate_values = candidate.factors_wmsr[:count]
@@ -2128,21 +2197,39 @@ class CalibrationCampaignSession:
         if ratio.size < 20:
             self.comparison = SphereComparison(
                 ComparisonState.INSUFFICIENT_DATA,
-                "fewer than 20 finite positive factor samples overlap",
+                f"fewer than 20 finite positive factor samples overlap with {reference}",
                 candidate,
                 previous,
                 int(ratio.size),
+                previous_sphere=self.previous_sphere,
+                previous_sphere_background=self.previous_sphere_background,
+                self_comparison=self_comparison,
             )
             return self.comparison
+        # READY either way: the factors themselves are sound, and a self-check
+        # is not a failure — it is a comparison that proved nothing, which is a
+        # thing to say rather than a thing to block on.
+        reason = (
+            f"candidate and previous factors share a finite comparison range, "
+            f"compared against {reference}"
+        )
+        if self_comparison:
+            reason = (
+                f"the previous pair ({reference}) is the same measurement as "
+                f"this campaign's own sphere pair — {SELF_COMPARISON_NOTE}"
+            )
         self.comparison = SphereComparison(
             ComparisonState.READY,
-            "candidate and previous factors share a finite comparison range",
+            reason,
             candidate,
             previous,
             int(ratio.size),
             float(np.median(ratio)),
             float(np.percentile(ratio, 5)),
             float(np.percentile(ratio, 95)),
+            previous_sphere=self.previous_sphere,
+            previous_sphere_background=self.previous_sphere_background,
+            self_comparison=self_comparison,
         )
         self._update_save_state(None)
         return self.comparison
@@ -2637,18 +2724,8 @@ class CalibrationCampaignSession:
             "# Review freely; this is ordinary authoritative TOML.",
             'schema = "echelle-calibration-campaign/v1"',
             f"snapshot_id = {_toml_string(snapshot_id)}",
-            f"comparison_state = {_toml_string(self.comparison.state.value)}",
-            f"comparison_reason = {_toml_string(self.comparison.reason)}",
+            *self._comparison_lines(),
         ]
-        if self.comparison.median_ratio is not None:
-            campaign_lines.extend(
-                [
-                    f"factor_median_ratio = {self.comparison.median_ratio:.12g}",
-                    f"factor_p05_ratio = {self.comparison.p05_ratio:.12g}",
-                    f"factor_p95_ratio = {self.comparison.p95_ratio:.12g}",
-                    f"factor_sample_count = {self.comparison.sample_count}",
-                ]
-            )
         # Where the sphere's own bands sat against the pattern this campaign
         # chose.  Written whether it is comfortable or not: a later reader
         # deciding how much to trust these factors is reading for exactly this.
@@ -2768,6 +2845,43 @@ class CalibrationCampaignSession:
             "alignment": "\n".join(alignment_lines) + "\n",
             "export": "\n".join(export_lines) + "\n",
         }
+
+    def _comparison_lines(self) -> list[str]:
+        """The sphere comparison in TOML: its verdict, and what it compared to.
+
+        The ratio and the pair it was measured against belong together — a
+        median with no named reference cannot be checked by anyone reading
+        this file later, and a self-check has to be labelled as one.
+        """
+
+        comparison = self.comparison
+        lines = [
+            f"comparison_state = {_toml_string(comparison.state.value)}",
+            f"comparison_reason = {_toml_string(comparison.reason)}",
+        ]
+        # Names only, like every other source in this file.
+        if comparison.previous_sphere is not None:
+            lines.append(
+                "comparison_previous_sphere = "
+                f"{_toml_string(comparison.previous_sphere.name)}"
+            )
+        if comparison.previous_sphere_background is not None:
+            lines.append(
+                "comparison_previous_sphere_background = "
+                f"{_toml_string(comparison.previous_sphere_background.name)}"
+            )
+        if comparison.self_comparison:
+            lines.append("comparison_self = true")
+        if comparison.median_ratio is not None:
+            lines.extend(
+                [
+                    f"factor_median_ratio = {comparison.median_ratio:.12g}",
+                    f"factor_p05_ratio = {comparison.p05_ratio:.12g}",
+                    f"factor_p95_ratio = {comparison.p95_ratio:.12g}",
+                    f"factor_sample_count = {comparison.sample_count}",
+                ]
+            )
+        return lines
 
     def _band_offset_lines(self) -> list[str]:
         """The sphere-against-pattern reading, in TOML, absence included."""
@@ -3142,6 +3256,9 @@ class CalibrationCampaignSession:
                         (item.magnitude_px for item in alignment.residuals), default=0.0
                     ),
                     "sphere_comparison": self.comparison.state.value,
+                    "sphere_comparison_reference": self.comparison.reference_name
+                    or None,
+                    "sphere_comparison_self": self.comparison.self_comparison or None,
                 },
             )
             save_alignment_settings(settings, snapshot.root / ALIGNMENT_SETTINGS_FILENAME)

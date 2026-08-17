@@ -341,6 +341,53 @@ def test_cli_needs_no_watch_folder_and_no_named_lamp():
     assert _build_parser().parse_args(["--lamp", "Kr", "--lamp", "Ne"]).lamp == ["Kr", "Ne"]
 
 
+def test_previous_sphere_flags_say_what_the_default_actually_is():
+    """--help names the packaged pair, so "previous" is never a mystery."""
+
+    help_text = _build_parser().format_help()
+    assert "sphere_cmos_20240305.sif" in help_text
+    assert "sphere_cmos_20240305_bkg.sif" in help_text
+    assert "2024-03-05" in help_text
+
+
+def test_sphere_panel_names_its_reference_and_calls_out_a_self_check(
+    qt_app, tmp_path
+):
+    """The panel says what it compared against, and when that was itself."""
+
+    window = _campaign_window(tmp_path)
+    text = window.comparison_value.text()
+    assert "previous_sphere.sif + previous_sphere_bg.sif" in text
+    assert "SELF-CHECK" not in text
+    assert "previous_sphere.sif" in window.comparison_value.toolTip()
+
+    # Now the shipped situation: the "previous" pair is this sphere's bytes.
+    (tmp_path / "previous_sphere.sif").write_bytes(
+        (tmp_path / "sphere.sif").read_bytes()
+    )
+    (tmp_path / "previous_sphere_bg.sif").write_bytes(
+        (tmp_path / "sphere_bg.sif").read_bytes()
+    )
+    window.campaign.compute_sphere_comparison(
+        lambda **_values: AbsoluteCalibrationResult(
+            np.linspace(400, 700, 60), np.full(60, 1.0)
+        )
+    )
+    window.refresh()
+    qt_app.processEvents()
+
+    text = window.comparison_value.text()
+    assert text.startswith("READY ·"), text
+    assert "SELF-CHECK" in text
+    assert "self-check, not physics" in text
+    assert "choose a different previous pair" in text
+    # The absolute pair is one click away, per the house Why-dock pattern.
+    assert str(tmp_path / "previous_sphere.sif") in window.comparison_value.property(
+        "explainText"
+    )
+    window.close()
+
+
 def test_bench_views_lead_with_triage_and_manual_input(qt_app, tmp_path):
     window = _campaign_window(tmp_path)
     window.show()

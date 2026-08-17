@@ -855,6 +855,84 @@ def test_missing_previous_pair_is_own_insufficient_data_state(tmp_path):
     assert comparison.state is ComparisonState.INSUFFICIENT_DATA
     assert comparison.candidate is not None
     assert "unavailable" in comparison.reason
+    assert comparison.reference_name == ""
+    assert not comparison.self_comparison
+
+
+def test_a_genuine_previous_pair_is_named_in_the_message_and_the_record(tmp_path):
+    """A ratio is only checkable if it says what it was measured against."""
+
+    sources = _sources(tmp_path)
+    alignment = _aligned_session(tmp_path)
+    campaign = _campaign(tmp_path, sources)
+    _classify_complete(campaign, sources, alignment.frame)
+
+    comparison = campaign.compute_sphere_comparison(_calculator)
+
+    assert comparison.state is ComparisonState.READY
+    assert not comparison.self_comparison
+    assert comparison.reference_name == "previous_sphere.sif + previous_sphere_bg.sif"
+    assert f"compared against {comparison.reference_name}" in comparison.reason
+    assert campaign_module.SELF_COMPARISON_NOTE not in comparison.reason
+    # The absolute pair is on the record too, for the dock and the tooltip.
+    assert comparison.previous_sphere == sources["previous_sphere.sif"]
+    assert comparison.previous_sphere_background == sources["previous_sphere_bg.sif"]
+
+    paths = campaign.write_tomls(tmp_path / "configs", "20250813_cmos", alignment)
+    text = paths["campaign"].read_text(encoding="utf-8")
+    assert 'comparison_previous_sphere = "previous_sphere.sif"' in text
+    assert 'comparison_previous_sphere_background = "previous_sphere_bg.sif"' in text
+    assert "comparison_self" not in text
+
+    snapshot = campaign.save_snapshot(
+        tmp_path / "calibrations",
+        snapshot_id="20250813_cmos",
+        detector="cmos",
+        alignment=alignment,
+    )
+    manifest = (snapshot.root / "snapshot.toml").read_text(encoding="utf-8")
+    assert 'sphere_comparison_reference = "previous_sphere.sif + previous_sphere_bg.sif"' in manifest
+    assert "sphere_comparison_self" not in manifest
+
+
+def test_previous_pair_copied_from_the_candidate_reads_as_a_self_check(tmp_path):
+    """The owner's own 2024 folder, where "previous" was his very sphere.
+
+    The packaged previous-campaign sphere is a copy of frames from a real
+    folder, so re-calibrating that folder compared the measurement with
+    itself and read a flawless 1.000 over 42601 samples with nothing on
+    screen saying why (owner, 2026-08-18: "I think the comparison compares
+    new vs new now :)").  The names still differ; only the bytes tell.
+    """
+
+    sources = _sources(tmp_path)
+    alignment = _aligned_session(tmp_path)
+    sources["previous_sphere.sif"].write_bytes(sources["sphere.sif"].read_bytes())
+    sources["previous_sphere_bg.sif"].write_bytes(sources["sphere_bg.sif"].read_bytes())
+    campaign = _campaign(tmp_path, sources)
+    _classify_complete(campaign, sources, alignment.frame)
+
+    comparison = campaign.compute_sphere_comparison(_calculator)
+
+    # Still READY — the factors are sound; it is the comparison that is void.
+    assert comparison.state is ComparisonState.READY
+    assert comparison.self_comparison
+    assert campaign_module.SELF_COMPARISON_NOTE in comparison.reason
+    assert comparison.reference_name in comparison.reason
+
+    paths = campaign.write_tomls(tmp_path / "configs", "20250813_cmos", alignment)
+    text = paths["campaign"].read_text(encoding="utf-8")
+    assert "comparison_self = true" in text
+    assert 'comparison_previous_sphere = "previous_sphere.sif"' in text
+
+    snapshot = campaign.save_snapshot(
+        tmp_path / "calibrations",
+        snapshot_id="20250813_cmos",
+        detector="cmos",
+        alignment=alignment,
+    )
+    manifest = (snapshot.root / "snapshot.toml").read_text(encoding="utf-8")
+    assert "sphere_comparison_self = true" in manifest
 
 
 def test_tomls_are_commented_parseable_and_machine_path_free(tmp_path):
