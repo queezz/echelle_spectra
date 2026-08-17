@@ -4,16 +4,15 @@ from __future__ import annotations
 
 import argparse
 import sys
-from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
 
 from .tools.pattern_extraction import (
     PatternExtractionConfig,
-    extract_order_pattern_near_prior,
+    extract_pattern_from_sphere,
+    pattern_row_offsets,
     subtract_background,
-    trial_order_pattern_extraction,
 )
 
 
@@ -141,14 +140,15 @@ def _print_trial_summary(trials, limit: int = 10) -> None:
 
 def _print_reference_delta(pattern: np.ndarray, reference_path: Path) -> None:
     reference = np.loadtxt(reference_path, dtype=int)
-    if reference.shape != pattern.shape:
+    try:
+        delta = pattern_row_offsets(pattern, reference)
+    except ValueError:
         print(
             f"Reference shape differs: {reference.shape} vs {pattern.shape}",
             file=sys.stderr,
         )
         return
 
-    delta = pattern.astype(float) - reference.astype(float)
     print("Delta row px: pattern - reference")
     print("  median:", float(np.median(delta)))
     print("  mean:  ", float(np.mean(delta)))
@@ -183,43 +183,34 @@ def main(argv: list[str] | None = None) -> None:
     column_starts = _parse_csv_ints(args.column_starts)
 
     image = _load_image_pair(sphere_path, background_path)
-    trials = trial_order_pattern_extraction(
-        image,
-        config=config,
-        threshold_values=thresholds,
-        column_start_values=column_starts,
-    )
-    _print_trial_summary(trials)
-
-    best = next((trial for trial in trials if trial.success), None)
-    if best is None or best.result is None:
-        print(
-            "ERROR: no trial found the expected order count in every sampled column.",
-            file=sys.stderr,
-        )
-        sys.exit(1)
-
-    print("Selected trial:")
-    print("  threshold:", best.threshold)
-    print("  sampled columns:", best.columns_px.tolist())
-
-    selected_config = replace(config, peak_threshold=best.threshold)
-    result = best.result
-    if args.prior_pattern and not args.no_prior_fit:
-        prior_path = Path(args.prior_pattern)
-        prior = np.loadtxt(prior_path, dtype=int)
-        result = extract_order_pattern_near_prior(
+    prior_path = Path(args.prior_pattern) if args.prior_pattern else None
+    prior = None if prior_path is None else np.loadtxt(prior_path, dtype=int)
+    # One call, shared with the calibration bench's own in-place extraction, so
+    # a pattern written here and a pattern the bench stands on are the same fit.
+    try:
+        extraction = extract_pattern_from_sphere(
             image,
             prior,
-            config=selected_config,
-            columns_px=best.columns_px,
+            config=config,
+            threshold_values=thresholds,
+            column_start_values=column_starts,
             search_radius_px=args.search_radius,
+            use_prior=not args.no_prior_fit,
         )
+    except ValueError as exc:
+        print(f"ERROR: {exc}.", file=sys.stderr)
+        sys.exit(1)
+
+    _print_trial_summary(extraction.trials)
+    print("Selected trial:" if extraction.trial_succeeded else "No trial succeeded; using:")
+    print("  threshold:", extraction.threshold)
+    print("  sampled columns:", extraction.columns_px.tolist())
+    if extraction.prior_used:
         print("Prior-guided fit:")
         print("  prior:", prior_path)
-        print("  search radius:", args.search_radius)
-        print("  peak counts:", [d.n_peaks for d in result.detections])
+        print("  search radius:", extraction.search_radius_px)
 
+    result = extraction
     print("Pattern shape:", result.pattern.shape)
     reference = args.reference_pattern or args.prior_pattern
     if reference:

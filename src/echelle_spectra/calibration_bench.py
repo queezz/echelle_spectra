@@ -244,11 +244,22 @@ class FrameLoader:
     """Load SIF detector/order data while reusing the established extractor."""
 
     def __init__(self, pattern: np.ndarray, *, half_width_px: int = 8) -> None:
+        self.half_width_px = int(half_width_px)
+        self.adopt_pattern(pattern)
+
+    def adopt_pattern(self, pattern: np.ndarray) -> None:
+        """Extract every later frame off a different pattern.
+
+        The pattern is the reader's only geometry, so a bench that extracts a
+        new one from its own sphere hands it here rather than being rebuilt: the
+        loader a window was constructed with is the loader its queued reads and
+        its tests already hold.
+        """
+
         pattern_array = np.asarray(pattern, dtype=int)
         if pattern_array.ndim != 2 or not pattern_array.size:
             raise ValueError("pattern must have shape (detector columns, orders)")
         self.pattern = pattern_array
-        self.half_width_px = int(half_width_px)
 
     def __call__(self, path: str | Path) -> BenchFrame:
         """Read one SIF and extract every order without absolute calibration."""
@@ -743,6 +754,37 @@ class CalibrationBenchSession:
             self.fail_file_load(source, exc)
             return False
         return True
+
+    def adopt_pattern(self, pattern: np.ndarray) -> int:
+        """Stand the live fit on a different pattern, and drop what the old one fitted.
+
+        The pattern was a constructor argument for as long as the only way to
+        change it was to close the bench.  It is not a constant: the bench can
+        extract one from its own sphere, and an operator can name another file,
+        both without a restart.
+
+        Every anchor goes.  An anchor is a dispersion measurement whose detector
+        row was read out of the pattern, so anchors fitted on the old geometry
+        are measurements of a geometry the bench no longer wears — keeping them
+        would carry the old rows into the new solution invisibly.  Returns how
+        many were cleared, so the caller can say so in as many words.
+        """
+
+        array = np.asarray(pattern, dtype=float)
+        if array.ndim != 2 or not array.size:
+            raise ValueError("pattern must have shape (detector columns, orders)")
+        cleared = len(self.anchors)
+        self.pattern = array
+        if self.frame is not None and len(self.frame.order_spectra) != array.shape[1]:
+            # A pattern with a different order count describes a frame this one
+            # is not: it is re-extracted before it can be fitted again.
+            self.frame = None
+            self.background_path = None
+            self._background_spectra = ()
+            self.file_state = FileLoadState.WAITING
+        self.selected_order = min(self.selected_order, array.shape[1] - 1)
+        self.clear_anchors()
+        return cleared
 
     def set_selected_order(self, order_idx: int) -> None:
         if order_idx < 0 or order_idx >= self.pattern.shape[1]:

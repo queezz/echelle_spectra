@@ -2735,3 +2735,110 @@ def test_a_lamp_frame_never_speaks_for_the_pattern(tmp_path):
 
     assert campaign.sphere_band_offsets() is None
     assert campaign.pattern_band_warning() == ""
+
+
+# ---------------------------------------------------------------------------
+# Wearing a different pattern, without closing.
+#
+# The pattern was a constructor argument for historical reasons only.  A
+# campaign that has just measured its own sphere against the wrong pattern can
+# be stood on the right one in place — and everything it derived from the old
+# one, the band readings included, has to go with it.
+# ---------------------------------------------------------------------------
+
+
+def _pattern_file(tmp_path: Path, name: str, shift_rows: float) -> Path:
+    path = tmp_path / name
+    np.savetxt(path, np.rint(_band_traces(shift_rows)).astype(int), fmt="%d")
+    return path
+
+
+def test_adopting_a_pattern_re_measures_the_guard_and_drops_the_old_outputs(tmp_path):
+    """The one press behind the bench's button, in campaign memory alone."""
+
+    campaign, sources = _campaign_with_sphere(tmp_path, 3.5)
+    alignment = _aligned_session(tmp_path)
+    campaign.compute_sphere_comparison(_calculator)
+    campaign.write_tomls(tmp_path / "configs", "20250813_cmos", alignment)
+    assert campaign.pattern_band_warning()
+    assert campaign.toml_state is TomlState.GENERATED
+
+    on_geometry = _pattern_file(tmp_path, "pattern_extracted.txt", 3.5)
+    reading = campaign.adopt_pattern(
+        on_geometry, sphere_image=_sphere_frame(sources["sphere.sif"], 3.5).detector_image
+    )
+
+    assert campaign.pattern_source == on_geometry
+    assert reading is not None and reading.measured
+    assert abs(reading.median_offset_rows) < 1.0
+    assert campaign.pattern_band_warning() == ""
+    # Dropped through the campaign's own invalidation, not a parallel reset.
+    assert campaign.comparison.state is ComparisonState.NOT_RUN
+    assert campaign.comparison.reason == "inputs changed"
+    assert campaign.toml_state is TomlState.NOT_GENERATED
+    assert campaign.save_state is SaveState.NOT_READY
+    # The roles and the files they name are untouched.
+    assert campaign.sphere_pair_paths() == (
+        sources["sphere.sif"],
+        sources["sphere_bg.sif"],
+    )
+
+
+def test_a_band_reading_nobody_re_measured_says_so_instead_of_the_old_number(tmp_path):
+    """A comparison against a pattern that is gone is not a reading."""
+
+    campaign, _sources = _campaign_with_sphere(tmp_path, 3.5)
+    on_geometry = _pattern_file(tmp_path, "pattern_extracted.txt", 3.5)
+
+    reading = campaign.adopt_pattern(on_geometry)
+
+    assert reading is not None and not reading.measured
+    assert "not re-measured against pattern_extracted.txt" in reading.summary()
+    assert "reopen this frame" in reading.summary()
+    assert campaign.pattern_band_warning() == ""
+
+
+def test_a_pattern_file_that_is_not_a_pattern_is_refused_whole(tmp_path):
+    """A refusal leaves the campaign wearing what it was wearing."""
+
+    campaign, sources = _campaign_with_sphere(tmp_path, 3.5)
+    junk = tmp_path / "not_a_pattern.txt"
+    junk.write_text("this is prose\n", encoding="utf-8")
+
+    with pytest.raises(ValueError):
+        campaign.adopt_pattern(junk)
+
+    assert campaign.pattern_source == sources["pattern.txt"]
+    assert campaign.pattern_band_warning()
+
+
+def test_a_snapshot_saved_after_a_rebase_carries_the_adopted_pattern(tmp_path):
+    """What the bench wears is what the snapshot saves, digest for digest."""
+
+    campaign, sources = _campaign_with_sphere(tmp_path, 3.5)
+    alignment = _aligned_session(tmp_path)
+    launch_digest = hashlib.sha256(sources["pattern.txt"].read_bytes()).hexdigest()
+
+    on_geometry = _pattern_file(tmp_path, "pattern_extracted_20250813.txt", 3.5)
+    campaign.adopt_pattern(
+        on_geometry, sphere_image=_sphere_frame(sources["sphere.sif"], 3.5).detector_image
+    )
+    campaign.compute_sphere_comparison(_calculator)
+    campaign.write_tomls(tmp_path / "configs", "20250813_cmos", alignment)
+    snapshot = campaign.save_snapshot(
+        tmp_path / "calibrations",
+        snapshot_id="20250813_cmos",
+        detector="cmos",
+        alignment=alignment,
+    )
+
+    saved = snapshot.source_path("pattern")
+    saved_digest = hashlib.sha256(saved.read_bytes()).hexdigest()
+    assert saved_digest != launch_digest, "the snapshot kept the pattern it was rebased off"
+    assert campaign.save_state is SaveState.VALIDATED
+    manifest = snapshot.manifest["alignment"]
+    assert abs(manifest["pattern_band_offset_rows"]) < 1.0
+    alignment_toml = tomllib.loads(
+        campaign.toml_paths["alignment"].read_text(encoding="utf-8")
+    )
+    assert alignment_toml["base_pattern_file"] == "pattern_extracted_20250813.txt"

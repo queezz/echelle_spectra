@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import numpy as np
+import pytest
 
 from echelle_spectra.tools.pattern_extraction import (
     PatternExtractionConfig,
@@ -11,6 +14,9 @@ from echelle_spectra.tools.pattern_extraction import (
     detect_order_peaks_near_prior_at_column,
     extract_order_pattern,
     extract_order_pattern_near_prior,
+    extract_pattern_from_sphere,
+    fit_sampling_to_width,
+    pattern_row_offsets,
     sample_columns,
     subtract_background,
     trial_order_pattern_extraction,
@@ -161,3 +167,74 @@ def test_extract_order_pattern_near_prior_recovers_synthetic_traces():
     assert result.pattern.shape == truth.shape
     assert result.n_orders == 5
     np.testing.assert_allclose(result.pattern, np.rint(truth), atol=2)
+
+
+# ---------------------------------------------------------------------------
+# One extraction, two callers.
+#
+# ``echelle-pattern`` and the calibration bench's "extract pattern from this
+# sphere" both come through ``extract_pattern_from_sphere``, so a table the
+# bench stands on and a table the CLI writes are the same fit on the same
+# settings.  These pin the behaviour the bench leans on: a prior settles the
+# order count, and a prior can carry the fit when no unguided trial can.
+# ---------------------------------------------------------------------------
+
+
+def test_extract_pattern_from_sphere_finds_bands_the_prior_does_not_sit_on():
+    image, truth = _synthetic_order_image()
+    prior = np.rint(truth - 5.0).astype(int)
+
+    extraction = extract_pattern_from_sphere(image, prior, config=_config())
+
+    assert extraction.prior_used
+    assert extraction.n_orders == truth.shape[1]
+    assert np.median(np.abs(extraction.pattern - truth)) < 1.0
+    offsets = pattern_row_offsets(extraction.pattern, prior)
+    assert abs(float(np.median(offsets)) - 5.0) < 1.0
+
+
+def test_a_prior_settles_the_order_count_whatever_the_config_says():
+    image, truth = _synthetic_order_image()
+    prior = np.rint(truth).astype(int)
+
+    extraction = extract_pattern_from_sphere(
+        image, prior, config=PatternExtractionConfig(expected_orders=29)
+    )
+
+    assert extraction.n_orders == truth.shape[1]
+
+
+def test_the_prior_alone_can_carry_a_fit_no_trial_could():
+    """Bands 27 rows apart are closer than this minimum peak distance."""
+
+    image, truth = _synthetic_order_image()
+    prior = np.rint(truth).astype(int)
+    config = replace(_config(), peak_min_dist_px=50)
+
+    extraction = extract_pattern_from_sphere(
+        image, prior, config=config, search_radius_px=10
+    )
+
+    assert not extraction.trial_succeeded
+    assert extraction.prior_used
+    assert np.median(np.abs(extraction.pattern - truth)) < 1.5
+
+
+def test_without_a_prior_a_failed_scan_refuses_rather_than_guessing():
+    image, _truth = _synthetic_order_image()
+
+    with pytest.raises(ValueError, match="expected order count"):
+        extract_pattern_from_sphere(image, config=PatternExtractionConfig(expected_orders=17))
+
+
+def test_the_sampling_plan_is_left_alone_on_a_real_detector():
+    config = PatternExtractionConfig()
+
+    assert fit_sampling_to_width(config, 2560) is config
+    narrowed = fit_sampling_to_width(config, 200)
+    assert narrowed.sample_step_px * narrowed.sample_count < 200
+
+
+def test_row_offsets_refuse_two_tables_of_different_shapes():
+    with pytest.raises(ValueError, match="shapes differ"):
+        pattern_row_offsets(np.zeros((4, 2)), np.zeros((4, 3)))

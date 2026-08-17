@@ -19,7 +19,7 @@ import re
 import shutil
 import tempfile
 from collections.abc import Callable, Iterable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date
 from enum import Enum
 from functools import lru_cache
@@ -1601,6 +1601,73 @@ class CalibrationCampaignSession:
             return None
         return loaded.band_offsets
 
+    def sphere_pair_paths(self) -> tuple[Path | None, Path | None]:
+        """The assigned sphere signal and its background, either of which may be absent."""
+
+        signal = self._one(MeasurementRole.SPHERE)
+        background = self._one(MeasurementRole.SPHERE_BACKGROUND)
+        return (
+            None if signal is None else signal.path,
+            None if background is None else background.path,
+        )
+
+    def adopt_pattern(
+        self,
+        pattern_source: str | Path,
+        *,
+        sphere_image: np.ndarray | None = None,
+        saturation_level: float = 0.98 * FULL_SCALE_COUNTS,
+    ) -> BandCenterOffsets | None:
+        """Wear a different pattern file, and forget what the old one produced.
+
+        The pattern was a launch-time argument for historical reasons only.  The
+        campaign holds the sphere, packages the extraction, and has just measured
+        the offset — so a pattern it extracted, or one an operator named, is
+        adopted here rather than by closing the bench and opening it again.
+
+        Every derived output goes through the same invalidation the roles use
+        (:meth:`_invalidate_outputs`): factors summed over the old traces, the
+        settings bundle written from them, and a save state earned by them are
+        all statements about a pattern this campaign no longer wears.  The band
+        readings go too — they are a *comparison* against the old pattern — and
+        the sphere's is re-measured on the spot when its image is handed in,
+        which is what makes the guard's verdict answer the new pattern rather
+        than a stale one.  Returns that re-measured reading.
+        """
+
+        source = Path(pattern_source)
+        rows = np.loadtxt(source, dtype=int)
+        if rows.ndim != 2 or not rows.size:
+            raise ValueError(
+                f"{source} is not a pattern table of shape (detector columns, orders)"
+            )
+        self.pattern_source = source
+        self._pattern_cache = rows
+        sphere_path, _background_path = self.sphere_pair_paths()
+        for path, record in list(self.loaded.items()):
+            if path == sphere_path and sphere_image is not None:
+                try:
+                    offsets: BandCenterOffsets | None = band_center_offsets(
+                        np.asarray(sphere_image, dtype=float),
+                        rows,
+                        saturation_level=saturation_level,
+                    )
+                except ValueError as exc:  # a frame or pattern this reading cannot use
+                    offsets = BandCenterOffsets(reason=str(exc))
+            else:
+                # Honest silence rather than a number measured against a pattern
+                # that is gone: the frames themselves are not kept, so only what
+                # the caller hands in can be re-read here.
+                offsets = BandCenterOffsets(
+                    reason=(
+                        f"not re-measured against {source.name}; reopen this "
+                        "frame to read its bands again"
+                    )
+                )
+            self.loaded[path] = replace(record, band_offsets=offsets)
+        self._invalidate_outputs()
+        return self.sphere_band_offsets()
+
     def pattern_band_warning(
         self, threshold: float = BAND_OFFSET_ATTENTION_ROWS
     ) -> str:
@@ -1620,8 +1687,9 @@ class CalibrationCampaignSession:
             f"the chosen pattern {self.pattern_source.name} does not fit this "
             f"sphere's geometry — {reading.summary()}, so every order is "
             "extracted off the edge of its own band; extract a pattern from this "
-            f"sphere (echelle-pattern with {self.pattern_source.name} as the "
-            "prior) or open the bench on the pattern this era was calibrated with"
+            f"sphere with {self.pattern_source.name} as the prior, or choose the "
+            "pattern file this era was calibrated with — the bench does both "
+            "without closing"
         )
 
     def forget_file(self, path: str | Path) -> bool:
@@ -2170,11 +2238,13 @@ class CalibrationCampaignSession:
                 ChecklistState.ATTENTION,
                 warning,
                 unblocked_by=(
-                    f"run echelle-pattern on {self._sphere_name()} with "
-                    f"{self.pattern_source.name} as the prior and reopen the bench "
-                    "on the pattern it writes, or reopen it on the pattern this "
-                    "era was calibrated with — saving is still allowed, and the "
-                    "measured offset is written into the snapshot either way"
+                    "press Extract pattern from this sphere: the bench runs the "
+                    f"echelle-pattern fit on {self._sphere_name()} with "
+                    f"{self.pattern_source.name} as the prior, writes the table "
+                    "beside the campaign, and stands on it without closing; or "
+                    "choose the pattern file this era was calibrated with — "
+                    "saving is still allowed, and the measured offset is written "
+                    "into the snapshot either way"
                 ),
             )
         reading = self.sphere_band_offsets()

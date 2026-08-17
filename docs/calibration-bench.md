@@ -30,7 +30,7 @@ Override them explicitly when rehearsing another detector or campaign:
 
 ```bash
 echelle-calib path/to/calibration-folder \
-  --pattern path/to/pattern.txt \
+  --pattern pattern_CMOS_20240305.txt \
   --wavelength path/to/wavelength.txt \
   --integral path/to/integrating-sphere.txt \
   --previous-sphere path/to/previous-sphere.sif \
@@ -41,6 +41,15 @@ echelle-calib path/to/calibration-folder \
   --output-root path/to/calibrations \
   --config-root path/to/calibrations/configs
 ```
+
+`--pattern` and `--wavelength` take a path **or the bare filename of a packaged
+table** — `--pattern pattern_CMOS_20240305.txt` is enough, and the packaged
+`calibration_files\` folder (subfolders included) is searched by name. A real
+path always wins; a name that is neither is refused with the packaged names that
+would have worked. Either way the bench prints the absolute path it resolved,
+and shows it on the **Bench state** panel while it runs — and the pattern is no
+longer fixed for the session, see [the pattern the light does not
+fit](#the-pattern-the-light-does-not-fit-and-the-press-that-fixes-it).
 
 `--lamp` names lamps to *suggest*, not to demand; any name is accepted and none
 is ever required. Load files at start-up with a repeatable `--file`, and enable
@@ -402,6 +411,52 @@ bench never calls this aligned or invents a ratio. A candidate-factor failure is
 The packaged default comparison uses the historical 2024 CMOS sphere pair
 because no packaged 2025 sphere pair is available. It is software rehearsal
 evidence, not a claim about a new lamp response.
+
+## The pattern the light does not fit, and the press that fixes it
+
+The bench cannot see a vertical detector shift through its fit: an anchor is a
+dispersion measurement whose detector row is read *out of the reference
+pattern*, so a pattern from the wrong era passes the fit, the residuals and the
+save in silence. The sphere is the one frame that lights every order, so its own
+band centres are what the bench holds the chosen pattern against. When they
+disagree by more than about two rows the Sphere factors view, the Procedure's
+reference row and the save panel all say so — "order bands sit 5.3 rows below
+the chosen pattern".
+
+**The answer is a press, not a restart.** Beside that reading, under the factor
+curves:
+
+- **Extract pattern from this sphere** fits an order-pattern table to the
+  assigned sphere pair — signal minus background, the current pattern as the
+  prior — through `extract_pattern_from_sphere()`, the very function
+  `echelle-pattern` calls. With no background assigned it fits the signal alone
+  and says so. The fit runs off the event loop, like every other campaign task.
+- **Choose pattern file…** stands the bench on any pattern table you name, on
+  exactly the same terms. The extraction is the one-press special case.
+
+The extracted table is **written first**, under the campaign's own generated
+folder, and its absolute path is printed in the message:
+
+```text
+…\20250926_calib\calibrations\patterns\pattern_extracted_<acquisition-date>.txt
+```
+
+Nothing is overwritten: a second extraction on the same day is a second file.
+The bench then rebases the live session on it, and says what that cost:
+
+- every order is extracted again on the new geometry, the traces over the
+  detector image are redrawn, and the band guard is re-measured against the new
+  pattern — it should now read quiet, which is the acceptance;
+- **anchors are cleared**, because they were fitted on the old geometry;
+  auto-anchor re-runs them in seconds, and the notice says exactly that;
+- the sphere factors, the settings bundle and the save state are reset, because
+  they were computed over the old pattern's bands;
+- roles, loaded files and the pattern file it came from are untouched.
+
+Which pattern the bench is wearing is a reading like any other: its absolute
+path is on the **Bench state** panel and beside the factor curves, and the
+snapshot saves the pattern the bench ended up wearing, corrected by any solved
+transform in the usual way.
 
 ## Save the alignment settings, then save the snapshot
 

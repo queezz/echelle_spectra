@@ -8,7 +8,7 @@ import platform
 import re
 import sys
 from collections.abc import Sequence
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from datetime import date, datetime
 from pathlib import Path, PurePath
 
@@ -45,6 +45,12 @@ from .calibration_campaign import (
 )
 from .snapshot import SnapshotError
 from .tools.calibration_alignment import load_wavelength_table, table_vetting
+from .tools.pattern_extraction import (
+    DEFAULT_SEARCH_RADIUS_PX,
+    extract_pattern_from_sphere,
+    pattern_row_offsets,
+    subtract_background,
+)
 
 _PACKAGE_DIR = Path(__file__).parent
 _CALIBRATION_DIR = _PACKAGE_DIR / "resources" / "calibration_files"
@@ -70,6 +76,53 @@ SNAPSHOT_ROOT_NAME = "calibrations"
 #: ``calibration-configs\`` beside it was a second generated folder to explain,
 #: to find, and to carry, for no gain over a subfolder of the first.
 CONFIG_ROOT_NAME = "configs"
+
+#: And its own subfolder for patterns the bench itself extracts, beside the
+#: settings bundles rather than loose in the snapshot root: a pattern is an
+#: input the campaign was rebased on, not a snapshot.
+PATTERN_ROOT_NAME = "patterns"
+
+
+def packaged_calibration_files(suffix: str = ".txt") -> tuple[Path, ...]:
+    """The packaged tables an operator may name by their bare filename."""
+
+    if not _CALIBRATION_DIR.is_dir():  # pragma: no cover - a broken installation
+        return ()
+    return tuple(
+        sorted(
+            (path for path in _CALIBRATION_DIR.rglob(f"*{suffix}") if path.is_file()),
+            key=lambda path: path.name.casefold(),
+        )
+    )
+
+
+def resolve_calibration_file(value: str | PurePath, kind: str) -> Path:
+    """Resolve a table argument as a real path first, then as a packaged name.
+
+    The packaged names *are* the documented vocabulary — the README's own
+    examples say ``pattern_CMOS_20240305.txt`` — and typing exactly that got the
+    owner "pattern file not found", because nothing but a literal path was ever
+    tried.  A path on disk still wins, so nothing that worked stops working, and
+    the refusal lists the handful of packaged names rather than leaving the
+    vocabulary to be guessed.
+    """
+
+    source = Path(value)
+    if source.is_file():
+        return source.resolve()
+    packaged = packaged_calibration_files(source.suffix or ".txt")
+    if source.name == str(source):
+        match = next((path for path in packaged if path.name == source.name), None)
+        if match is not None:
+            return match.resolve()
+    # The vocabulary this argument is about, not every packaged table: a
+    # refusal that lists the wavelength tables under --pattern teaches nothing.
+    offered = [path for path in packaged if kind in path.name.casefold()] or list(packaged)
+    names = ", ".join(path.name for path in offered)
+    raise SystemExit(
+        f"{kind} file not found: {source}\n"
+        f"Packaged {kind} tables you can name directly: {names or 'none'}"
+    )
 
 
 def absolute_root(path: str | PurePath) -> Path:
@@ -664,6 +717,99 @@ class FrameLoadThread(QtCore.QThread):
             self.loaded.emit(self.loader(self.path))
         except Exception as exc:  # GUI boundary: report domain/IO failures in state
             self.failed.emit(str(self.path), str(exc))
+
+
+@dataclass(frozen=True)
+class PatternRebase:
+    """A pattern file the bench is about to stand on, and the light it measured.
+
+    Produced off the event loop — reading a sphere pair and fitting order traces
+    over a 2560x2160 frame is seconds of work — and applied on the GUI thread,
+    where the session, the reader and the campaign live.
+    """
+
+    path: Path
+    #: Whether this bench fitted the table, as opposed to an operator naming it.
+    extracted: bool = False
+    sphere_path: Path | None = None
+    #: The sphere signal's own detector image, so the band guard can be
+    #: re-measured against the new pattern without opening the file again.
+    sphere_image: np.ndarray | None = None
+    background_path: Path | None = None
+    #: Median row shift of the extracted table from the pattern it was fitted
+    #: against, which is what the guard was complaining about.
+    median_offset_rows: float | None = None
+    caveat: str = ""
+
+
+def extract_pattern_beside_campaign(
+    *,
+    loader,
+    prior: np.ndarray,
+    sphere_path: Path,
+    background_path: Path | None,
+    output_path: Path,
+    search_radius_px: int = DEFAULT_SEARCH_RADIUS_PX,
+) -> PatternRebase:
+    """Fit a pattern to one sphere pair and write it beside the campaign.
+
+    The fit is ``extract_pattern_from_sphere`` — the very function
+    ``echelle-pattern`` calls — with the bench's current pattern as the prior,
+    so a bench that fixes its own geometry and an operator who runs the CLI get
+    the same table from the same frames.
+    """
+
+    sphere_image = np.asarray(loader(sphere_path).detector_image, dtype=float)
+    caveats: list[str] = []
+    if background_path is None:
+        image = sphere_image
+        caveats.append(
+            "no sphere background carries a role, so the pattern was fitted to "
+            "the signal alone; assign the background and extract again for the "
+            "subtracted fit echelle-pattern performs"
+        )
+    else:
+        image = subtract_background(
+            sphere_image, np.asarray(loader(background_path).detector_image, dtype=float)
+        )
+    extraction = extract_pattern_from_sphere(
+        image, prior, search_radius_px=search_radius_px
+    )
+    if not extraction.trial_succeeded:
+        caveats.append(
+            "no unguided trial found every order, so the prior alone guided the "
+            "fit — check the traces over the detector image"
+        )
+    caveat = "; ".join(caveats)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    np.savetxt(output_path, extraction.pattern, fmt="%d")
+    return PatternRebase(
+        path=output_path,
+        extracted=True,
+        sphere_path=sphere_path,
+        sphere_image=sphere_image,
+        background_path=background_path,
+        median_offset_rows=float(
+            np.median(pattern_row_offsets(extraction.pattern, prior))
+        ),
+        caveat=caveat,
+    )
+
+
+def read_pattern_beside_campaign(*, loader, chosen_path: Path, sphere_path: Path | None):
+    """Adopt a pattern file somebody named, reading the sphere to re-judge it.
+
+    The sphere frame is opened again for one reason: the band guard's verdict is
+    a comparison, and a comparison against a pattern that is gone is not a
+    reading.  Everything else about the chosen file is already on disk.
+    """
+
+    sphere_image = None
+    if sphere_path is not None and loader is not None:
+        sphere_image = np.asarray(loader(sphere_path).detector_image, dtype=float)
+    return PatternRebase(
+        path=Path(chosen_path), sphere_path=sphere_path, sphere_image=sphere_image
+    )
 
 
 class CampaignTaskThread(QtCore.QThread):
@@ -1855,9 +2001,18 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         self.file_value = _ElidingLabel("no file open")
         self.file_state_value = QtWidgets.QLabel("WAITING")
         self.file_state_value.setObjectName("stateBadge")
+        # Which pattern the bench is wearing, on the strip that is in view
+        # whatever tab is open.  Every order the bench extracts, every anchor
+        # row it reads and every factor it sums is taken off this file, and
+        # until it was said here the only way to know which one was in use was
+        # to remember what the launcher passed.
+        self.pattern_source_value = _ElidingLabel("—")
         status_form.addRow("Input", self.watch_value)
-        status_form.addRow("Open frame", self.file_value)
-        status_form.addRow("File state", self.file_state_value)
+        # The open frame and the state it is in are one fact in two halves, and
+        # pairing them on one row is what buys the pattern its own — the strip
+        # is a strip, and it was already as tall as the plots could afford.
+        status_form.addRow("Open frame", self._frame_state_row())
+        status_form.addRow("Pattern", self.pattern_source_value)
         self.bench_state_group = status_group
 
         # "Sphere factors" is what the view tab has always called this, and a
@@ -1960,6 +2115,20 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         self._status_panels = (status_group, alignment_group, comparison_group)
         self._status_columns = 0
         self._reflow_status_band(len(self._status_panels))
+
+    def _frame_state_row(self) -> QtWidgets.QWidget:
+        """The open frame's name and its load state on one line."""
+
+        row = QtWidgets.QWidget()
+        layout = QtWidgets.QHBoxLayout(row)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(8)
+        layout.addWidget(self.file_value, 1)
+        separator = QtWidgets.QLabel("·")
+        separator.setObjectName("mutedText")
+        layout.addWidget(separator)
+        layout.addWidget(self.file_state_value)
+        return row
 
     def _anchor_rms_row(self) -> QtWidgets.QWidget:
         """Anchor count and RMS on one line: two short numbers, one strip row.
@@ -2770,6 +2939,49 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         )
         header.addWidget(self.recompute_sphere_button)
         layout.addLayout(header)
+
+        # The pattern row, directly under the reading that reports the pattern.
+        # The band guard is read here — the factor curves are summed over these
+        # very traces — so this is where the two things that can answer it live,
+        # by the same rule that put Recompute above rather than on the readings
+        # strip.  Quiet by default: one line and the picker; the extraction
+        # surfaces as the loud verb only when the guard is actually warning, and
+        # the procedure's next-step button offers it then too.
+        pattern_row = QtWidgets.QHBoxLayout()
+        self.pattern_choice_value = _ElidingLabel("Pattern: —")
+        self.pattern_choice_value.setObjectName("mutedText")
+        pattern_row.addWidget(self.pattern_choice_value, 1)
+        self.choose_pattern_button = QtWidgets.QPushButton("Choose pattern file…")
+        self._explainable(
+            self.choose_pattern_button,
+            "Standing the bench on a different pattern",
+            "Picks the order-pattern table the whole bench reads: the traces "
+            "drawn over the detector image, the rows every anchor's centroid is "
+            "paired with, and the bands the factor curves are summed over. The "
+            "open frame is extracted again on it, the sphere's band offsets are "
+            "measured against it, and anything derived from the old pattern — "
+            "factors, settings bundle, save state — is dropped rather than "
+            "quietly carried over. Anchors go with it: they were fitted on the "
+            "old geometry.",
+        )
+        pattern_row.addWidget(self.choose_pattern_button)
+        self.extract_pattern_button = QtWidgets.QPushButton(
+            "Extract pattern from this sphere"
+        )
+        self._explainable(
+            self.extract_pattern_button,
+            "Fitting a pattern to the sphere in front of you",
+            "Runs the same fit echelle-pattern runs — the sphere signal minus "
+            "its background, order bands traced with the current pattern as the "
+            "prior — writes the table under the campaign's own patterns folder, "
+            "and stands the bench on it without closing. This is the answer to "
+            "a band guard that says the light does not sit on the chosen "
+            "pattern: the sphere is the frame that lights every order, so it is "
+            "the frame the geometry is measured from.",
+        )
+        pattern_row.addWidget(self.extract_pattern_button)
+        layout.addLayout(pattern_row)
+
         self.sphere_plot = pg.PlotWidget(title="Absolute calibration factors")
         self.sphere_plot.setBackground("#10151b")
         self.sphere_plot.setLabel("bottom", "wavelength", units="nm")
@@ -2846,6 +3058,8 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         self.generate_tomls_button.clicked.connect(lambda: self._generate_tomls())
         self.regenerate_tomls_button.clicked.connect(self._regenerate_tomls)
         self.recompute_sphere_button.clicked.connect(self._start_sphere_comparison)
+        self.choose_pattern_button.clicked.connect(self._choose_pattern_file)
+        self.extract_pattern_button.clicked.connect(self._extract_pattern_from_sphere)
         self.save_snapshot_button.clicked.connect(self._save_snapshot)
         self.snapshot_id_edit.textChanged.connect(self.refresh_campaign)
         # ``textEdited`` fires for the operator's keystrokes and never for the
@@ -3487,8 +3701,190 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         self.comparison_value.setText("COMPUTING — using the established absolute engine…")
         self._start_campaign_task(self.campaign.compute_sphere_comparison)
 
+    def _pattern_root(self) -> Path:
+        """Where patterns this bench extracts are written: one tidy folder."""
+
+        return self.output_root / PATTERN_ROOT_NAME
+
+    def _extracted_pattern_path(self) -> Path:
+        """A name that says what it is and when, and never clobbers an earlier one.
+
+        A pattern a snapshot was computed on is not scratch: an extraction made
+        an hour later is a second file, not a silent replacement of the first.
+        """
+
+        # Dated by the calibration, not by the day somebody pressed the button:
+        # the identity in the Save tab is the acquisition's own date whenever
+        # anything could say what it was.
+        dated = (
+            acquisition_date_from_name(self.snapshot_id_edit.text().strip())
+            or self.snapshot_date
+            or date.today()
+        )
+        stamp = dated.strftime("%Y%m%d")
+        root = self._pattern_root()
+        candidate = root / f"pattern_extracted_{stamp}.txt"
+        attempt = 2
+        while candidate.exists():
+            candidate = root / f"pattern_extracted_{stamp}_{attempt}.txt"
+            attempt += 1
+        return candidate
+
+    def _extraction_blocker(self) -> str:
+        """Why the sphere cannot be extracted from, in words, or empty."""
+
+        if self.campaign is None:
+            return "campaign memory was not configured for this bench"
+        if self.loader is None:
+            return "no SIF reader is configured for this bench"
+        sphere_path, _background = self.campaign.sphere_pair_paths()
+        if sphere_path is None:
+            return (
+                "no file carries the sphere signal role — assign it in the Files "
+                "tab and the pattern can be fitted to the light it holds"
+            )
+        return ""
+
+    def _extract_pattern_from_sphere(self) -> None:
+        """Fit a pattern to the assigned sphere and stand the bench on it."""
+
+        blocker = self._extraction_blocker()
+        if blocker:
+            self._save_says(f"No pattern was extracted: {blocker}.")
+            return
+        assert self.campaign is not None
+        sphere_path, background_path = self.campaign.sphere_pair_paths()
+        assert sphere_path is not None
+        prior = np.rint(self.session.pattern).astype(int)
+        output_path = self._extracted_pattern_path()
+        loader = self.loader
+        self._save_says(
+            f"Extracting a pattern from {sphere_path.name} with "
+            f"{self.campaign.pattern_source.name} as the prior…"
+        )
+        self._start_campaign_task(
+            lambda: extract_pattern_beside_campaign(
+                loader=loader,
+                prior=prior,
+                sphere_path=sphere_path,
+                background_path=background_path,
+                output_path=output_path,
+            )
+        )
+
+    def _choose_pattern_file(self) -> None:
+        """Name a different pattern file, on the same terms as an extracted one."""
+
+        if self.campaign is None or self._campaign_thread is not None:
+            return
+        start = self.campaign.pattern_source.parent
+        chosen, _filter = QtWidgets.QFileDialog.getOpenFileName(
+            self,
+            "Choose the order-pattern table this bench reads",
+            str(start if start.is_dir() else self.last_folder),
+            "Pattern tables (*.txt);;All files (*)",
+        )
+        if not chosen:
+            return
+        chosen_path = Path(chosen)
+        if chosen_path == self.campaign.pattern_source:
+            self._save_says(
+                f"The bench already wears {chosen_path}; nothing was changed."
+            )
+            return
+        sphere_path, _background = self.campaign.sphere_pair_paths()
+        loader = self.loader
+        self._save_says(f"Standing the bench on {chosen_path}…")
+        self._start_campaign_task(
+            lambda: read_pattern_beside_campaign(
+                loader=loader, chosen_path=chosen_path, sphere_path=sphere_path
+            )
+        )
+
+    def _adopt_pattern_rebase(self, result: PatternRebase) -> None:
+        """Swap the pattern under the whole bench, and say what that cost.
+
+        Everything derived from the old pattern is invalidated through the paths
+        that already exist — the campaign's own ``_invalidate_outputs`` by way of
+        :meth:`CalibrationCampaignSession.adopt_pattern`, and the session's
+        ``clear_anchors`` by way of :meth:`CalibrationBenchSession.adopt_pattern`
+        — rather than through a second reset that would drift from them.
+        """
+
+        if self.campaign is None:
+            return
+        # Read before the swap: a pattern with a different order count releases
+        # the open frame, and it is exactly that frame which must be extracted
+        # again on the new geometry.
+        frame_path = None if self.session.frame is None else self.session.frame.path
+        try:
+            rows = np.loadtxt(result.path, dtype=int)
+            reading = self.campaign.adopt_pattern(
+                result.path,
+                sphere_image=result.sphere_image,
+                saturation_level=self.session.saturation_level,
+            )
+            cleared = self.session.adopt_pattern(rows)
+        except (OSError, ValueError) as exc:
+            self._save_says(f"That pattern was not adopted: {exc}")
+            self.refresh()
+            return
+        adopt = getattr(self.loader, "adopt_pattern", None)
+        if adopt is not None:
+            adopt(rows)
+        # The traces are cached on the pattern's SHAPE, which a re-extracted
+        # pattern usually shares with the one it replaces.  Without this the new
+        # geometry would be drawn as the old one until the order count changed.
+        self._pattern_key = None
+        self._catalog_cache.clear()
+
+        sentences = []
+        if result.extracted:
+            offset = result.median_offset_rows
+            moved = "" if offset is None else f", moving the traces {offset:+.1f} row(s)"
+            sentences.append(
+                f"Extracted a pattern from {result.sphere_path.name}{moved}, wrote "
+                f"it to {result.path}, and stood the bench on it."
+            )
+        else:
+            sentences.append(f"The bench now reads its orders off {result.path}.")
+        if result.caveat:
+            sentences.append(f"Note: {result.caveat}.")
+        if cleared:
+            sentences.append(
+                f"{cleared} anchor(s) were cleared — they were fitted on the old "
+                "geometry, and auto-anchor re-runs them in seconds."
+            )
+        if reading is not None and reading.measured:
+            sentences.append(
+                f"Against the new pattern, {reading.summary()}."
+                if self.campaign.pattern_band_warning()
+                else f"The band guard now reads quiet: {reading.summary()}."
+            )
+        sentences.append(
+            "Factors, settings bundle and save state were reset: they were "
+            "computed over the old pattern."
+        )
+        # Re-extracting the open frame is the last thing started, so the
+        # narration above is on screen while it runs.
+        if frame_path is not None:
+            sentences.append(f"Re-extracting {frame_path.name} on the new pattern.")
+        self.refresh()
+        self._save_says(" ".join(sentences))
+        if frame_path is not None:
+            # Through the queue rather than straight at the reader: a read
+            # already in flight would swallow this one, and the frame would go
+            # on being fitted off the old geometry with nothing saying so.
+            self._queue.append(frame_path)
+            self._start_next_load()
+
     @QtCore.pyqtSlot(object)
     def _campaign_task_completed(self, result) -> None:
+        if isinstance(result, PatternRebase):
+            # The file was written off the event loop; the swap itself touches
+            # the session, the reader and the plots, so it happens here.
+            self._adopt_pattern_rebase(result)
+            return
         state = getattr(result, "state", None)
         if state is ComparisonState.READY:
             self.message_value.setText("Sphere factors computed and compared.")
@@ -4142,6 +4538,7 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         self.recompute_sphere_button.setEnabled(
             enabled and not busy and self._sphere_pair_assigned()
         )
+        self._refresh_pattern_source(busy)
         # An offer to overwrite belongs to the identity that was refused.  The
         # id field is edited between the refusal and the press, and this runs on
         # every keystroke in it, so a different identity withdraws the offer
@@ -4189,6 +4586,52 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         # background — decided here, after the roles are known.
         self._follow_assigned_lamp_signal()
         self._pair_lamp_background()
+
+    def _refresh_pattern_source(self, busy: bool) -> None:
+        """Say which pattern the bench wears, and what may be done about it.
+
+        Quiet by default: the path on the readings strip and beside the factor
+        curves, one picker, and an extraction that is only emphasised while the
+        band guard is actually warning about the pattern it names.
+        """
+
+        if self.campaign is None:
+            self.pattern_source_value.setText("packaged pattern (no campaign memory)")
+            self.pattern_choice_value.setText("Pattern: —")
+            self.choose_pattern_button.setEnabled(False)
+            self.extract_pattern_button.setEnabled(False)
+            return
+        source = self.campaign.pattern_source
+        self.pattern_source_value.setText(str(source))
+        # The whole path on hover, like every other elided reading; the tooltip
+        # rule about short lines is about explanations, and a path is a fact.
+        self.pattern_choice_value.setText(f"Pattern: {source}")
+        self.pattern_choice_value.setToolTip(str(source))
+        self._explainable(
+            self.pattern_source_value,
+            "The pattern this bench is wearing",
+            "Every order the bench extracts, every anchor row it reads, and "
+            "every factor it sums is taken off this file. It is no longer fixed "
+            "at launch: the Sphere factors view can extract one from the "
+            f"assigned sphere or open another, in place. In full: {source}",
+            hint=one_line(f"{source.name} — click for the whole path and why it matters"),
+        )
+        self.choose_pattern_button.setEnabled(not busy)
+        blocker = self._extraction_blocker()
+        self.extract_pattern_button.setEnabled(not busy and not blocker)
+        warning = self.campaign.pattern_band_warning()
+        self.extract_pattern_button.setToolTip(
+            f"Not yet possible: {blocker}."
+            if blocker
+            else (
+                "The sphere's bands do not sit on this pattern; fit one to them."
+                if warning
+                else "Fit a pattern to the assigned sphere pair and stand on it."
+            )
+        )
+        # Loud only when something is wrong. A pattern the light fits is not a
+        # thing to be pressed about.
+        _emphasise(self.extract_pattern_button, self.body_pt, bold=bool(warning))
 
     @staticmethod
     def _verdict_colour(verdict, triage) -> str:
@@ -4521,9 +4964,22 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
 
         key = step.key
         if key == "references":
-            # The pattern, wavelength and integral tables are named when the
-            # bench is opened; no file the SIF picker can add would satisfy
-            # this row, so the row explains itself and offers no button.
+            # This row used to explain itself and offer nothing, because the
+            # tables were named when the bench was opened and no file the SIF
+            # picker could add would satisfy it.  That is no longer true of the
+            # pattern: when the guard says the sphere's bands do not sit on it,
+            # the bench holds the sphere, packages the extraction, and can fit
+            # and adopt a pattern without closing.  So the row that reports the
+            # mismatch carries the verb that answers it.
+            if (
+                self.campaign is not None
+                and self.campaign.pattern_band_warning()
+                and not self._extraction_blocker()
+            ):
+                return (
+                    "Extract pattern from this sphere",
+                    self._extract_pattern_from_sphere,
+                )
             return None
         if key == "files":
             return ("Add SIF files…", self._pick_files)
@@ -5199,8 +5655,26 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="also poll the folder for new stable SIFs (optional convenience)",
     )
-    parser.add_argument("--pattern", type=Path, default=_DEFAULT_PATTERN)
-    parser.add_argument("--wavelength", type=Path, default=_DEFAULT_WAVELENGTH)
+    parser.add_argument(
+        "--pattern",
+        type=Path,
+        default=_DEFAULT_PATTERN,
+        help=(
+            "order-pattern table: a path, or the bare filename of a packaged "
+            "one such as pattern_CMOS_20240305.txt (default: "
+            f"{_DEFAULT_PATTERN.name})"
+        ),
+    )
+    parser.add_argument(
+        "--wavelength",
+        type=Path,
+        default=_DEFAULT_WAVELENGTH,
+        help=(
+            "wavelength table: a path, or the bare filename of a packaged one "
+            f"such as Th_wavelength_CMOS_20240305.txt (default: "
+            f"{_DEFAULT_WAVELENGTH.name})"
+        ),
+    )
     parser.add_argument("--integral", type=Path, default=_DEFAULT_INTEGRAL)
     parser.add_argument("--previous-sphere", type=Path, default=_DEFAULT_PREVIOUS_SPHERE)
     parser.add_argument(
@@ -5282,10 +5756,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
     if not args.folder.is_dir():
         raise SystemExit(f"folder not found: {args.folder}")
-    if not args.pattern.is_file():
-        raise SystemExit(f"pattern file not found: {args.pattern}")
-    if not args.wavelength.is_file():
-        raise SystemExit(f"wavelength table not found: {args.wavelength}")
+    # Resolved, then said out loud: which pattern the bench opened on is the one
+    # fact the fit cannot tell you afterwards, and a bare packaged name resolves
+    # to a file the operator never typed the path of.
+    args.pattern = resolve_calibration_file(args.pattern, "pattern")
+    args.wavelength = resolve_calibration_file(args.wavelength, "wavelength")
+    print(f"Pattern:    {args.pattern}")
+    print(f"Wavelength: {args.wavelength}")
     if not args.integral.is_file():
         raise SystemExit(f"integrating-sphere reference not found: {args.integral}")
     if args.poll_ms < 50:

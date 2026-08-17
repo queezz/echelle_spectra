@@ -53,6 +53,7 @@ from echelle_spectra.calibration_bench_gui import (
     default_bench_roots,
     forget_session_layout,
     one_line,
+    resolve_calibration_file,
     role_combo_minimum_width,
     snapshot_identity,
 )
@@ -63,6 +64,8 @@ from echelle_spectra.calibration_campaign import (
     ExposureState,
     MeasurementRecord,
     MeasurementRole,
+    SaveState,
+    TomlState,
     default_validity,
     lamp_reference_set,
     triage_exposure,
@@ -3930,7 +3933,12 @@ def test_the_sphere_view_says_when_the_pattern_does_not_fit(qt_app, tmp_path: Pa
     message = window.sphere_view_message.text()
     assert "PATTERN DOES NOT FIT" in message
     assert "rows above the chosen pattern" in message
-    assert "echelle-pattern" in message
+    # The way out is a press on this very view, not a command line and a
+    # restart: the reading and the two controls that answer it are together.
+    assert "extract a pattern from this sphere" in message
+    assert "without closing" in message
+    assert window.extract_pattern_button.isEnabled()
+    assert window.choose_pattern_button.isEnabled()
 
 
 def test_a_fitting_pattern_is_reported_beside_the_factors_without_alarm(
@@ -3967,3 +3975,458 @@ def test_a_fitting_pattern_says_nothing_at_the_save_press(qt_app, tmp_path: Path
     window._save_snapshot()
 
     assert window.save_message_value.text() == ""
+
+
+# ---------------------------------------------------------------------------
+# Extracting a pattern in place.
+#
+# The owner, at the bench, with the guard warning on screen and every role
+# assigned: "I'm blocked, why do I need to exit for the pattern?"  He was
+# right.  The bench holds the sphere frame, packages the extraction code, and
+# has just measured the offset — the pattern was a constructor argument for
+# historical reasons only.  These tests are his flow: bands five rows off the
+# launch pattern, guard fires, one press, guard quiet, and nothing derived from
+# the old geometry left standing.
+# ---------------------------------------------------------------------------
+
+#: One trusted line per order, so the anchors an extraction clears are anchors
+#: that were really fitted, and the re-run that replaces them really runs.
+_BAND_LINE_PIXELS = ((0, 120.0), (1, 240.0), (2, 360.0), (3, 480.0))
+
+#: How far this sphere's own bands sit above the pattern the bench opened on —
+#: the owner's real 2024-folder-on-the-2025-pattern reading, near enough.
+_BAND_SHIFT_ROWS = 5.0
+
+
+def _band_lines() -> tuple:
+    return tuple(
+        CalibrationTableLine(
+            order, center - 5.0, center + 5.0, center, 600.0 + center, "NeI", "ok"
+        )
+        for order, center in _BAND_LINE_PIXELS
+    )
+
+
+def _band_frame(path: Path, shift_rows: float, *, lit: bool = True) -> BenchFrame:
+    """A sphere acquisition: order bands across the rows, lines along them."""
+
+    rows = np.arange(_BAND_ROWS, dtype=float)[:, None]
+    traces = _band_traces(shift_rows)
+    image = np.full((_BAND_ROWS, _BAND_COLUMNS), 40.0)
+    if lit:
+        for order_idx in range(traces.shape[1]):
+            image = image + 20000.0 * np.exp(
+                -0.5 * ((rows - traces[:, order_idx][None, :]) / 5.0) ** 2
+            )
+    x = np.arange(_BAND_COLUMNS, dtype=float)
+    spectra = []
+    for order_idx in range(traces.shape[1]):
+        trace = np.full(_BAND_COLUMNS, 10.0)
+        for line_order, center in _BAND_LINE_PIXELS:
+            if line_order == order_idx and lit:
+                trace = trace + 900.0 * np.exp(-0.5 * ((x - center) / 1.7) ** 2)
+        spectra.append(trace)
+    return BenchFrame(
+        Path(path),
+        image[np.newaxis, :, :],
+        image,
+        tuple(spectra),
+        {"ExposureTime": 0.1},
+    )
+
+
+class _BandLoader:
+    """A reader that hands back the sphere pair, and remembers a new pattern."""
+
+    def __init__(self, shift_rows: float) -> None:
+        self.shift_rows = shift_rows
+        self.pattern: np.ndarray | None = None
+
+    def __call__(self, path) -> BenchFrame:
+        source = Path(path)
+        return _band_frame(source, self.shift_rows, lit="-bg" not in source.name)
+
+    def adopt_pattern(self, pattern) -> None:
+        self.pattern = np.asarray(pattern, dtype=int)
+
+
+def _extraction_bench(
+    tmp_path: Path, *, shift_rows: float = _BAND_SHIFT_ROWS, background: bool = True
+):
+    """A bench whose sphere's bands sit *shift_rows* off the pattern it opened on."""
+
+    launch = tmp_path / "pattern_launch.txt"
+    np.savetxt(launch, np.rint(_band_traces()).astype(int), fmt="%d")
+    for name in ("wavelength.txt", "integral.txt"):
+        (tmp_path / name).write_text(name, encoding="utf-8")
+
+    loader = _BandLoader(shift_rows)
+    sphere = tmp_path / "sphere-0.1s-x3.sif"
+    sphere_bg = tmp_path / "sphere-0.1s-x3-bg.sif"
+    for path in (sphere, sphere_bg):
+        path.write_bytes(b"sphere fixture\n")
+
+    session = CalibrationBenchSession(np.loadtxt(launch, dtype=int), _band_lines())
+    session.accept_frame(loader(sphere))
+    window = CalibrationBenchWindow(
+        session,
+        loader=loader,
+        start_timer=False,
+        output_root=tmp_path / "calibrations",
+    )
+    campaign = CalibrationCampaignSession(
+        pattern_source=launch,
+        wavelength_source=tmp_path / "wavelength.txt",
+        integral_source=tmp_path / "integral.txt",
+    )
+    campaign.record_frame(session.frame)
+    campaign.classify_file(sphere, MeasurementRole.SPHERE)
+    if background:
+        campaign.classify_file(sphere_bg, MeasurementRole.SPHERE_BACKGROUND)
+    window.campaign = campaign
+    window.snapshot_id_edit.setText("20250926_cmos")
+    window.refresh()
+    return window, launch, sphere
+
+
+def _wait_for_the_bench(window: CalibrationBenchWindow, qt_app) -> None:
+    """Let the extraction thread and the re-extraction it starts both finish."""
+
+    for _attempt in range(600):
+        idle = (
+            window._campaign_thread is None
+            and window._load_thread is None
+            and not window._queue
+        )
+        if idle:
+            break
+        qt_app.processEvents()
+        QtCore.QThread.msleep(5)
+    qt_app.processEvents()
+
+
+def test_the_band_guard_carries_the_press_that_answers_it(qt_app, tmp_path: Path):
+    """The row that reports the mismatch is the row that offers the fix."""
+
+    window, _launch, sphere = _extraction_bench(tmp_path)
+
+    assert window.campaign.pattern_band_warning()
+    references = next(
+        item
+        for item in window.campaign.checklist(window.session)
+        if item.key == "references"
+    )
+    assert window._next_action_for(references) == (
+        "Extract pattern from this sphere",
+        window._extract_pattern_from_sphere,
+    )
+    assert window.next_step_button.text() == "Extract pattern from this sphere"
+    assert window.extract_pattern_button.isEnabled()
+    assert window.extract_pattern_button.font().bold()
+    # And it says what it will fit, before it is pressed.
+    assert sphere.name in references.unblocked_by
+    assert "without closing" in references.unblocked_by
+    window.close()
+
+
+def test_extracting_from_this_sphere_rebases_the_bench_in_place(qt_app, tmp_path: Path):
+    """The owner's flow, end to end: press once, and the geometry is right."""
+
+    window, launch, sphere = _extraction_bench(tmp_path)
+    window._auto_anchor()
+    anchored = len(window.session.anchors)
+    assert anchored >= 2, "the fixture must place anchors on the old geometry"
+    window.campaign.compute_sphere_comparison(
+        lambda **values: AbsoluteCalibrationResult(np.linspace(400, 700, 8), np.ones(8))
+    )
+    assert window.campaign.pattern_band_warning()
+
+    window._extract_pattern_from_sphere()
+    _wait_for_the_bench(window, qt_app)
+
+    # Written first, under the campaign's own one tidy folder, and named in full.
+    written = tmp_path / "calibrations" / "patterns" / "pattern_extracted_20250926.txt"
+    assert written.is_file()
+    said = window.save_message_value.text()
+    assert str(written) in said
+
+    # The bench is standing on it, and says so where the state is read.
+    assert window.campaign.pattern_source == written
+    assert window.pattern_source_value.text() == str(written)
+    assert str(written) in window.pattern_choice_value.text()
+
+    # The traces land on this sphere's own bands, which is the whole point.
+    extracted = np.loadtxt(written, dtype=int)
+    truth = _band_traces(_BAND_SHIFT_ROWS)
+    assert np.median(np.abs(extracted - truth)) < 1.0
+    np.testing.assert_allclose(window.session.pattern, extracted)
+    np.testing.assert_array_equal(window.loader.pattern, extracted)
+    np.testing.assert_allclose(window._pattern_items[0].yData, extracted[:, 0])
+
+    # The guard, re-measured against what the bench now wears, reads quiet.
+    assert window.campaign.pattern_band_warning() == ""
+    reading = window.campaign.sphere_band_offsets()
+    assert reading is not None and reading.measured
+    assert abs(reading.median_offset_rows) < 1.0
+    assert "PATTERN DOES NOT FIT" not in window.sphere_view_message.text()
+
+    # Anchors go, with the one honest notice, and the re-run really re-runs.
+    assert not window.session.anchors
+    assert f"{anchored} anchor(s) were cleared" in said
+    assert "fitted on the old geometry" in said
+    assert "auto-anchor re-runs them in seconds" in said
+    window._auto_anchor()
+    assert len(window.session.anchors) >= 2
+    assert window.session.rms_px is not None
+
+    # Everything the old pattern produced is dropped through the existing paths.
+    assert window.campaign.comparison.state is ComparisonState.NOT_RUN
+    assert window.campaign.toml_state is TomlState.NOT_GENERATED
+    assert window.campaign.save_state is SaveState.NOT_READY
+    # And the roles and the files themselves are untouched.
+    assert window.campaign.sphere_pair_paths()[0] == sphere
+    assert launch.is_file(), "the pattern it came from is never overwritten"
+    window.close()
+
+
+def test_the_bench_extraction_is_the_cli_extraction(qt_app, tmp_path: Path):
+    """One core, called through one function, with the worn pattern as prior."""
+
+    from echelle_spectra import pattern_cli
+    from echelle_spectra.tools import pattern_extraction
+
+    assert (
+        bench_gui.extract_pattern_from_sphere
+        is pattern_cli.extract_pattern_from_sphere
+        is pattern_extraction.extract_pattern_from_sphere
+    )
+
+    window, launch, _sphere = _extraction_bench(tmp_path)
+    seen = {}
+    real = pattern_extraction.extract_pattern_from_sphere
+
+    def spy(image, prior=None, **kwargs):
+        seen["prior"] = None if prior is None else np.asarray(prior)
+        seen["image"] = np.asarray(image)
+        return real(image, prior, **kwargs)
+
+    bench_gui.extract_pattern_from_sphere = spy
+    try:
+        window._extract_pattern_from_sphere()
+        _wait_for_the_bench(window, qt_app)
+    finally:
+        bench_gui.extract_pattern_from_sphere = real
+
+    np.testing.assert_array_equal(seen["prior"], np.loadtxt(launch, dtype=int))
+    # Signal minus background, as the CLI does it: the bands survive and the
+    # detector floor the background carries is gone.
+    assert seen["image"].max() > 1000.0
+    assert float(np.percentile(seen["image"], 5)) < 1.0
+    window.close()
+
+
+def test_a_pattern_file_can_be_chosen_on_the_same_terms(qt_app, tmp_path: Path):
+    """The picker is the general mechanism; extraction is its special case."""
+
+    window, _launch, _sphere = _extraction_bench(tmp_path)
+    window._auto_anchor()
+    assert window.session.anchors
+    on_geometry = tmp_path / "pattern_this_era.txt"
+    np.savetxt(
+        on_geometry, np.rint(_band_traces(_BAND_SHIFT_ROWS)).astype(int), fmt="%d"
+    )
+    chosen = (str(on_geometry), "")
+    monkey = QtWidgets.QFileDialog.getOpenFileName
+    QtWidgets.QFileDialog.getOpenFileName = staticmethod(lambda *a, **k: chosen)
+    try:
+        window._choose_pattern_file()
+        _wait_for_the_bench(window, qt_app)
+    finally:
+        QtWidgets.QFileDialog.getOpenFileName = monkey
+
+    assert window.campaign.pattern_source == on_geometry
+    np.testing.assert_allclose(
+        window.session.pattern, np.loadtxt(on_geometry, dtype=int)
+    )
+    np.testing.assert_array_equal(
+        window.loader.pattern, np.loadtxt(on_geometry, dtype=int)
+    )
+    assert window.campaign.pattern_band_warning() == ""
+    assert not window.session.anchors
+    assert "anchor(s) were cleared" in window.save_message_value.text()
+    assert window.campaign.save_state is SaveState.NOT_READY
+    # Nothing was extracted, so nothing was written.
+    assert not (tmp_path / "calibrations" / "patterns").exists()
+    window.close()
+
+
+def test_a_campaign_without_a_sphere_says_why_it_cannot_extract(qt_app, tmp_path: Path):
+    """A disabled button that does not say why is a bench that went quiet."""
+
+    window, _launch, sphere = _extraction_bench(tmp_path)
+    window.campaign.remove_classification(sphere)
+    window.refresh_campaign()
+
+    assert not window.extract_pattern_button.isEnabled()
+    assert "sphere signal role" in window.extract_pattern_button.toolTip()
+    assert window.choose_pattern_button.isEnabled(), "the picker never needs a sphere"
+
+    window._extract_pattern_from_sphere()
+    said = window.save_message_value.text()
+    assert "No pattern was extracted" in said
+    assert "sphere signal role" in said
+    assert window._campaign_thread is None
+    window.close()
+
+
+def test_extracting_without_a_background_states_the_caveat(qt_app, tmp_path: Path):
+    """Signal alone still answers the guard, and still says what it was."""
+
+    window, _launch, _sphere = _extraction_bench(tmp_path, background=False)
+
+    window._extract_pattern_from_sphere()
+    _wait_for_the_bench(window, qt_app)
+
+    said = window.save_message_value.text()
+    assert "signal alone" in said
+    assert window.campaign.pattern_band_warning() == ""
+    window.close()
+
+
+def test_the_busy_gate_covers_the_extraction(qt_app, tmp_path: Path):
+    """The extraction reads the very session and campaign a press would move."""
+
+    window, _launch, _sphere = _extraction_bench(tmp_path)
+    window._campaign_thread = bench_gui.CampaignTaskThread(lambda: None, window)
+    try:
+        window.refresh_campaign()
+        assert not window.extract_pattern_button.isEnabled()
+        assert not window.choose_pattern_button.isEnabled()
+        assert not window.next_step_button.isEnabled()
+        # And a press that reaches the handler anyway starts nothing.
+        started = []
+        window._start_campaign_task(lambda: started.append(1))
+        assert not started
+    finally:
+        window._campaign_thread = None
+    window.refresh_campaign()
+    assert window.extract_pattern_button.isEnabled()
+    window.close()
+
+
+# ---------------------------------------------------------------------------
+# The packaged names are the vocabulary.
+#
+# The owner typed the name the README's own examples use —
+# ``--pattern pattern_CMOS_20240305.txt`` — and was told "pattern file not
+# found", because only a literal path was ever tried.  A path still wins; a
+# bare packaged name now resolves; and a name that is neither is refused with
+# the handful of names that would have worked.
+# ---------------------------------------------------------------------------
+
+
+def test_a_bare_packaged_pattern_name_resolves_to_the_packaged_file():
+    resolved = resolve_calibration_file(Path("pattern_CMOS_20240305.txt"), "pattern")
+
+    assert resolved.is_absolute()
+    assert resolved.is_file()
+    assert resolved.name == "pattern_CMOS_20240305.txt"
+    assert resolved.parent.name == "calibration_files"
+
+
+def test_a_bare_packaged_wavelength_name_resolves_from_a_subfolder():
+    resolved = resolve_calibration_file(
+        Path("Th_wavelength_CMOS_20240305_aligned_to_20250926.txt"), "wavelength"
+    )
+
+    assert resolved.is_file()
+    assert resolved.parent.name == "alignments"
+
+
+def test_a_real_path_still_wins_over_a_packaged_name(tmp_path: Path):
+    mine = tmp_path / "pattern_CMOS_20240305.txt"
+    mine.write_text("1 2\n3 4\n", encoding="utf-8")
+
+    resolved = resolve_calibration_file(mine, "pattern")
+
+    assert resolved == mine.resolve()
+
+
+def test_a_name_that_is_neither_is_refused_with_the_packaged_vocabulary():
+    with pytest.raises(SystemExit) as refusal:
+        resolve_calibration_file(Path("pattern_CMOS_1999.txt"), "pattern")
+
+    said = str(refusal.value)
+    assert "pattern file not found" in said
+    assert "pattern_CMOS_20240305.txt" in said
+    assert "pattern_CMOS_20250926.txt" in said
+    # The vocabulary this argument is about, and not the other tables beside it.
+    assert "Th_wavelength" not in said
+
+
+def test_the_bench_says_which_tables_it_resolved(qt_app, tmp_path: Path, capsys):
+    """Which pattern the bench opened on is the one fact the fit cannot tell you."""
+
+    started = {}
+
+    def fake_window(session, **kwargs):
+        started["campaign"] = kwargs["campaign"]
+        raise SystemExit(0)
+
+    monkey = bench_gui.CalibrationBenchWindow
+    bench_gui.CalibrationBenchWindow = fake_window
+    try:
+        with pytest.raises(SystemExit):
+            bench_gui.main([str(tmp_path), "--pattern", "pattern_CMOS_20240305.txt"])
+    finally:
+        bench_gui.CalibrationBenchWindow = monkey
+
+    printed = capsys.readouterr().out
+    assert "pattern_CMOS_20240305.txt" in printed
+    assert str(_PACKAGE_DIR) in printed
+    assert started["campaign"].pattern_source.is_absolute()
+
+
+#: The owner's own 2025 folder, when this checkout carries it: the matched era,
+#: where an extraction must agree with the pattern it was fitted against rather
+#: than move it.  A guard that shifted the geometry on a good pattern would be
+#: worse than no button at all.
+_LIVE_FOLDER = Path(__file__).resolve().parents[1] / "local" / "20250926_calib"
+_LIVE_SPHERE_PAIR = (
+    _LIVE_FOLDER / "sphere-0.1s-x3.sif",
+    _LIVE_FOLDER / "sphere-0.1s-x3-bg.sif",
+)
+_LIVE_PATTERN = (
+    _PACKAGE_DIR / "resources" / "calibration_files" / "pattern_CMOS_20250926.txt"
+)
+
+
+@pytest.mark.skipif(
+    not all(path.is_file() for path in _LIVE_SPHERE_PAIR),
+    reason="local/20250926_calib is not in this checkout",
+)
+def test_the_real_2025_sphere_extracts_back_onto_its_own_pattern(tmp_path: Path):
+    """Real optics, matched era: the fit lands where the pattern already was."""
+
+    from echelle_spectra.calibration_bench import FrameLoader, band_center_offsets
+
+    prior = np.loadtxt(_LIVE_PATTERN, dtype=int)
+    sphere, background = _LIVE_SPHERE_PAIR
+    written = tmp_path / "calibrations" / "patterns" / "pattern_extracted_20250926.txt"
+
+    rebase = bench_gui.extract_pattern_beside_campaign(
+        loader=FrameLoader(prior),
+        prior=prior,
+        sphere_path=sphere,
+        background_path=background,
+        output_path=written,
+    )
+
+    extracted = np.loadtxt(written, dtype=int)
+    assert extracted.shape == prior.shape
+    assert rebase.caveat == ""
+    assert abs(rebase.median_offset_rows) < 1.0
+    # And the guard, which was quiet before, is quiet after.
+    reading = band_center_offsets(rebase.sphere_image, extracted)
+    assert reading.measured
+    assert not reading.exceeds()

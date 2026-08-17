@@ -80,6 +80,12 @@ geometry is mostly a shifted version of the previous calibration.
 
 ## CLI Workflow
 
+The live calibration bench can also extract a pattern without leaving the
+GUI: when the sphere's order bands do not fit the chosen pattern, the bench
+offers **Extract pattern from this sphere** and rebases the session on the
+result — same extraction core as the CLI below. See the
+[calibration bench guide](calibration-bench.md).
+
 Use `echelle-pattern` when the notebook settings are known and the task is just
 to run the calibration workflow. Without `--output`, the command prints
 diagnostics and does not write a pattern file:

@@ -822,3 +822,68 @@ def test_the_2025_sphere_sits_on_the_packaged_2025_pattern():
     # Loosely pinned: this is a measurement of real optics, not a fixture.
     assert abs(reading.median_offset_rows) < 1.0
     assert not reading.exceeds()
+
+
+# ---------------------------------------------------------------------------
+# The pattern is not a constant.
+#
+# It was a constructor argument for as long as the only way to change it was to
+# close the bench.  The bench can extract one from its own sphere now, so both
+# the state machine and the reader take one mid-session — and the anchors that
+# were fitted on the old geometry go, because an anchor's detector row is read
+# out of the pattern it was placed against.
+# ---------------------------------------------------------------------------
+
+
+def test_adopting_a_pattern_drops_the_anchors_fitted_on_the_old_geometry(tmp_path):
+    session = CalibrationBenchSession(_pattern(), (_line(0, 32.0, 585.2),))
+    session.accept_frame(_frame(tmp_path))
+    session.upsert_anchor(_anchor(_line(0, 32.0, 585.2), 32.4))
+    session.upsert_anchor(_anchor(_line(1, 72.0, 588.1), 72.5))
+    assert session.transform is not None
+
+    moved = _pattern() + 5.0
+    cleared = session.adopt_pattern(moved)
+
+    assert cleared == 2
+    assert not session.anchors
+    assert session.transform is None
+    assert session.rms_px is None
+    assert session.residuals == ()
+    assert session.alignment_state is AlignmentState.EMPTY
+    np.testing.assert_allclose(session.pattern, moved)
+    # The frame itself is kept: it is re-extracted by the caller, not lost.
+    assert session.frame is not None
+    assert session.file_state is FileLoadState.LOADED
+
+
+def test_a_pattern_with_another_order_count_releases_the_open_frame(tmp_path):
+    session = CalibrationBenchSession(_pattern(), (_line(0, 32.0, 585.2),))
+    session.accept_frame(_frame(tmp_path))
+    session.set_selected_order(2)
+
+    session.adopt_pattern(np.full((120, 2), 12.0))
+
+    assert session.frame is None
+    assert session.file_state is FileLoadState.WAITING
+    assert session.alignment_state is AlignmentState.WAITING_FOR_FRAME
+    assert session.selected_order == 1
+
+
+def test_a_pattern_that_is_not_a_table_is_refused(tmp_path):
+    session = CalibrationBenchSession(_pattern(), (_line(0, 32.0, 585.2),))
+
+    with pytest.raises(ValueError):
+        session.adopt_pattern(np.arange(10.0))
+
+    assert session.pattern.shape == (120, 3)
+
+
+def test_the_frame_loader_reads_later_frames_off_the_adopted_pattern():
+    loader = FrameLoader(_pattern().astype(int))
+
+    loader.adopt_pattern((_pattern() + 7).astype(int))
+
+    np.testing.assert_array_equal(loader.pattern, (_pattern() + 7).astype(int))
+    with pytest.raises(ValueError):
+        loader.adopt_pattern(np.arange(5))

@@ -7,7 +7,7 @@ or a future CLI can choose how to load SIF/TIFF/FITS data.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from typing import List, Optional, Sequence
 
 import numpy as np
@@ -19,13 +19,16 @@ except ImportError as exc:  # pragma: no cover - dependency is declared by the p
     raise ImportError("pattern_extraction requires peakutils") from exc
 
 __all__ = [
+    "DEFAULT_TRIAL_THRESHOLDS",
     "PatternExtractionConfig",
     "PatternColumnDetection",
     "PatternExtractionResult",
     "PatternExtractionTrial",
+    "SpherePatternExtraction",
     "average_detector_frames",
     "subtract_background",
     "sample_columns",
+    "fit_sampling_to_width",
     "amplification_curve",
     "detect_order_peaks_at_column",
     "detect_order_peaks_near_prior_at_column",
@@ -35,7 +38,17 @@ __all__ = [
     "extract_order_pattern",
     "extract_order_pattern_near_prior",
     "trial_order_pattern_extraction",
+    "pattern_row_offsets",
+    "extract_pattern_from_sphere",
 ]
+
+#: Peak thresholds the unguided trial scan walks when nobody names its own.
+#: These are the values ``echelle-pattern`` has always defaulted to, kept here
+#: so the CLI and the bench cannot drift apart on them.
+DEFAULT_TRIAL_THRESHOLDS = (0.10, 0.11, 0.12, 0.13, 0.14, 0.15)
+
+#: How far from a prior trace the guided fit will look for the real band.
+DEFAULT_SEARCH_RADIUS_PX = 20
 
 
 @dataclass(frozen=True)
@@ -164,6 +177,30 @@ def sample_columns(
             f"sample columns must be within [0, {ncols}); got {columns.tolist()}"
         )
     return columns
+
+
+def fit_sampling_to_width(
+    config: PatternExtractionConfig, ncols: int
+) -> PatternExtractionConfig:
+    """Shrink a sampled-column plan until it fits a detector this wide.
+
+    The packaged defaults (ten columns, 150 px apart) describe the real 2560 px
+    CMOS frame and are left exactly alone by it.  A narrower image — a test
+    fixture, a cropped sensor — would otherwise refuse the whole extraction over
+    a sampling plan nobody chose deliberately, so the step is reduced to the
+    widest one that still lands every sample on the detector.
+    """
+
+    if ncols <= 0:
+        raise ValueError("ncols must be positive")
+    count = int(config.sample_count)
+    if count <= 0:
+        raise ValueError("sample_count must be positive")
+    step = int(config.sample_step_px)
+    if step > 0 and step * count < ncols:
+        return config
+    fitted = max(1, (ncols - 1) // count)
+    return replace(config, sample_step_px=fitted)
 
 
 def amplification_curve(nrows: int, rate: float = 3e-3) -> np.ndarray:
@@ -484,4 +521,127 @@ def trial_order_pattern_extraction(
             -int(trial.columns_px[0]) if trial.columns_px.size else 0,
         ),
         reverse=True,
+    )
+
+
+def pattern_row_offsets(pattern: np.ndarray, reference: np.ndarray) -> np.ndarray:
+    """Row differences ``pattern - reference`` for two tables of one shape."""
+
+    rows = np.asarray(pattern, dtype=float)
+    other = np.asarray(reference, dtype=float)
+    if rows.shape != other.shape:
+        raise ValueError(f"pattern shapes differ: {rows.shape} vs {other.shape}")
+    return rows - other
+
+
+@dataclass(frozen=True)
+class SpherePatternExtraction:
+    """One pattern extracted from a sphere image, and how it was arrived at.
+
+    The diagnostics travel with the table because both callers report them: the
+    CLI prints the trial scan it walked, and the bench says in one sentence how
+    far the extracted traces moved from the pattern it was wearing.
+    """
+
+    pattern: np.ndarray
+    columns_px: np.ndarray
+    threshold: float
+    #: Whether the prior-guided fit produced this table, as opposed to the
+    #: unguided trial fit alone.
+    prior_used: bool = False
+    search_radius_px: int = DEFAULT_SEARCH_RADIUS_PX
+    trials: List[PatternExtractionTrial] = field(default_factory=list)
+    #: Whether a trial found the expected order count in every sampled column.
+    #: ``False`` means the prior alone carried the fit, which it can do: the
+    #: guided search returns one peak per prior trace by construction.
+    trial_succeeded: bool = True
+
+    @property
+    def n_orders(self) -> int:
+        """Number of orders in the extracted table."""
+
+        return int(self.pattern.shape[1])
+
+
+def extract_pattern_from_sphere(
+    image: np.ndarray,
+    prior_pattern: Optional[np.ndarray] = None,
+    *,
+    config: PatternExtractionConfig = PatternExtractionConfig(),
+    threshold_values: Sequence[float] = DEFAULT_TRIAL_THRESHOLDS,
+    column_start_values: Optional[Sequence[int]] = None,
+    search_radius_px: int = DEFAULT_SEARCH_RADIUS_PX,
+    use_prior: bool = True,
+) -> SpherePatternExtraction:
+    """Extract one order-pattern table from a sphere image, prior-guided.
+
+    This is the whole extraction, in one call, for every caller that has a
+    sphere image in hand: ``echelle-pattern`` and the calibration bench's own
+    "extract pattern from this sphere" both come through here, so the table the
+    bench stands on and the table the CLI writes are produced by the same code
+    on the same settings.
+
+    The threshold scan chooses its own peak threshold and sampled columns; the
+    prior, when one is given, then decides which peak belongs to which order.
+    When no trial finds the expected order count — a dim frame, an unusual
+    sensor, a fixture — the prior alone can still carry the fit, because the
+    guided search returns exactly one peak per prior trace by construction.
+    Without a prior that case has nothing to fall back on and raises.
+    """
+
+    arr = average_detector_frames(image)
+    prior = None
+    if prior_pattern is not None:
+        prior = np.asarray(prior_pattern, dtype=float)
+        if prior.ndim != 2 or not prior.size:
+            raise ValueError("prior_pattern must have shape (detector columns, orders)")
+        # A prior settles the order count: the guided fit reads one band per
+        # trace, so the prior's own width is the expectation, never a flag.
+        config = replace(config, expected_orders=int(prior.shape[1]))
+    config = fit_sampling_to_width(config, arr.shape[1])
+
+    trials = trial_order_pattern_extraction(
+        arr,
+        config=config,
+        threshold_values=threshold_values,
+        column_start_values=column_start_values,
+    )
+    best = next((trial for trial in trials if trial.success), None)
+    if best is not None:
+        columns = np.asarray(best.columns_px, dtype=int)
+        threshold = float(best.threshold)
+        pattern = best.result.pattern if best.result is not None else None
+    elif prior is None or not use_prior:
+        raise ValueError(
+            "no trial found the expected order count in every sampled column"
+        )
+    else:
+        columns = sample_columns(
+            arr.shape[1],
+            step_size=config.sample_step_px,
+            num_steps=config.sample_count,
+        )
+        threshold = float(config.peak_threshold)
+        pattern = None
+
+    prior_used = prior is not None and use_prior
+    if prior_used:
+        result = extract_order_pattern_near_prior(
+            arr,
+            prior,
+            config=replace(config, peak_threshold=threshold),
+            columns_px=columns,
+            search_radius_px=search_radius_px,
+        )
+        pattern = result.pattern
+    assert pattern is not None  # a failed trial without a prior already raised
+
+    return SpherePatternExtraction(
+        pattern=pattern,
+        columns_px=columns,
+        threshold=threshold,
+        prior_used=prior_used,
+        search_radius_px=int(search_radius_px),
+        trials=list(trials),
+        trial_succeeded=best is not None,
     )

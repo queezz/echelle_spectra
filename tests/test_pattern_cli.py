@@ -61,7 +61,7 @@ def test_preview_mode_does_not_write(tmp_path, capsys):
 
     with patch("echelle_spectra.pattern_cli._load_image_pair", return_value=np.ones((5, 6))), \
         patch(
-            "echelle_spectra.pattern_cli.trial_order_pattern_extraction",
+            "echelle_spectra.tools.pattern_extraction.trial_order_pattern_extraction",
             return_value=[_FakeTrial()],
         ), \
         pytest.raises(SystemExit) as exc:
@@ -80,7 +80,7 @@ def test_output_writes_pattern(tmp_path):
 
     with patch("echelle_spectra.pattern_cli._load_image_pair", return_value=np.ones((5, 6))), \
         patch(
-            "echelle_spectra.pattern_cli.trial_order_pattern_extraction",
+            "echelle_spectra.tools.pattern_extraction.trial_order_pattern_extraction",
             return_value=[_FakeTrial()],
         ), \
         pytest.raises(SystemExit) as exc:
@@ -101,11 +101,11 @@ def test_prior_pattern_runs_prior_guided_fit(tmp_path):
 
     with patch("echelle_spectra.pattern_cli._load_image_pair", return_value=np.ones((5, 6))), \
         patch(
-            "echelle_spectra.pattern_cli.trial_order_pattern_extraction",
+            "echelle_spectra.tools.pattern_extraction.trial_order_pattern_extraction",
             return_value=[_FakeTrial()],
         ), \
         patch(
-            "echelle_spectra.pattern_cli.extract_order_pattern_near_prior",
+            "echelle_spectra.tools.pattern_extraction.extract_order_pattern_near_prior",
             return_value=_FakeResult(),
         ) as prior_fit, \
         pytest.raises(SystemExit) as exc:
