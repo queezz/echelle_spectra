@@ -5,9 +5,10 @@ from __future__ import annotations
 import argparse
 import html
 import platform
+import re
 import sys
 from collections.abc import Sequence
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path, PurePath
 
 import numpy as np
@@ -58,9 +59,16 @@ _DEFAULT_PREVIOUS_SPHERE_BACKGROUND = (
     _CALIBRATION_DIR / "sphere_cmos_20240305_bkg.sif"
 )
 
-#: The two folder names the bench writes under, wherever its roots end up.
+#: The one folder everything the bench generates lives under, wherever its
+#: roots end up — owner, 2026-08-17: "It's kinder to keep all generated stuff
+#: in one tidy folder."
 SNAPSHOT_ROOT_NAME = "calibrations"
-CONFIG_ROOT_NAME = "calibration-configs"
+
+#: And its own subfolder for the reviewable settings bundles, so the snapshot
+#: root holds snapshot identities and exactly one other child.  A sibling
+#: ``calibration-configs\`` beside it was a second generated folder to explain,
+#: to find, and to carry, for no gain over a subfolder of the first.
+CONFIG_ROOT_NAME = "configs"
 
 
 def absolute_root(path: str | PurePath) -> Path:
@@ -86,10 +94,19 @@ def default_bench_roots(folder: str | PurePath | None = None) -> tuple[Path, Pat
     The bench is launched *at* a calibration folder, and that folder is where
     the operator goes looking for what the bench wrote.  Deriving both roots
     from it is what stopped a run against a NAS folder from scattering its
-    TOMLs into whatever directory the shortcut happened to start in.  With no
-    folder to derive from there is nothing better than the working directory,
-    so that is what it falls back to — but the Save tab says so out loud
-    either way.
+    TOMLs into whatever directory the shortcut happened to start in.  The
+    computed calibration belongs beside the frames it was computed from —
+    owner, 2026-08-17: "our metadata inside the folder with real lamp frames.
+    Side by side, and that folder holds it all. Raw and calculated stuff."
+    With no folder to derive from there is nothing better than the working
+    directory, so that is what it falls back to — but the Save tab says so out
+    loud either way.
+
+    The settings bundles land *inside* the snapshot root rather than in a
+    sibling folder, so the calibration folder gains one generated child and not
+    two.  Snapshot enumeration is unaffected: everything that reads a
+    calibrations root looks for ``<child>/snapshot.toml`` or resolves a
+    snapshot id it was given, so a ``configs`` child is simply not a snapshot.
 
     Only ``pathlib`` joins are used, which is what keeps a UNC root intact: a
     ``Path`` appends below ``\\\\server\\share`` without ever losing the two
@@ -97,7 +114,75 @@ def default_bench_roots(folder: str | PurePath | None = None) -> tuple[Path, Pat
     """
 
     base = absolute_root(Path.cwd() if folder is None else folder)
-    return base / SNAPSHOT_ROOT_NAME, base / CONFIG_ROOT_NAME
+    snapshots = base / SNAPSHOT_ROOT_NAME
+    return snapshots, snapshots / CONFIG_ROOT_NAME
+
+
+#: A calibration folder's name begins with the day its frames were taken —
+#: ``20250926_calib``.  Anchored, and refusing a ninth digit, so a shot number
+#: that merely starts with eight digits is never mistaken for a date.
+_ACQUISITION_DATE_IN_NAME = re.compile(r"^(\d{4})(\d{2})(\d{2})(?!\d)")
+
+
+def acquisition_date_from_name(folder: str | PurePath | None) -> date | None:
+    """The acquisition date a calibration folder's own name leads with.
+
+    ``20250926_calib`` is the calibration measured on 2025-09-26, and that is
+    the date the snapshot identity is built from.  Only the folder's own name
+    is read, never the path above it: a campaign tree may carry any number of
+    dated components, and only the folder the bench was pointed at is a claim
+    about *these* frames.
+    """
+
+    if folder is None:
+        return None
+    name = folder if isinstance(folder, str) else PurePath(folder).name
+    match = _ACQUISITION_DATE_IN_NAME.match(str(name).strip())
+    if match is None:
+        return None
+    try:
+        return date(int(match.group(1)), int(match.group(2)), int(match.group(3)))
+    except ValueError:  # 20259999_calib is not a date, it is a typo
+        return None
+
+
+def acquisition_date_from_metadata(metadata: object) -> date | None:
+    """The day an Andor SIF header says its acquisition began.
+
+    ``ExperimentTime`` is the Unix timestamp the acquisition started at, the
+    same field the cube exporter records as ``t_start``.  It is read as a
+    *local* calendar day on purpose: the identity convention names the day at
+    the instrument, which is the same day the folder beside it was named for.
+    """
+
+    if not isinstance(metadata, dict):
+        return None
+    raw = metadata.get("ExperimentTime")
+    if raw in (None, ""):
+        return None
+    try:
+        seconds = int(raw)
+    except (TypeError, ValueError):
+        return None
+    if seconds <= 0:
+        return None
+    try:
+        return datetime.fromtimestamp(seconds).date()
+    except (OSError, OverflowError, ValueError):
+        return None
+
+
+def snapshot_identity(day: date, detector: str = "cmos") -> str:
+    """``YYYYMMDD_<detector>`` — the identity every epoch in the registry uses.
+
+    Dated by acquisition, never by computation: ``20240305_cmos`` and
+    ``20250926_cmos`` name the days those calibrations were *measured*, and a
+    snapshot computed months later still belongs to its own frames.  (Owner,
+    2026-08-17: "calibration IS dated by the day the images were taken. When we
+    calculate is our bookkeeping. Not physics.")
+    """
+
+    return f"{day:%Y%m%d}_{str(detector).strip() or 'cmos'}"
 
 
 def open_containing_folder(path: str | Path) -> bool:
@@ -608,8 +693,10 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         watcher: StableSifWatcher | None = None,
         loader: FrameLoader | None = None,
         output_root: str | Path = SNAPSHOT_ROOT_NAME,
-        config_root: str | Path = CONFIG_ROOT_NAME,
+        config_root: str | Path | None = None,
         snapshot_id: str = "",
+        snapshot_date: date | None = None,
+        snapshot_id_explicit: bool = False,
         detector: str = "cmos",
         base_snapshot: str = "",
         valid_from: date | None = None,
@@ -626,11 +713,32 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         # bare name keeps that promise secret — which is exactly how a campaign
         # got saved into the launcher's home folder instead of beside its data.
         self.output_root = absolute_root(output_root)
-        self.config_root = absolute_root(config_root)
+        # Derived, the settings bundles are a child of the snapshot root: one
+        # generated folder per calibration folder, not two.  An explicitly
+        # passed root is honoured wherever it points.
+        self.config_root = (
+            self.output_root / CONFIG_ROOT_NAME
+            if config_root is None
+            else absolute_root(config_root)
+        )
         self.initial_snapshot_id = snapshot_id
         self.initial_detector = detector
         self.initial_base_snapshot = base_snapshot
         self.valid_from = valid_from
+        #: The acquisition date the prefilled identity is dated by, and where
+        #: it was read.  ``None`` means no acquisition date could be derived
+        #: yet, so the identity carries today's date as a placeholder and the
+        #: Save tab says so — the one case the operator must check by hand.
+        self.snapshot_date = snapshot_date
+        self._snapshot_date_source = (
+            "the --snapshot-id you passed"
+            if snapshot_id_explicit
+            else ("the folder name the bench was launched at" if snapshot_date else "")
+        )
+        #: Whether the identity is somebody's decision rather than the bench's
+        #: guess — a flag, or a hand edit.  A decision is never re-derived when
+        #: frames land and say something else.
+        self._snapshot_id_decided = bool(snapshot_id_explicit)
         self._load_thread: FrameLoadThread | None = None
         self._background_thread: FrameLoadThread | None = None
         self._campaign_thread: CampaignTaskThread | None = None
@@ -2125,6 +2233,7 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         form.addRow("Base snapshot", self.base_snapshot_edit)
         form.addRow("Notes", self.notes_edit)
         layout.addWidget(identity_group)
+        self._describe_snapshot_identity()
 
         # Where the files go, in full.  The bare folder names that used to be
         # here read as a promise that the bench wrote beside the data, and the
@@ -2139,8 +2248,12 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
             "Where saved snapshots are written",
             "Every snapshot this bench saves is created inside this folder, "
             "one subfolder per snapshot identity. Unless you passed "
-            "--output-root, it is the calibrations folder inside the data "
-            f"folder the bench was launched at. In full: {self.output_root}",
+            "--output-root, it is the calibrations folder inside the "
+            "calibration folder the bench was launched at — the computed "
+            "calibration sits beside the lamp frames it was computed from, and "
+            "that folder holds it all. Everything the bench generates lives "
+            "under this one folder, the settings bundles included, in a "
+            f"configs subfolder. In full: {self.output_root}",
             hint=str(self.output_root),
         )
         layout.addWidget(self.snapshot_root_value)
@@ -2151,9 +2264,10 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
             "Where the generated settings files are written",
             "The commented campaign, alignment and export files are written "
             "inside this folder, one subfolder per snapshot identity. Unless "
-            "you passed --config-root, it is the calibration-configs folder "
-            "inside the data folder the bench was launched at. In full: "
-            f"{self.config_root}",
+            "you passed --config-root, it is the configs folder inside the "
+            "calibrations folder above — one tidy folder holds everything the "
+            "bench generates, beside the lamp frames it was derived from. In "
+            f"full: {self.config_root}",
             hint=str(self.config_root),
         )
         layout.addWidget(self.config_root_value)
@@ -2210,6 +2324,82 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         self._fills_its_share(self.toml_preview)
         layout.addWidget(self.toml_preview, 1)
         self.control_tabs.addTab(self._scrollable(tab), "Save")
+
+    def _describe_snapshot_identity(self) -> None:
+        """Say where the identity's date came from — especially when nowhere.
+
+        The identity is the calibration's date, and the date is the day the
+        frames were *taken*: today is only ever a placeholder for it. So the
+        one state that must be unmissable is the one where nothing could be
+        derived, because then — and only then — the date on screen is the
+        bench's bookkeeping rather than the measurement's own day.
+        """
+
+        if self.snapshot_date is None and self._snapshot_id_decided:
+            detail = (
+                "This identity carries no leading YYYYMMDD, so nothing here "
+                "states an acquisition date and the saved epoch has no day to "
+                "start on. Give it the day these frames were taken."
+            )
+        elif self.snapshot_date is None:
+            detail = (
+                "No acquisition date could be read — not from the folder name "
+                "the bench was launched at, and not from the frames' own SIF "
+                "headers — so this is TODAY'S date standing in for it. CHECK "
+                "it against the day these frames were taken before saving, and "
+                "correct it here if it is wrong."
+            )
+        else:
+            detail = (
+                f"Dated {self.snapshot_date:%Y-%m-%d}, read from "
+                f"{self._snapshot_date_source}. Loading frames may still fill "
+                "this in from their headers while it is untouched; typing here "
+                "settles it and the bench never overwrites what you typed."
+            )
+        self._explainable(
+            self.snapshot_id_edit,
+            "The snapshot identity, and the day it is dated by",
+            "A calibration is dated by the day its images were TAKEN, not by "
+            "the day it is computed: YYYYMMDD_<detector>, matching "
+            f"20250926_cmos and the other epochs in the registry. {detail}",
+        )
+
+    def _snapshot_id_hand_edited(self, _text: str = "") -> None:
+        """A typed identity is a decision, and outranks anything derived."""
+
+        self._snapshot_id_decided = True
+        self._snapshot_date_source = "the identity you typed here"
+        self.snapshot_date = acquisition_date_from_name(
+            self.snapshot_id_edit.text().strip()
+        )
+        self._describe_snapshot_identity()
+
+    def _adopt_acquisition_date(self, frame) -> None:
+        """Take the identity's date from the frames when nothing else supplied one.
+
+        Only ever fills a gap: a date already read from the folder name stands,
+        a flag stands, and a hand-typed identity stands absolutely. What this
+        catches is the folder whose name says nothing — the frames themselves
+        still know which day they were shot on.
+        """
+
+        if self.snapshot_date is not None or self._snapshot_id_decided:
+            return
+        if self.snapshot_id_edit.text().strip() != self.initial_snapshot_id:
+            return
+        day = acquisition_date_from_metadata(getattr(frame, "metadata", None))
+        if day is None:
+            return
+        self.snapshot_date = day
+        self._snapshot_date_source = "the loaded frames' own SIF headers"
+        self.initial_snapshot_id = snapshot_identity(
+            day, self.detector_edit.text().strip() or self.initial_detector
+        )
+        # setText, not setPlaceholder: this is the identity that will be saved,
+        # and it is still the operator's to overwrite.  ``textEdited`` does not
+        # fire for a programmatic change, so this cannot mark itself decided.
+        self.snapshot_id_edit.setText(self.initial_snapshot_id)
+        self._describe_snapshot_identity()
 
     def _build_triage_view(self) -> None:
         widget = QtWidgets.QWidget()
@@ -2635,6 +2825,10 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         self.recompute_sphere_button.clicked.connect(self._start_sphere_comparison)
         self.save_snapshot_button.clicked.connect(self._save_snapshot)
         self.snapshot_id_edit.textChanged.connect(self.refresh_campaign)
+        # ``textEdited`` fires for the operator's keystrokes and never for the
+        # bench's own ``setText``, which is exactly the distinction between a
+        # decision and a derivation.
+        self.snapshot_id_edit.textEdited.connect(self._snapshot_id_hand_edited)
         # Picking the work on the left brings its own view with it: one lamp
         # choice, one view, the whole line workflow in one place.
         self.control_tabs.currentChanged.connect(self._control_tab_changed)
@@ -3412,6 +3606,10 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
     @QtCore.pyqtSlot(object)
     def _frame_loaded(self, frame: BenchFrame) -> None:
         self.session.accept_frame(frame)
+        # The frames carry the day they were shot on, which is the day the
+        # calibration is dated by; a folder that did not say so is filled in
+        # from them here, before anything is saved under a wrong identity.
+        self._adopt_acquisition_date(frame)
         if self.campaign is not None:
             record = self.campaign.record_frame(
                 frame, saturation_level=self.session.saturation_level
@@ -4592,7 +4790,9 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
                 row.label,
                 f"{row.wavelength_nm:.4f}",
                 f"{row.detector_pixel:.1f}",
-                "—" if intensity is None else f"{intensity:.2f}",
+                # Lamp-context strength spans five decades, so two fixed
+                # decimals print every ionized row as a flat "0.00".
+                "—" if intensity is None else f"{intensity:.3g}",
                 "✓" if is_anchored else "",
             )
             for column, value in enumerate(values):
@@ -4890,20 +5090,28 @@ def _build_parser() -> argparse.ArgumentParser:
             f"{', '.join(PREVIOUS_CAMPAIGN_LAMPS)})"
         ),
     )
+    # Unset by default, like the two roots below and for the same kind of
+    # reason: the identity is dated by the day the frames were TAKEN, and that
+    # day is not knowable until the folder argument — and then the frames
+    # themselves — have been read.  Today is the last resort, not the default.
     parser.add_argument(
         "--snapshot-id",
-        default=f"{date.today():%Y%m%d}_cmos",
-        help="planned snapshot identity (default: today's CMOS identity)",
+        default=None,
+        help=(
+            "planned snapshot identity (default: YYYYMMDD_<detector> dated by "
+            "the acquisition — the date leading the folder argument's name, "
+            "else the date in the loaded frames' SIF headers, else today)"
+        ),
     )
     parser.add_argument("--detector", default="cmos")
     parser.add_argument("--base-snapshot", default="20250926_cmos")
     parser.add_argument(
         "--valid-from",
         type=date.fromisoformat,
-        default=date.today(),
+        default=None,
         help=(
             "ISO date the saved snapshot's open-ended calibration epoch starts "
-            "(default: today)"
+            "(default: the acquisition date the snapshot identity is named for)"
         ),
     )
     # Left unset on purpose: the default is not knowable until the folder
@@ -4924,7 +5132,8 @@ def _build_parser() -> argparse.ArgumentParser:
         default=None,
         help=(
             "parent for generated commented TOML bundles "
-            f"(default: {CONFIG_ROOT_NAME}/ inside the folder argument)"
+            f"(default: {SNAPSHOT_ROOT_NAME}/{CONFIG_ROOT_NAME}/ inside the "
+            "folder argument, so one generated folder holds everything)"
         ),
     )
     parser.add_argument("--poll-ms", type=int, default=1000)
@@ -4961,6 +5170,16 @@ def main(argv: Sequence[str] | None = None) -> int:
     default_output, default_config = default_bench_roots(args.folder)
     output_root = default_output if args.output_root is None else absolute_root(args.output_root)
     config_root = default_config if args.config_root is None else absolute_root(args.config_root)
+
+    # The calibration is dated by the day its images were taken.  The folder
+    # the bench was launched at is the first place that says so — the owner's
+    # ``20250926_calib`` — and the frames' own headers are the second, once
+    # they load.  Today's date is only ever the placeholder for a day nothing
+    # could tell us, and the Save tab says as much when it is used.
+    snapshot_date = acquisition_date_from_name(args.folder)
+    snapshot_id = args.snapshot_id or snapshot_identity(
+        snapshot_date or date.today(), args.detector
+    )
 
     pattern = np.loadtxt(args.pattern, dtype=int)
     lines = load_wavelength_table(args.wavelength)
@@ -5004,7 +5223,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         loader=loader,
         output_root=output_root,
         config_root=config_root,
-        snapshot_id=args.snapshot_id,
+        snapshot_id=snapshot_id,
+        snapshot_date=(
+            acquisition_date_from_name(args.snapshot_id)
+            if args.snapshot_id
+            else snapshot_date
+        ),
+        snapshot_id_explicit=args.snapshot_id is not None,
         detector=args.detector,
         base_snapshot=args.base_snapshot,
         valid_from=args.valid_from,

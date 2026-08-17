@@ -113,7 +113,7 @@ developer tools cannot be assumed.
 | Command | Use it for | Normal trip use |
 | --- | --- | --- |
 | `echelle_spectra` | Single-SIF viewer: open one shot, see the image, the extracted orders, the calibrated spectrum, and the known-line overlays | Yes, for looking at a shot |
-| `echelle-calib [FOLDER]` | Separate live calibration bench; drag SIFs onto it (FOLDER sets where the file dialog opens **and** where the two output folders are derived; `--watch` adds folder polling), triages every exposure, takes hand-assigned roles for any lamp, fits alignment, compares sphere response, and builds configuration/snapshot evidence | Yes, during calibration |
+| `echelle-calib [FOLDER]` | Separate live calibration bench; drag SIFs onto it (FOLDER sets where the file dialog opens, where the two output folders are derived, and the acquisition date the snapshot identity is prefilled from; `--watch` adds folder polling), triages every exposure, takes hand-assigned roles for any lamp, fits alignment, compares sphere response, and builds configuration/snapshot evidence | Yes, during calibration |
 | `echelle status` | Summarizes snapshots, registry presence, and durable processing receipts | Yes; safest first command |
 | `echelle snapshot create` | Copies role-named calibration inputs into one immutable, digested snapshot | Yes, usually through the bench |
 | `echelle snapshot validate DIR` | Rechecks snapshot schema, paths, sizes, and SHA-256 digests | Yes |
@@ -153,13 +153,13 @@ $Data = "D:\NIFS"
   --registry "$Data\calibration_registry.toml" `
   --runs "$Data\runs"
 
-# 2. Open the live bench on the acquisition folder, then drag SIFs onto it.
+# 2. Open the live bench on the calibration folder, then drag SIFs onto it.
 #    The two roots below are only needed because this loop keeps them one
-#    level up; without them the bench writes calibrations\ and
-#    calibration-configs\ inside the folder argument itself.
-& ".\.venv\Scripts\echelle-calib.exe" "$Data\incoming" `
+#    level up; without them the bench writes everything it generates into
+#    calibrations\ inside the folder argument itself.
+& ".\.venv\Scripts\echelle-calib.exe" "$Data\20250926_calib" `
   --output-root "$Data\calibrations" `
-  --config-root "$Data\calibration-configs"
+  --config-root "$Data\calibrations\configs"
 
 # 3. Recheck the snapshot produced by the completed bench procedure.
 .\echelle.ps1 snapshot validate "$Data\calibrations\20260814_cmos"
@@ -223,13 +223,13 @@ data="/Volumes/NIFS"
   --registry "$data/calibration_registry.toml" \
   --runs "$data/runs"
 
-# 2. Open the live bench on the acquisition folder, then drag SIFs onto it.
+# 2. Open the live bench on the calibration folder, then drag SIFs onto it.
 #    The two roots below are only needed because this loop keeps them one
-#    level up; without them the bench writes calibrations/ and
-#    calibration-configs/ inside the folder argument itself.
-./.venv/bin/echelle-calib "$data/incoming" \
+#    level up; without them the bench writes everything it generates into
+#    calibrations/ inside the folder argument itself.
+./.venv/bin/echelle-calib "$data/20250926_calib" \
   --output-root "$data/calibrations" \
-  --config-root "$data/calibration-configs"
+  --config-root "$data/calibrations/configs"
 
 # 3. Recheck the completed snapshot.
 ./echelle snapshot validate "$data/calibrations/20260814_cmos"
@@ -295,17 +295,28 @@ legal and is recorded as `ungated (no registry)`.
 ## Where the bench writes
 
 `echelle-calib` derives both of its output folders from the folder argument it
-was launched at. Launch it at `D:\NIFS\incoming` and it writes:
+was launched at. Launch it at `D:\NIFS\20250926_calib` and it writes:
 
 ```text
-D:\NIFS\incoming\calibrations\<snapshot-id>\        the immutable snapshot
-D:\NIFS\incoming\calibration-configs\<snapshot-id>\ campaign/alignment/export settings
+D:\NIFS\20250926_calib\calibrations\<snapshot-id>\         the immutable snapshot
+D:\NIFS\20250926_calib\calibrations\configs\<snapshot-id>\ campaign/alignment/export settings
 ```
 
-That is the fix for a bench started from a shortcut scattering its output into
-whatever directory the shortcut happened to begin in. To put them somewhere
-else — the trip loop above keeps them one level up, beside the shots —
-`--output-root` and `--config-root` override each independently.
+Inside, because that folder is the calibration: the measured lamp and sphere
+frames and the calibration computed from them, side by side in the one folder
+that holds it all. That is also the fix for a bench started from a shortcut
+scattering its output into whatever directory the shortcut happened to begin
+in. Everything the bench generates then lives under one tidy `calibrations\`
+folder — the snapshot identities, plus a `configs\` subfolder for the settings
+bundles — so a calibration folder gains one generated child, not two. To put
+them somewhere else — the trip loop above keeps them one level up, beside the
+shots — `--output-root` and `--config-root` override each independently.
+
+The snapshot identity the Save tab prefills is `YYYYMMDD_<detector>` dated by
+**acquisition**: the `YYYYMMDD` leading the launch folder's name, else the date
+in the loaded SIFs' headers, else today with the Save tab saying it could not
+be derived and must be checked. `--snapshot-id`, and your own typing in the ID
+field, always win.
 
 Either way the Save tab states both paths **in full**, so you can read where
 the files will go before pressing anything, and once a snapshot is saved an

@@ -24,7 +24,7 @@ response against the previous one, and ends with one Save that writes an
 immutable, validated snapshot plus a hand-editable configuration bundle.
 
 By default both land inside the folder you launched it at —
-`/data/incoming/calibrations/` and `/data/incoming/calibration-configs/`. The
+`/data/incoming/calibrations/`, settings bundles under its `configs/` subfolder. The
 Save tab shows both paths in full, and offers **Open folder** once something has
 been saved.
 

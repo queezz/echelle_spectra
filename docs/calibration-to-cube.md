@@ -31,7 +31,7 @@ processing ever reads.
 | `integral.txt` | The sphere's own spectral reference. Together with the sphere pair, these three give the absolute-factor curve. |
 | `alignment.toml` | A copy of the solved alignment, saved beside the calibration it belongs to. |
 
-### The configuration bundle — `calibration-configs/<id>/`
+### The configuration bundle — `calibrations/configs/<id>/`
 
 Commented, hand-editable text you can open and change. Nothing here is
 digested, and nothing here is read by a registry-driven run.
@@ -44,7 +44,7 @@ digested, and nothing here is read by a registry-driven run.
 
 !!! note "Where the two folders land"
     With no flags, both are created **inside the folder you launched the bench
-    at**: `<folder>/calibrations/` and `<folder>/calibration-configs/`. Pass
+    at**: `<folder>/calibrations/` with the settings bundles in its `configs/` subfolder. Pass
     `--output-root` and `--config-root` to send them elsewhere. The bench's Save
     tab always shows both in full, so you can read where they will go before you
     press anything.
@@ -56,7 +56,7 @@ digested, and nothing here is read by a registry-driven run.
 ```mermaid
 flowchart TD
     B["Calibration bench<br/>echelle-calib"] -->|Save| S["calibrations/ID/<br/>snapshot.toml, pattern.txt,<br/>wavelength.txt, sphere pair,<br/>integral.txt, alignment.toml"]
-    B -->|Save| C["calibration-configs/ID/<br/>campaign.toml, alignment.toml,<br/>export.toml"]
+    B -->|Save| C["calibrations/configs/ID/<br/>campaign.toml, alignment.toml,<br/>export.toml"]
     S --> R["Calibration epoch registry<br/>calibration_registry.toml"]
     R -->|"one snapshot per shot"| P["echelle process"]
     C -.->|"export.toml, bypasses the registry"| P
@@ -136,7 +136,7 @@ years later never has to guess:
 
 ```bash
 echelle process /data/shots -o /data/cubes \
-  --config /data/calibration-configs/20260814_cmos/export.toml
+  --config /data/calibrations/configs/20260814_cmos/export.toml
 ```
 
 Here you name the calibration yourself instead of letting the registry choose

@@ -39,7 +39,7 @@ echelle-calib path/to/calibration-folder \
   --snapshot-id 20260901_cmos \
   --valid-from 2026-09-01 \
   --output-root path/to/calibrations \
-  --config-root path/to/calibration-configs
+  --config-root path/to/calibrations/configs
 ```
 
 `--lamp` names lamps to *suggest*, not to demand; any name is accepted and none
@@ -56,18 +56,27 @@ configuration, and snapshot controls.
 ## Where the bench writes
 
 Both output roots are **derived from the folder argument**. Launched at
-`D:\NIFS\incoming`, the bench writes:
+`T:\2025-LHD-BH\Echelle\20250926_calib`, the bench writes:
 
 ```text
-D:\NIFS\incoming\calibrations\<snapshot-id>\         the immutable snapshot
-D:\NIFS\incoming\calibration-configs\<snapshot-id>\  the settings bundle
+…\20250926_calib\calibrations\<snapshot-id>\          the immutable snapshot
+…\20250926_calib\calibrations\configs\<snapshot-id>\  the settings bundle
 ```
 
-The folder argument is the calibration's own folder, and it is where you go
-looking for what the bench wrote — so that is what the roots hang off. Nothing
-is scattered into whatever directory a shortcut happened to start in any more.
-With no folder argument at all there is nothing better than the working
-directory, and the bench falls back to it.
+The folder argument is the calibration's own folder: the lamp and sphere frames
+that were measured, and the calibration computed from them, side by side in the
+one folder that holds it all. It is also where you go looking for what the bench
+wrote — so that is what the roots hang off, and nothing is scattered into
+whatever directory a shortcut happened to start in. With no folder argument at
+all there is nothing better than the working directory, and the bench falls back
+to it.
+
+Everything the bench generates lives under that single `calibrations\` folder:
+the snapshot identity folders, and one `configs\` subfolder holding the settings
+bundles. A calibration folder therefore gains exactly one generated child, not
+two. Nothing that reads a calibrations root is confused by `configs\`: snapshot
+enumeration keys on a child's `snapshot.toml`, and the epoch registry resolves
+the snapshot IDs it was given by name.
 
 `--output-root` and `--config-root` still override each root independently, and
 an overriding path is made absolute so the window can be honest about it. A
@@ -79,6 +88,28 @@ only when they will not fit, one hover or one click into the *Why this reading*
 dock away from being read exactly. Once a snapshot is saved, an **Open folder**
 button appears beside the confirmation and shows the saved folder in the
 system's own file manager, so no path has to be retyped.
+
+## The identity is dated by acquisition, not by computation
+
+A calibration belongs to the day its images were **taken**. When it is computed
+is bookkeeping, not physics — and `20240305_cmos`, `20250926_cmos` and every
+other epoch in the registry are already named that way. So the bench prefills
+the snapshot identity as `YYYYMMDD_<detector>` from the acquisition date, and
+looks for it in this order:
+
+1. a leading `YYYYMMDD` in the launch folder's own name — `20250926_calib`
+   gives `20250926_cmos`;
+2. failing that, the acquisition date the loaded SIF headers carry
+   (`ExperimentTime`), filled in as soon as the first frame lands;
+3. failing both, today's date as a placeholder, with the Save tab's *Why this
+   reading* text saying no acquisition date could be derived and that it must
+   be checked before saving.
+
+`--snapshot-id` always wins, and so does typing in the **ID** field: once you
+have typed there, a later frame never overwrites it. The epoch a saved snapshot
+declares follows the identity's own date, so a snapshot computed months later
+still starts its epoch on the day it was measured; `--valid-from YYYY-MM-DD`
+overrides that.
 
 ## Reading the bench
 
@@ -298,7 +329,10 @@ never add or remove a line. Earlier rounds drew sticks from the curated table
 while filling the panel from the caches interpolated onto the order, which is
 how order 7 could label a NeI 640.225 the panel had never heard of and order 6
 could show three labelled Ne sticks under "0 expected Ne lines in this order":
-the packaged Ne cache spans 580.4–638.3 nm and the curated table does not.
+the packaged Ne cache then spanned only 580.4–638.3 nm and the curated table
+does not. The caches now cover 380–810 nm, so they annotate nearly every
+curated row — but the panel is still the curated rows, and would be even if the
+caches were empty.
 
 Accepted anchors use the curated calibration table and the established fitting,
 saturation, detector-point, and rigid-transform functions. A low selected-anchor
@@ -375,7 +409,7 @@ press, because that press discards any hand edits.
 The directory it writes contains:
 
 ```text
-calibration-configs/20260901_cmos/
+calibrations/configs/20260901_cmos/
 ├── campaign.toml
 ├── alignment.toml
 └── export.toml
@@ -437,8 +471,10 @@ its own richer `alignment.toml`, which additionally lists every accepted anchor.
 
 Every saved snapshot carries a `[validity]` table so it is usable in a
 calibration epoch registry without hand editing. The epoch is open-ended and
-starts on the acquisition date; `--valid-from YYYY-MM-DD` states another start,
-and the default is today.
+starts on the acquisition date the snapshot identity is named for — see
+[The identity is dated by acquisition](#the-identity-is-dated-by-acquisition-not-by-computation)
+— so the day of computation never leaks into it; `--valid-from YYYY-MM-DD`
+states another start.
 
 A save failure preserves classifications, comparison, anchors, and the settings
 already written. Correct the identity or missing input and retry. Those settings

@@ -100,7 +100,7 @@ as commented hand-editable files, then save and validate a complete snapshot
 through the established snapshot API.
 
 The folder argument is also where the output goes: by default the bench writes
-`calibrations/` and `calibration-configs/` inside it, and the Save tab shows
+`calibrations/` inside it (settings bundles in its `configs/` subfolder), and the Save tab shows
 both paths in full with an **Open folder** button once a snapshot is saved. Use
 `--output-root` and `--config-root` to send them elsewhere. See the
 [live calibration bench guide](docs/calibration-bench.md).

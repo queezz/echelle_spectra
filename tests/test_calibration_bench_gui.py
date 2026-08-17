@@ -6,7 +6,7 @@ import os
 import subprocess
 import sys
 from dataclasses import replace
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path, PureWindowsPath
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -42,6 +42,8 @@ from echelle_spectra.calibration_bench_gui import (
     _build_parser,
     _ElidingLabel,
     absolute_root,
+    acquisition_date_from_metadata,
+    acquisition_date_from_name,
     apply_windows_taskbar_identity,
     bench_default_geometry,
     bench_layout_unit,
@@ -52,6 +54,7 @@ from echelle_spectra.calibration_bench_gui import (
     forget_session_layout,
     one_line,
     role_combo_minimum_width,
+    snapshot_identity,
 )
 from echelle_spectra.calibration_campaign import (
     AbsoluteCalibrationResult,
@@ -60,6 +63,7 @@ from echelle_spectra.calibration_campaign import (
     ExposureState,
     MeasurementRecord,
     MeasurementRole,
+    default_validity,
     triage_exposure,
     triage_for_role,
 )
@@ -86,6 +90,7 @@ def _frame_for(
     peak: float = 40000.0,
     cosmic: bool = False,
     frames: int = 1,
+    experiment_time: int | None = None,
 ) -> BenchFrame:
     x = np.arange(_COLUMNS, dtype=float)
     order_spectra = (
@@ -106,12 +111,17 @@ def _frame_for(
         if frames > 1
         else ()
     )
+    # ``ExperimentTime`` is the Andor header's Unix acquisition start; it is
+    # what dates a calibration when its folder name does not.
+    metadata: dict = {"ExposureTime": 0.1}
+    if experiment_time is not None:
+        metadata["ExperimentTime"] = int(experiment_time)
     return BenchFrame(
         Path(path),
         images,
         images.mean(axis=0),
         order_spectra,
-        {"ExposureTime": 0.1},
+        metadata,
         frame_order_spectra=per_frame,
     )
 
@@ -123,7 +133,13 @@ def _loader(**frame_options):
     return load
 
 
-def _window(tmp_path: Path, *, with_loader: bool = False, **frame_options) -> CalibrationBenchWindow:
+def _window(
+    tmp_path: Path,
+    *,
+    with_loader: bool = False,
+    window_options: dict | None = None,
+    **frame_options,
+) -> CalibrationBenchWindow:
     pattern = np.column_stack(
         [np.full(_COLUMNS, 12, dtype=float), np.full(_COLUMNS, 30, dtype=float)]
     )
@@ -144,13 +160,18 @@ def _window(tmp_path: Path, *, with_loader: bool = False, **frame_options) -> Ca
         session,
         loader=_loader(**frame_options) if with_loader else None,
         start_timer=False,
+        **(window_options or {}),
     )
 
 
-def _manual_window(tmp_path: Path, **frame_options) -> CalibrationBenchWindow:
+def _manual_window(
+    tmp_path: Path, *, window_options: dict | None = None, **frame_options
+) -> CalibrationBenchWindow:
     """A bench with campaign memory, a reader, and nothing loaded yet."""
 
-    window = _window(tmp_path, with_loader=True, **frame_options)
+    window = _window(
+        tmp_path, with_loader=True, window_options=window_options, **frame_options
+    )
     references = {}
     for name in ("pattern.txt", "wavelength.txt", "integral.txt"):
         path = tmp_path / name
@@ -303,7 +324,12 @@ def test_cli_needs_no_watch_folder_and_no_named_lamp():
     assert args.lamp is None
     assert args.watch is False
     assert args.file is None
-    assert args.valid_from == date.today()
+    # Nothing is dated by today at parse time: the identity and its epoch are
+    # dated by the acquisition, which is not knowable until the folder — and
+    # then the frames — have been read.  ``None`` is what keeps "unset"
+    # distinguishable from "set to the default".
+    assert args.snapshot_id is None
+    assert args.valid_from is None
     assert _build_parser().parse_args(["--valid-from", "2026-09-01"]).valid_from == date(
         2026, 9, 1
     )
@@ -3085,19 +3111,20 @@ def _bench_from_main(monkeypatch, argv) -> dict:
 
     def bench_windows():
         application = QtWidgets.QApplication.instance()
+        # The widgets themselves, not their ``id()``: an id set does not keep
+        # the windows it names alive, and CPython hands a fresh window the id
+        # of a collected one — which read, at random, as "no window opened".
         return {
-            id(widget): widget
+            widget
             for widget in application.topLevelWidgets()
             if isinstance(widget, CalibrationBenchWindow)
         }
 
-    before = set(bench_windows())
+    before = bench_windows()
     seen: dict = {}
 
     def fake_exec(self=None):
-        opened = [
-            widget for key, widget in bench_windows().items() if key not in before
-        ]
+        opened = [widget for widget in bench_windows() if widget not in before]
         assert len(opened) == 1
         window = opened[0]
         seen["output_root"] = window.output_root
@@ -3105,6 +3132,10 @@ def _bench_from_main(monkeypatch, argv) -> dict:
         seen["snapshots_said"] = window.snapshot_root_value.text()
         seen["configs_said"] = window.config_root_value.text()
         seen["snapshots_tooltip"] = window.snapshot_root_value.toolTip()
+        seen["snapshot_id"] = window.snapshot_id_edit.text().strip()
+        seen["snapshot_date"] = window.snapshot_date
+        seen["valid_from"] = window.valid_from
+        seen["identity_why"] = window.snapshot_id_edit.property("explainText")
         window.close()
         return 0
 
@@ -3121,7 +3152,9 @@ def test_the_folder_argument_decides_where_the_campaign_is_saved(
     Both roots defaulted to ``Path.cwd()``-relative, so a bench opened on a
     NAS acquisition folder wrote its calibrations into whatever directory the
     shortcut happened to start in — with nothing on screen to say so.  The
-    folder the bench was pointed at is the folder it saves beside.
+    folder the bench was pointed at is the calibration: the measured frames and
+    the calibration computed from them, side by side in the one folder that
+    holds it all.
     """
 
     data = tmp_path / "20250926_calib"
@@ -3133,7 +3166,8 @@ def test_the_folder_argument_decides_where_the_campaign_is_saved(
     seen = _bench_from_main(monkeypatch, [str(data)])
 
     assert seen["output_root"] == data / SNAPSHOT_ROOT_NAME
-    assert seen["config_root"] == data / CONFIG_ROOT_NAME
+    # One generated folder inside it, holding everything the bench writes.
+    assert seen["config_root"] == data / SNAPSHOT_ROOT_NAME / CONFIG_ROOT_NAME
     assert seen["output_root"].is_absolute() and seen["config_root"].is_absolute()
     # And emphatically not the working directory the launcher started in.
     assert elsewhere not in seen["output_root"].parents
@@ -3152,7 +3186,7 @@ def test_without_a_folder_argument_the_roots_stay_where_the_bench_started(
     seen = _bench_from_main(monkeypatch, [])
 
     assert seen["output_root"] == here / SNAPSHOT_ROOT_NAME
-    assert seen["config_root"] == here / CONFIG_ROOT_NAME
+    assert seen["config_root"] == here / SNAPSHOT_ROOT_NAME / CONFIG_ROOT_NAME
 
 
 def test_explicit_roots_beat_both_the_folder_and_the_working_directory(
@@ -3197,7 +3231,7 @@ def test_the_save_tab_names_the_whole_destination_not_its_last_folder(
     seen = _bench_from_main(monkeypatch, [str(data)])
 
     assert str(data / SNAPSHOT_ROOT_NAME) in seen["snapshots_said"]
-    assert str(data / CONFIG_ROOT_NAME) in seen["configs_said"]
+    assert str(data / SNAPSHOT_ROOT_NAME / CONFIG_ROOT_NAME) in seen["configs_said"]
     # The whole path is one hover away even when the label paints it shortened.
     assert seen["snapshots_tooltip"] == str(data / SNAPSHOT_ROOT_NAME)
 
@@ -3224,6 +3258,13 @@ def test_a_bare_root_name_is_absolute_before_it_is_ever_displayed(qt_app, tmp_pa
     assert window.config_root.is_absolute()
     assert window.output_root.name == SNAPSHOT_ROOT_NAME
     assert window.config_root.name == CONFIG_ROOT_NAME
+    # Derived, the settings bundles are a child of the snapshot root: one
+    # generated folder per calibration folder, not two.
+    assert window.config_root.parent == window.output_root
+    # An explicitly passed root is still honoured wherever it points.
+    elsewhere = _window(tmp_path, window_options={"config_root": tmp_path / "cfg"})
+    assert elsewhere.config_root == tmp_path / "cfg"
+    elsewhere.close()
     window.close()
 
 
@@ -3239,12 +3280,217 @@ def test_a_unc_folder_keeps_its_share_when_the_roots_are_derived():
     snapshots, configs = default_bench_roots(folder)
 
     assert str(snapshots) == str(folder / SNAPSHOT_ROOT_NAME)
-    assert str(configs) == str(folder / CONFIG_ROOT_NAME)
+    assert str(configs) == str(folder / SNAPSHOT_ROOT_NAME / CONFIG_ROOT_NAME)
     assert str(snapshots).startswith(share + "\\")
     assert snapshots.drive == share
     assert snapshots.is_absolute()
     # An already-absolute UNC path is handed straight back, unresolved.
     assert absolute_root(folder) is folder
+
+
+def test_everything_generated_lives_under_one_folder_that_holds_no_stray_snapshot(
+    tmp_path, capsys
+):
+    """Owner: "It's kinder to keep all generated stuff in one tidy folder."
+
+    The settings bundles moved from a sibling ``calibration-configs\\`` into a
+    ``configs`` child of the snapshot root, so a calibration folder gains one
+    generated child instead of two. The thing that has to be checked when a
+    snapshot root gains a child that is not a snapshot is whatever enumerates
+    it: ``echelle status`` keys on ``<child>/snapshot.toml``, so ``configs``
+    is neither counted nor reported as an invalid snapshot. (The epoch registry
+    never enumerates at all — it resolves the snapshot IDs it was given.)
+    """
+
+    from echelle_spectra.cli import _status
+
+    snapshots, configs = default_bench_roots(tmp_path / "20250926_calib")
+    assert configs.parent == snapshots
+    bundle = configs / "20250926_cmos"
+    bundle.mkdir(parents=True)
+    (bundle / "campaign.toml").write_text("# campaign\n", encoding="utf-8")
+
+    _status(
+        [
+            "--calibrations",
+            str(snapshots),
+            "--registry",
+            str(tmp_path / "nowhere.toml"),
+            "--runs",
+            str(tmp_path / "no-runs"),
+        ]
+    )
+    printed = capsys.readouterr().out
+
+    assert "snapshots: none found" in printed
+    assert "invalid" not in printed
+    assert "configs" not in printed.replace(str(snapshots), "")
+
+
+# ----------------------------------------------------------------------
+# The identity is dated by acquisition, never by computation
+# ----------------------------------------------------------------------
+
+
+def test_the_acquisition_date_is_read_from_a_folder_name_or_a_sif_header():
+    """Two sources, one convention: YYYYMMDD_<detector>, dated by the shot day."""
+
+    assert acquisition_date_from_name("20250926_calib") == date(2025, 9, 26)
+    assert acquisition_date_from_name(
+        PureWindowsPath("T:\\2025-LHD-BH\\Echelle\\20250926_calib")
+    ) == date(2025, 9, 26)
+    # Only the folder's own name, and only where the date leads it: a campaign
+    # tree may carry any number of dated components above this one.
+    assert acquisition_date_from_name("calib_20250926") is None
+    assert acquisition_date_from_name("20259999_calib") is None
+    # An LHD shot number that merely begins with eight digits is not a date.
+    assert acquisition_date_from_name("123456789_shot") is None
+    assert acquisition_date_from_name(None) is None
+
+    moment = datetime(2025, 9, 26, 11, 30)
+    assert acquisition_date_from_metadata(
+        {"ExperimentTime": int(moment.timestamp())}
+    ) == date(2025, 9, 26)
+    assert acquisition_date_from_metadata({"ExposureTime": 0.1}) is None
+    assert acquisition_date_from_metadata({"ExperimentTime": 0}) is None
+    assert acquisition_date_from_metadata(None) is None
+
+    assert snapshot_identity(date(2025, 9, 26), "cmos") == "20250926_cmos"
+    assert snapshot_identity(date(2025, 9, 26), " ") == "20250926_cmos"
+
+
+def test_the_identity_is_dated_by_the_folder_the_calibration_was_measured_in(
+    qt_app, tmp_path, monkeypatch
+):
+    """Owner: "calibration IS dated by the day the images were taken."
+
+    The bench prefilled today's date, so frames shot on 2025-09-26 were about
+    to be saved as ``20260817_cmos`` — the day the computation happened, which
+    is bookkeeping and not physics. The folder says which day it was.
+    """
+
+    data = tmp_path / "Echelle" / "20250926_calib"
+    data.mkdir(parents=True)
+    monkeypatch.chdir(tmp_path)
+
+    seen = _bench_from_main(monkeypatch, [str(data)])
+
+    assert seen["snapshot_id"] == "20250926_cmos"
+    assert seen["snapshot_date"] == date(2025, 9, 26)
+    assert seen["snapshot_id"] != snapshot_identity(date.today(), "cmos")
+    # The epoch follows the identity's own date rather than today's, which is
+    # what ``--valid-from`` being unset now means.
+    assert seen["valid_from"] is None
+    assert default_validity(seen["snapshot_id"], seen["valid_from"]) == {
+        "date_from": "2025-09-26"
+    }
+    assert "2025-09-26" in seen["identity_why"]
+    assert "TAKEN" in seen["identity_why"]
+
+
+def test_an_undateable_folder_falls_back_to_today_and_says_it_must_be_checked(
+    qt_app, tmp_path, monkeypatch
+):
+    """Today is a placeholder, and a placeholder has to announce itself."""
+
+    data = tmp_path / "incoming"
+    data.mkdir()
+    monkeypatch.chdir(tmp_path)
+
+    seen = _bench_from_main(monkeypatch, [str(data)])
+
+    assert seen["snapshot_id"] == snapshot_identity(date.today(), "cmos")
+    assert seen["snapshot_date"] is None
+    assert "No acquisition date could be read" in seen["identity_why"]
+    assert "CHECK" in seen["identity_why"]
+
+
+def test_an_explicit_identity_or_epoch_beats_every_derivation(
+    qt_app, tmp_path, monkeypatch
+):
+    """A flag is a decision; deriving the date is only a default."""
+
+    data = tmp_path / "Echelle" / "20250926_calib"
+    data.mkdir(parents=True)
+    monkeypatch.chdir(tmp_path)
+
+    seen = _bench_from_main(
+        monkeypatch,
+        [
+            str(data),
+            "--snapshot-id",
+            "20240305_cmos",
+            "--valid-from",
+            "2026-09-01",
+        ],
+    )
+
+    assert seen["snapshot_id"] == "20240305_cmos"
+    assert seen["snapshot_date"] == date(2024, 3, 5)
+    assert seen["valid_from"] == date(2026, 9, 1)
+    assert default_validity(seen["snapshot_id"], seen["valid_from"]) == {
+        "date_from": "2026-09-01"
+    }
+    # A detector other than the default is carried into a derived identity.
+    other = tmp_path / "Echelle" / "20250926_calib"
+    assert _bench_from_main(monkeypatch, [str(other), "--detector", "ccd"])[
+        "snapshot_id"
+    ] == "20250926_ccd"
+
+
+def test_the_frames_date_the_identity_when_the_folder_name_cannot(qt_app, tmp_path):
+    """The SIF headers know the shot day even when the folder name says nothing."""
+
+    placeholder = snapshot_identity(date.today(), "cmos")
+    taken = datetime(2025, 9, 26, 11, 30)
+    window = _manual_window(
+        tmp_path,
+        window_options={"snapshot_id": placeholder},
+        experiment_time=int(taken.timestamp()),
+    )
+    window.show()
+    assert window.snapshot_id_edit.text() == placeholder
+    assert window.snapshot_date is None
+
+    source = tmp_path / "Ne-0.02s-x3-bright-lines.sif"
+    source.write_bytes(b"sif\n")
+    _drop(window, [source])
+    _wait_for_loads(window, qt_app)
+
+    assert window.snapshot_date == date(2025, 9, 26)
+    assert window.snapshot_id_edit.text() == "20250926_cmos"
+    assert "SIF headers" in window.snapshot_id_edit.property("explainText")
+    window.close()
+
+
+def test_a_typed_identity_is_never_overwritten_by_a_later_frame(qt_app, tmp_path):
+    """A hand edit is a decision, and outranks anything the frames say."""
+
+    placeholder = snapshot_identity(date.today(), "cmos")
+    taken = datetime(2025, 9, 26, 11, 30)
+    window = _manual_window(
+        tmp_path,
+        window_options={"snapshot_id": placeholder},
+        experiment_time=int(taken.timestamp()),
+    )
+    window.show()
+    # Typing is what ``textEdited`` reports; ``setText`` alone is the bench's
+    # own voice and must never be mistaken for the operator's.
+    window.snapshot_id_edit.setText("20251003_cmos")
+    window.snapshot_id_edit.textEdited.emit("20251003_cmos")
+    qt_app.processEvents()
+
+    source = tmp_path / "Ne-0.02s-x3-bright-lines.sif"
+    source.write_bytes(b"sif\n")
+    _drop(window, [source])
+    _wait_for_loads(window, qt_app)
+
+    assert window.snapshot_id_edit.text() == "20251003_cmos"
+    assert window.snapshot_date == date(2025, 10, 3)
+    assert default_validity(window.snapshot_id_edit.text(), window.valid_from) == {
+        "date_from": "2025-10-03"
+    }
+    window.close()
 
 
 def test_the_saved_snapshot_confirmation_names_its_folder_and_opens_it(
