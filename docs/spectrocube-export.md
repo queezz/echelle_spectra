@@ -213,12 +213,16 @@ range plus dropped-column counts in SpectroCube metadata.
 
 Use a registry when one source or batch must select calibration by shot/date:
 
-```bash
-echelle-spectrocube /data/shots \
-  --registry /data/calibration_registry.toml \
-  --calibrations /data/calibrations \
-  --units wmsr -o /data/cubes
+```powershell
+$Data = "D:\NIFS"   # your campaign root, set once
+
+echelle-spectrocube "$Data\shots" `
+  --registry "$Data\calibration_registry.toml" `
+  --calibrations "$Data\calibrations" `
+  --units wmsr -o "$Data\cubes"
 ```
+
+On macOS or Linux set `data="/Volumes/NIFS"` instead and use forward slashes.
 
 The registry is calibration authority and cannot be mixed with snapshot-ID,
 camera, calibration-directory, or per-file calibration overrides. Registry and
@@ -258,15 +262,15 @@ echelle-spectrocube local\193778_Echelle.SIF `
 
 ### Batch folder export
 
-```bash
+```powershell
 # Export all .SIF files in a folder, save .nc files alongside them
-echelle-spectrocube /data/shots/ --units wm
+echelle-spectrocube "$Data\shots" --units wm
 
 # Save to a separate output directory
-echelle-spectrocube /data/shots/ --units wmsr -o /data/nc/
+echelle-spectrocube "$Data\shots" --units wmsr -o "$Data\nc"
 
 # Preview what would happen (no files written)
-echelle-spectrocube /data/shots/ --dry-run --verbose
+echelle-spectrocube "$Data\shots" --dry-run --verbose
 ```
 
 ### Full option reference
@@ -318,8 +322,8 @@ For each input file `shot_042_Echelle.SIF` the output is named
     If the `.sif` sphere files are not bundled with your installation (they are
     large binaries), point to a local copy:
 
-    ```bash
-    echelle-spectrocube /data/shots/ --calibration-dir /lab/calibration_files/
+    ```powershell
+    echelle-spectrocube "$Data\shots" --calibration-dir "<lab-calibration-files>"
     ```
 
     The same `--camera` flag selects either the CCD or CMOS calibration file

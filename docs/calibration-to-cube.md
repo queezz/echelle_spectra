@@ -79,12 +79,17 @@ flowchart TD
 
 This is how a campaign drive is processed.
 
-```bash
-echelle process /data/shots -o /data/cubes \
-  --registry /data/calibration_registry.toml \
-  --calibrations /data/calibrations \
-  --drift-verdict /data/epoch-drift.json
+```powershell
+$Data = "D:\NIFS"   # your campaign root, set once
+
+echelle process "$Data\shots" -o "$Data\cubes" `
+  --registry "$Data\calibration_registry.toml" `
+  --calibrations "$Data\calibrations" `
+  --drift-verdict "$Data\epoch-drift.json"
 ```
+
+The [operator cheat sheet](operator-cheat-sheet.md) carries this loop in both
+PowerShell and a POSIX shell.
 
 The registry is an ordered list of calibration epochs with inclusive date and
 shot bounds. For every SIF, `echelle process` reads the **shot number** out of
@@ -141,9 +146,9 @@ years later never has to guess:
 
 ## The other route: `--config`
 
-```bash
-echelle process /data/shots -o /data/cubes \
-  --config /data/calibrations/configs/20260814_cmos/export.toml
+```powershell
+echelle process "$Data\shots" -o "$Data\cubes" `
+  --config "$Data\calibrations\configs\20260814_cmos\export.toml"
 ```
 
 Here you name the calibration yourself instead of letting the registry choose

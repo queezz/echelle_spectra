@@ -13,9 +13,17 @@ are about to do.
 
 ## Calibration day: the bench
 
-```bash
-echelle-calib /data/incoming
+Set your campaign root once; every command on this page reuses it.
+
+```powershell
+$Data = "D:\NIFS"
+
+echelle-calib "$Data\incoming"
 ```
+
+On macOS or Linux the same variable is `data="/Volumes/NIFS"` and the paths use
+forward slashes; the [operator cheat sheet](operator-cheat-sheet.md) carries the
+whole loop in both shells.
 
 Drag SIFs onto the window. The bench triages each exposure the moment it lands
 (saturation, cosmic rays, headroom, histogram), takes the roles you assign by
@@ -24,7 +32,7 @@ response against the previous one, and ends with one Save that writes an
 immutable, validated snapshot plus a hand-editable configuration bundle.
 
 By default both land inside the folder you launched it at —
-`/data/incoming/calibrations/`, settings bundles under its `configs/` subfolder. The
+`$Data\incoming\calibrations\`, settings bundles under its `configs\` subfolder. The
 Save tab shows both paths in full, and offers **Open folder** once something has
 been saved.
 
@@ -102,16 +110,22 @@ calibration (that is the bench) or for converting a drive (that is
   you double-click to open — no server, nothing fetched. Rebuild it after a run
   to refresh what it shows.
 
-```bash
-echelle web \
-  --catalog /data/all-years.json \
-  --output /data/campaign-page \
-  --registry /data/calibration_registry.toml \
-  --calibrations /data/calibrations \
-  --drift /data/epoch-drift.json
+```powershell
+$Data = "D:\NIFS"
+
+echelle web `
+  --catalog "$Data\all-years.json" `
+  --output "$Data\campaign-page" `
+  --registry "$Data\calibration_registry.toml" `
+  --calibrations "$Data\calibrations" `
+  --drift "$Data\epoch-drift.json"
 ```
 
-Then open `/data/campaign-page/index.html`.
+Then open `$Data\campaign-page\index.html`.
+
+Every path above is checked before anything is built: a path that does not
+exist is answered by name, with the absolute path the command actually looked
+at and the flag that supplied it.
 
 ---
 

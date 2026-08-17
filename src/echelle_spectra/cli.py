@@ -118,7 +118,9 @@ def _status(argv: list[str]) -> int:
     parser.add_argument("--registry", default="calibration_registry.toml", metavar="FILE")
     parser.add_argument("--runs", default="local/runs", metavar="DIR")
     args = parser.parse_args(argv)
-    root = Path(args.calibrations)
+    # Absolute, always: a status line that echoes a relative path back tells an
+    # operator standing in the wrong folder nothing about where it looked.
+    root = Path(args.calibrations).expanduser().resolve()
     valid = []
     invalid: list[tuple[Path, SnapshotValidationError]] = []
     if root.is_dir():
@@ -139,9 +141,9 @@ def _status(argv: list[str]) -> int:
         print(f"  invalid:   {len(invalid)}")
         for path, exc in invalid:
             print(f"    {path.name}: {exc.errors[0]}")
-    registry = Path(args.registry)
+    registry = Path(args.registry).expanduser().resolve()
     registry_invalid = _print_registry_status(registry, root)
-    runs_root = Path(args.runs)
+    runs_root = Path(args.runs).expanduser().resolve()
     runs = list_run_summaries(runs_root)
     if runs:
         latest = runs[0]
@@ -151,7 +153,7 @@ def _status(argv: list[str]) -> int:
             ", ".join(f"{count} {status}" for status, count in counts.items() if count)
             or "no terminal records"
         )
-        print(f"  runs:      {len(runs)} receipt(s) under {args.runs}")
+        print(f"  runs:      {len(runs)} receipt(s) under {runs_root}")
         print(f"  latest:    {latest['id']} [{latest['state']}]")
         print(f"  progress:  {accounted}/{latest['expected_files']} ({details})")
         print(f"  snapshot:  {latest['snapshot_id']}")
@@ -163,7 +165,7 @@ def _status(argv: list[str]) -> int:
         print(f"  gate:      {gate}")
         _print_combined_run_status(runs_root)
     else:
-        print(f"  runs:      none found under {args.runs}")
+        print(f"  runs:      none found under {runs_root}")
     return 1 if invalid or registry_invalid else 0
 
 

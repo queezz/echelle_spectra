@@ -44,6 +44,10 @@ DOC_GUIDES = (
     "operator-cheat-sheet.md",
     "campaign-runs.md",
     "calibration-epoch-registry.md",
+    # The two routing pages carry copy-paste examples too, and a copied example
+    # is exactly how a wrong invocation reaches an operator.
+    "usage-overview.md",
+    "calibration-to-cube.md",
 )
 UMBRELLA_COMMANDS = {
     "status",

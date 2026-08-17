@@ -63,9 +63,12 @@ line boxes beside the blobs instead of on them.
 Point the viewer at that era's snapshot and it sees the files through those
 eyes instead:
 
-```bash
-echelle_spectra --calibration /path/to/calibrations/20190314_cmos
+```powershell
+echelle_spectra --calibration "<calibrations>\20190314_cmos"
 ```
+
+Replace `<calibrations>` with your own snapshot root — `D:\NIFS\calibrations`
+on Windows, `/Volumes/NIFS/calibrations` on macOS.
 
 The folder is a calibration snapshot — the one holding `snapshot.toml` next to
 `pattern.txt` and `wavelength.txt`. Snapshots are made by the bench and listed
