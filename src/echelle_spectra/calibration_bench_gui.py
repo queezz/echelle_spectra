@@ -1899,8 +1899,11 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         self.alignment_state_value.setObjectName("stateBadge")
         self.anchor_count_value = QtWidgets.QLabel("0")
         self.rms_value = QtWidgets.QLabel("—")
-        self.transform_value = QtWidgets.QLabel("—")
-        self.transform_value.setWordWrap(True)
+        # One line, middle-elided if the rail is ever that narrow: word wrap
+        # put the θ on a second line the row's height budget then hid, so the
+        # header promised three numbers and showed two and a comma (owner
+        # screenshot, 2026-08-17 — his own law: cut off is the same as absent).
+        self.transform_value = _ElidingLabel("—")
         alignment_form.addRow("State", self.alignment_state_value)
         alignment_form.addRow("Anchors / RMS", self._anchor_rms_row())
         alignment_form.addRow("dx / dy / θ", self.transform_value)

@@ -842,10 +842,14 @@ def test_left_pane_is_resizable_and_its_text_wraps(qt_app, tmp_path):
         window.comparison_value,
         window.reference_value,
         window.message_value,
-        window.transform_value,
         window.frame_choice_value,
     ):
         assert label.wordWrap()
+    # transform_value deliberately left this list: wrapping put the θ on a
+    # second line the row height then hid, so "dx / dy / θ" showed two
+    # numbers and a comma. It is one-line state text now (elided middle only
+    # if the rail is ever absurdly narrow, full text in the tooltip).
+    assert not window.transform_value.wordWrap()
 
     window.root_splitter.setSizes([760, 780])
     qt_app.processEvents()
@@ -3839,3 +3843,24 @@ def test_without_a_lamp_reference_the_fallback_rows_follow_too(qt_app, tmp_path)
     assert name == "NeI 585.249"
     assert pixel == pytest.approx(40.0, abs=0.05)
     window.close()
+
+
+def test_the_transform_line_shows_all_three_numbers_on_one_line(tmp_path):
+    """dx / dy / θ promises three numbers; word wrap was hiding the third.
+
+    The wrapped θ landed on a second line the row's height budget clipped,
+    so the header read "+18.02, -0.60," with a dangling comma (owner
+    screenshot, 2026-08-17). One line, elided middle if ever too narrow.
+    """
+
+    from echelle_spectra.tools.calibration_alignment import RigidTransform
+
+    window = _window(tmp_path)
+    window.session.transform = RigidTransform(
+        dx_px=18.02, dy_px=-0.60, theta_rad=0.0001
+    )
+    window.refresh()
+    text = window.transform_value.text()
+    assert text.endswith("°")
+    assert text.count(",") == 2
+    assert not window.transform_value.wordWrap()
