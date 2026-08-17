@@ -53,6 +53,42 @@ what a finished cube records about them, is
 
 ---
 
+## Opening files through a saved calibration
+
+By default the viewer reads every file through the packaged CCD and CMOS
+tables — today's calibration. Frames from an earlier era were taken on an
+instrument that has since moved, so today's tables put the order traces and the
+line boxes beside the blobs instead of on them.
+
+Point the viewer at that era's snapshot and it sees the files through those
+eyes instead:
+
+```bash
+echelle_spectra --calibration /path/to/calibrations/20190314_cmos
+```
+
+The folder is a calibration snapshot — the one holding `snapshot.toml` next to
+`pattern.txt` and `wavelength.txt`. Snapshots are made by the bench and listed
+by `echelle status`; see [Calibration snapshots](calibration-snapshots.md).
+
+What changes:
+
+- The title bar names the snapshot: **Echelle viewer — 20190314_cmos**, and the
+  info panel repeats it beside each loaded frame. Without the flag, nothing
+  about the window changes.
+- The order pattern, the line overlays, the cursor link, and the spectrum's
+  wavelength axis all come from that snapshot, because they all read the one
+  calibration the window loaded.
+- The camera is fixed to the detector the snapshot was made for, and the CCD /
+  CMOS buttons are greyed out: a snapshot is one detector's calibration, and
+  there is no second one loaded to flip to.
+
+If the folder is not a snapshot, or the snapshot is missing a table or fails
+its digest check, the viewer says which problem it hit and exits. It never
+falls back to the packaged tables behind your back.
+
+---
+
 ## When the instrument has moved a little
 
 For a small detector or optics shift, fit a rigid correction rather than

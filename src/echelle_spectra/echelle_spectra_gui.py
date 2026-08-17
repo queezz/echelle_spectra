@@ -1,3 +1,4 @@
+import argparse
 import ctypes
 import sys
 from dataclasses import dataclass
@@ -34,6 +35,69 @@ IMAGE_DISPLAY_FAILED = "display-failed"
 IMAGE_CALIBRATION_UNAVAILABLE = "calibration-unavailable"
 
 CAMERA_NAMES = ("CCD", "CMOS")
+
+
+class CalibrationOverrideError(ValueError):
+    """A folder the viewer was pointed at cannot serve as its calibration."""
+
+
+@dataclass(frozen=True)
+class CalibrationOverride:
+    """One saved snapshot standing in for the packaged calibration tables.
+
+    ``filenames`` is the ordinary ``Calibrations`` vocabulary the snapshot
+    itself hands out, so the override travels through exactly the loader the
+    packaged CCD/CMOS sets travel through — only the folder and the names in it
+    differ.
+    """
+
+    snapshot_id: str
+    camera: str
+    folder: Path
+    filenames: dict
+
+
+def load_calibration_override(folder):
+    """Resolve a snapshot folder into the single calibration the viewer wears.
+
+    Every failure is named and raised here, before a window exists: an operator
+    who asked for a particular era's eyes must never be handed the packaged
+    tables instead without being told.
+    """
+    from .snapshot import SnapshotError, load_snapshot
+
+    path = Path(folder).expanduser()
+    if not path.is_dir():
+        raise CalibrationOverrideError(
+            f"--calibration wants a calibration snapshot folder; {path} is not a directory"
+        )
+    if not (path / "snapshot.toml").is_file():
+        raise CalibrationOverrideError(
+            f"{path} is not a calibration snapshot: it holds no snapshot.toml"
+        )
+    try:
+        # Structure and presence only, no digest pass: the viewer is a reader,
+        # not an auditor, and a thin snapshot's referenced raws can be hundreds
+        # of megabytes on a NAS — hashing them before a window opens is a
+        # launch-time cost `echelle snapshot validate` already owns.
+        snapshot = load_snapshot(path, verify_files=False)
+    except SnapshotError as err:
+        raise CalibrationOverrideError(
+            f"calibration snapshot {path} did not validate: {err}"
+        ) from err
+
+    camera = snapshot.detector.strip().upper()
+    if camera not in CAMERA_NAMES:
+        raise CalibrationOverrideError(
+            f"calibration snapshot {snapshot.snapshot_id!r} names detector "
+            f"{snapshot.detector!r}, which is not one of {', '.join(CAMERA_NAMES)}"
+        )
+    return CalibrationOverride(
+        snapshot_id=snapshot.snapshot_id,
+        camera=camera,
+        folder=snapshot.root,
+        filenames=snapshot.calibration_files(),
+    )
 
 
 @dataclass(frozen=True)
@@ -86,12 +150,18 @@ def format_dimensions(dimensions):
 class EchelleSpectraGUI(QMainWindow, window_layout.Ui_MainWindow):
     """GUI window for the echelle_spectra app"""
 
-    def __init__(self, config):
+    def __init__(self, config, calibration_override=None):
         super(self.__class__, self).__init__()
         self.setupUi(self)
         self.setWindowIcon(
             QtGui.QIcon(str(config["base_path"] / "resources/graphics/echelle.png"))
         )
+
+        # Which calibration this window wears.  ``None`` is the packaged
+        # CCD/CMOS pair — what every launch without --calibration gets — and a
+        # snapshot narrows the window to that snapshot's one detector.
+        self.calibration_override = calibration_override
+        self.camera_names = tuple(CAMERA_NAMES)
 
         # set widget statuses
         self.CameraCCD.setChecked(False)
@@ -171,7 +241,10 @@ class EchelleSpectraGUI(QMainWindow, window_layout.Ui_MainWindow):
         self.cb_CCD.filenames = files_ccd
         self.cb_CMOS.filenames = files_cmos
 
-        self.calib_threads = {name: None for name in CAMERA_NAMES}
+        if self.calibration_override is not None:
+            self._wear_calibration_override()
+
+        self.calib_threads = {name: None for name in self.camera_names}
         # One entry per camera once its thread reports: "" when the calibration
         # loaded, otherwise why it did not.  Until both are in, no image load
         # may run against half-built DIMW/DIMO.
@@ -179,8 +252,45 @@ class EchelleSpectraGUI(QMainWindow, window_layout.Ui_MainWindow):
         self.pending_image = None
         self.cameras_tried = []
 
-        self.load_calibration(self.cb_CCD)
-        self.load_calibration(self.cb_CMOS)
+        for calibration in self.active_calibrations():
+            self.load_calibration(calibration)
+
+    def _wear_calibration_override(self):
+        """Put the snapshot's tables where the packaged ones would have gone.
+
+        A snapshot is one detector's calibration, so the window keeps exactly
+        that camera and empties the other slot: there is nothing honest for a
+        size-mismatch flip to fall back to, and the packaged tables must not be
+        what it silently finds.  The folder and the role filenames come straight
+        from the snapshot, and the ordinary ``Calibrations`` loader reads them
+        the same way it reads ``resources/calibration_files``.
+        """
+        override = self.calibration_override
+        self.camera_names = (override.camera,)
+
+        calibration = ech.Calibrations(str(override.folder))
+        calibration.name = override.camera
+        calibration.filenames = dict(override.filenames)
+        setattr(self, "cb_" + override.camera, calibration)
+        for name in CAMERA_NAMES:
+            if name != override.camera:
+                setattr(self, "cb_" + name, None)
+
+        for button, name in zip(self.cameras, CAMERA_NAMES):
+            button.setChecked(name == override.camera)
+            # Fixed, not merely preselected: the snapshot decided the detector
+            # when it was made, and no other calibration is loaded to switch to.
+            button.setEnabled(False)
+            button.setToolTip(
+                f"Calibration snapshot {override.snapshot_id} is a {override.camera} "
+                "calibration, so the camera is fixed for this session"
+            )
+
+        self.setWindowTitle("{} — {}".format(self.windowTitle(), override.snapshot_id))
+
+    def active_calibrations(self):
+        """The calibrations this window actually wears, in camera order"""
+        return [getattr(self, "cb_" + name) for name in self.camera_names]
 
     def connect_actions(self):
         self.frame.valueChanged.connect(self.show_image_frame)
@@ -303,7 +413,7 @@ class EchelleSpectraGUI(QMainWindow, window_layout.Ui_MainWindow):
 
     def calibrations_settled(self):
         """True once every calibration thread has reported, loaded or failed"""
-        return set(CAMERA_NAMES) <= set(self.calibration_errors)
+        return set(self.camera_names) <= set(self.calibration_errors)
 
     def _on_calibration_loaded(self, outcome):
         """Record one calibration; release buttons only once both have reported"""
@@ -325,7 +435,7 @@ class EchelleSpectraGUI(QMainWindow, window_layout.Ui_MainWindow):
 
         self.coursor_bw.setText("")
         self._enable_controls(True)
-        broken = [name for name in CAMERA_NAMES if self.calibration_errors.get(name)]
+        broken = [name for name in self.camera_names if self.calibration_errors.get(name)]
         if broken:
             self.statusBar().showMessage(
                 "Calibration files failed to load — "
@@ -551,7 +661,10 @@ class EchelleSpectraGUI(QMainWindow, window_layout.Ui_MainWindow):
         self._enable_controls(False)
         self.coursor_bw.setText('<font size = 6 color = "#d1451b">Loading Image</font>')
 
-        if self.CameraCMOS.isChecked():
+        if self.calibration_override is not None:
+            # The snapshot names the detector; the radio buttons only report it.
+            cb = getattr(self, "cb_" + self.calibration_override.camera)
+        elif self.CameraCMOS.isChecked():
             cb = self.cb_CMOS
             if self.config["debug"]:
                 print("CMOS selected")
@@ -636,7 +749,7 @@ class EchelleSpectraGUI(QMainWindow, window_layout.Ui_MainWindow):
         never loaded fail identically on both cameras, so retrying them only
         buys another spin of the same wheel.
         """
-        untried = [name for name in CAMERA_NAMES if name not in self.cameras_tried]
+        untried = [name for name in self.camera_names if name not in self.cameras_tried]
 
         if outcome.status == IMAGE_DIMENSION_MISMATCH and untried:
             self.statusBar().showMessage(
@@ -697,7 +810,7 @@ class EchelleSpectraGUI(QMainWindow, window_layout.Ui_MainWindow):
     def _camera_expectations(self):
         """One phrase per camera describing the frame size it can accept"""
         phrases = []
-        for calibration in (self.cb_CCD, self.cb_CMOS):
+        for calibration in self.active_calibrations():
             dimensions = calibration_dimensions(calibration)
             if not len(dimensions):
                 phrases.append(f"the {calibration.name} calibration is unavailable")
@@ -940,7 +1053,15 @@ class EchelleSpectraGUI(QMainWindow, window_layout.Ui_MainWindow):
             fs=4,  # font size
         )
 
-        self.image_info_bw.setText(txt)
+        self.image_info_bw.setText(txt + self._calibration_info_html())
+
+    def _calibration_info_html(self):
+        """Name the overriding snapshot beside the frame it was read with"""
+        if self.calibration_override is None:
+            return ""
+        return '<font size = 4 color = "#187031">calibration: {}</font><br>'.format(
+            self.calibration_override.snapshot_id
+        )
 
     def show_image_frame(self):
         """Display current frame of the loaded SIF file"""
@@ -1290,8 +1411,50 @@ class SaveSpectraThread(QtCore.QThread):
         self.pass_result.emit(self.spectra)
 
 
-def start():
+def parse_args(argv=None):
+    """Read the viewer's own switches and hand the rest to Qt.
+
+    Qt spells its own switches with a single dash (``-platform offscreen``), so
+    everything left over that starts with ``--`` is a misspelling of ours rather
+    than a message for Qt, and is refused instead of quietly ignored.  With no
+    arguments at all nothing is parsed away and Qt receives what it always did.
+    """
+    parser = argparse.ArgumentParser(
+        prog="echelle_spectra",
+        description="Echelle viewer: open one SIF at a time.",
+    )
+    parser.add_argument(
+        "--calibration",
+        metavar="SNAPSHOT",
+        default=None,
+        # Plain ASCII, deliberately: --help has to print on a Japanese console
+        # too, where an em dash is not encodable.
+        help=(
+            "Open files through a saved calibration snapshot folder (the one "
+            "holding snapshot.toml) instead of the packaged CCD/CMOS tables."
+        ),
+    )
+    args, extra = parser.parse_known_args(argv)
+    unknown = [item for item in extra if item.startswith("--")]
+    if unknown:
+        parser.error("unrecognized arguments: " + " ".join(unknown))
+    return args, extra
+
+
+def start(argv=None):
     import platform
+
+    args, qt_args = parse_args(argv)
+    override = None
+    if args.calibration is not None:
+        try:
+            override = load_calibration_override(args.calibration)
+        except CalibrationOverrideError as err:
+            # Said once, on the way out.  A window wearing the packaged tables
+            # while the operator believes he asked for 2019 is the one outcome
+            # this flag exists to prevent.
+            print(f"echelle_spectra: {err}", file=sys.stderr)
+            return 2
 
     if platform.system() == "Windows":
         try:
@@ -1301,11 +1464,11 @@ def start():
         except OSError:
             pass
 
-    app = QApplication(sys.argv)
+    app = QApplication(sys.argv[:1] + list(qt_args))
     app.setWindowIcon(
         QtGui.QIcon(str(_config["base_path"] / "resources/graphics/echelle.png"))
     )
-    win = EchelleSpectraGUI(_config)
+    win = EchelleSpectraGUI(_config, calibration_override=override)
     win.show()
     sys.exit(app.exec_())
 

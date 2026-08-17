@@ -112,7 +112,7 @@ developer tools cannot be assumed.
 
 | Command | Use it for | Normal trip use |
 | --- | --- | --- |
-| `echelle_spectra` | Single-SIF viewer: open one shot, see the image, the extracted orders, the calibrated spectrum, and the known-line overlays | Yes, for looking at a shot |
+| `echelle_spectra [--calibration DIR]` | Single-SIF viewer: open one shot, see the image, the extracted orders, the calibrated spectrum, and the known-line overlays (`--calibration` points it at a saved snapshot folder, so old files are read through their own era's tables) | Yes, for looking at a shot |
 | `echelle-calib [FOLDER]` | Separate live calibration bench; drag SIFs onto it (FOLDER sets where the file dialog opens, where the two output folders are derived, and the acquisition date the snapshot identity is prefilled from; `--watch` adds folder polling), triages every exposure, takes hand-assigned roles for any lamp, fits alignment, compares sphere response, and builds configuration/snapshot evidence | Yes, during calibration |
 | `echelle status` | Summarizes snapshots, registry presence, and durable processing receipts | Yes; safest first command |
 | `echelle snapshot create` | Copies role-named calibration inputs into one immutable, digested snapshot | Yes, usually through the bench |

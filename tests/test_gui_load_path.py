@@ -47,6 +47,11 @@ CYCLE_S = 0.5
 
 UNREADABLE_NAME = "6001_unreadable.SIF"
 
+# The owner's real case: 2019 frames read through a 2025 solution sit a rigid
+# eighteen pixels away from where the overlay boxes are drawn.
+PIXEL_SHIFT = 18
+SNAPSHOT_ID = "20190314_cmos"
+
 
 def _order_wavelengths(columns: int) -> np.ndarray:
     """The wavelength each order carries at each detector column."""
@@ -138,7 +143,8 @@ def detector(monkeypatch: pytest.MonkeyPatch) -> None:
     frames = {CMOS_SHAPE: _detector_frames(CMOS_SHAPE), CCD_SHAPE: _detector_frames(CCD_SHAPE)}
 
     def read_image(fpth, spec="black", crop=(0, -1), exptime=1):
-        name = Path(str(fpth)).name.casefold()
+        path = Path(str(fpth))
+        name = path.name.casefold()
         if name == UNREADABLE_NAME.casefold():
             # Exactly how a Dropbox online-only placeholder answers on Windows.
             raise OSError(22, "Invalid argument", str(fpth))
@@ -149,7 +155,10 @@ def detector(monkeypatch: pytest.MonkeyPatch) -> None:
             images = np.zeros((1, rows // binning[1], columns // binning[0]))
             return images, _info(shape, binning)
 
-        shape = CMOS_SHAPE if "cmos" in name else CCD_SHAPE
+        # A snapshot names its files by role — ``sphere.sif`` says nothing about
+        # the detector — so the folder that holds them answers for them.
+        folder = path.parent.name.casefold()
+        shape = CMOS_SHAPE if "cmos" in name or "cmos" in folder else CCD_SHAPE
         if name.endswith("_bkg.sif") or name.endswith("_bg.sif"):
             images = frames[shape]["background"]
         elif "sphere" in name or "absolute" in name:
@@ -159,6 +168,41 @@ def detector(monkeypatch: pytest.MonkeyPatch) -> None:
         return images.copy(), _info(shape)
 
     monkeypatch.setattr(echelle_module, "read_image", read_image)
+
+
+def _wavelength_table(columns: int, pixel_shift: int = 0) -> str:
+    """The identified-line table, optionally moved bodily along the detector.
+
+    A shift moves the pixel each known wavelength was identified at, which is
+    what a detector that has slid actually does — the same light, further along
+    the sensor — so the fitted solution comes out translated by that many pixels
+    and everything read through it moves with it.
+    """
+
+    wavelengths = _order_wavelengths(columns)
+    rows = []
+    for index, order_id in enumerate(ORDER_IDS):
+        for pixel in np.linspace(20, columns * 0.8, 5).astype(int):
+            rows.append((order_id, int(pixel) + pixel_shift, wavelengths[index][pixel]))
+    return (
+        "# synthetic lamp identification\n"
+        "# order from to center wavelength\n"
+        + "".join(
+            f"{order:d} {pixel - 2:d} {pixel + 2:d} {pixel:d} {value:.6f}\n"
+            for order, pixel, value in rows
+        )
+    )
+
+
+def _write_sphere_table(path: Path) -> None:
+    """The integrating sphere's spectral response, flat across the fixture."""
+
+    micrometres = np.linspace(0.310, 0.850, 40)
+    np.savetxt(
+        path,
+        np.column_stack([micrometres, np.full(micrometres.size, 1.0e-2)]),
+        fmt="%.8f",
+    )
 
 
 def _write_calibration_files(root: Path) -> None:
@@ -176,29 +220,11 @@ def _write_calibration_files(root: Path) -> None:
         ),
     ):
         np.savetxt(root / pattern_name, _order_centers(shape), fmt="%d")
-
-        columns = shape[0]
-        wavelengths = _order_wavelengths(columns)
-        rows = []
-        for index, order_id in enumerate(ORDER_IDS):
-            for pixel in np.linspace(20, columns * 0.8, 5).astype(int):
-                rows.append((order_id, pixel, wavelengths[index][pixel]))
         (root / wavelength_name).write_text(
-            "# synthetic lamp identification\n"
-            "# order from to center wavelength\n"
-            + "".join(
-                f"{order:d} {pixel - 2:d} {pixel + 2:d} {pixel:d} {value:.6f}\n"
-                for order, pixel, value in rows
-            ),
-            encoding="utf-8",
+            _wavelength_table(shape[0]), encoding="utf-8"
         )
 
-    micrometres = np.linspace(0.310, 0.850, 40)
-    np.savetxt(
-        root / "integrating_sphere.txt",
-        np.column_stack([micrometres, np.full(micrometres.size, 1.0e-2)]),
-        fmt="%.8f",
-    )
+    _write_sphere_table(root / "integrating_sphere.txt")
 
     for name in (
         "absolute_20170613_b8_0.2_v2.sif",
@@ -249,6 +275,64 @@ def window(qt_app, detector, tmp_path: Path):
     yield win
     win.close()
     qt_app.processEvents()
+
+
+def _write_snapshot(root: Path, pixel_shift: int = 0, snapshot_id: str = SNAPSHOT_ID) -> Path:
+    """Build a real snapshot folder carrying this fixture's CMOS calibration.
+
+    With ``pixel_shift`` zero it is byte-for-byte the calibration the packaged
+    CMOS path already reads, which is what makes a shifted one's effect
+    attributable to the shift and to nothing else.
+    """
+
+    from echelle_spectra.snapshot import create_snapshot
+
+    staging = root / f"sources_{snapshot_id}"
+    staging.mkdir(parents=True, exist_ok=True)
+    np.savetxt(staging / "pattern.txt", _order_centers(CMOS_SHAPE), fmt="%d")
+    (staging / "wavelength.txt").write_text(
+        _wavelength_table(CMOS_SHAPE[0], pixel_shift), encoding="utf-8"
+    )
+    _write_sphere_table(staging / "integral.txt")
+    for name in ("sphere_cmos.sif", "sphere_cmos_bg.sif"):
+        (staging / name).write_bytes(b"served by the synthetic detector")
+
+    snapshot = create_snapshot(
+        root / "calibrations",
+        snapshot_id=snapshot_id,
+        detector="cmos",
+        files={
+            "pattern": staging / "pattern.txt",
+            "wavelength": staging / "wavelength.txt",
+            "sphere": staging / "sphere_cmos.sif",
+            "sphere_background": staging / "sphere_cmos_bg.sif",
+            "integral": staging / "integral.txt",
+        },
+        lamps=["Th"],
+        notes="synthetic viewer fixture",
+    )
+    return snapshot.root
+
+
+def _snapshot_window(base: Path, pixel_shift: int = 0):
+    """A viewer launched the way ``--calibration <folder>`` launches it."""
+
+    config = _config(base)
+    root = _write_snapshot(base, pixel_shift)
+    override = gui.load_calibration_override(root)
+    return gui.EchelleSpectraGUI(config, calibration_override=override)
+
+
+def _balmer_columns(app, win, name: str) -> dict:
+    """Where the Balmer overlay puts each line on the detector image."""
+
+    spy = LoadSpy(win)
+    _load(app, win, name, spy, attempts=1)
+    assert spy.statuses == [gui.IMAGE_LOADED]
+    win.line_overlay_checks["balmer"].setChecked(True)
+    marks = win.detector_line_overlays.primary_marks("balmer")
+    assert marks
+    return {round(mark.wavelength_nm, 3): mark.column for mark in marks}
 
 
 def test_window_icon_resolves_and_is_set(qt_app):
@@ -644,3 +728,153 @@ def test_a_hand_set_display_level_survives_a_redraw_of_the_same_frame(
     window.show_image_frame()
     assert len(asked) == 2
     assert window.hist.getLevels() != pytest.approx((7.0, 42.0))
+
+
+# ---------------------------------------------------------------------------
+# Opening files through a saved calibration snapshot
+# ---------------------------------------------------------------------------
+
+
+def test_launching_without_the_flag_is_the_window_it_has_always_been(qt_app, window):
+    """No ``--calibration`` means the packaged pair, the old title, both cameras."""
+
+    args, qt_args = gui.parse_args([])
+    assert args.calibration is None
+    assert qt_args == []
+    # Qt keeps its own single-dash switches, so an off-screen launch still works.
+    assert gui.parse_args(["-platform", "offscreen"])[1] == ["-platform", "offscreen"]
+
+    _settle_calibrations(qt_app, window)
+    assert window.calibration_override is None
+    assert window.windowTitle() == "Echelle viewer"
+    assert window.camera_names == ("CCD", "CMOS")
+    assert window.CameraCCD.isEnabled()
+    assert window.CameraCMOS.isEnabled()
+
+    spy = LoadSpy(window)
+    _load(qt_app, window, "5101_cmos.SIF", spy, attempts=1)
+    assert spy.statuses == [gui.IMAGE_LOADED]
+    assert "calibration:" not in window.image_info_bw.toPlainText()
+
+
+def test_a_snapshot_calibration_is_worn_and_the_window_says_so(qt_app, detector, tmp_path):
+    """The viewer opens files through the snapshot it was pointed at, and names it."""
+
+    win = _snapshot_window(tmp_path)
+    try:
+        assert win.windowTitle() == f"Echelle viewer — {SNAPSHOT_ID}"
+        # One snapshot is one detector's calibration: that camera and no other,
+        # with nothing packaged left in the other slot to fall back to.
+        assert win.camera_names == ("CMOS",)
+        assert win.cb_CCD is None
+        assert win.CameraCMOS.isChecked()
+        assert not win.CameraCCD.isEnabled()
+        assert not win.CameraCMOS.isEnabled()
+
+        assert _pump(qt_app, win.calibrations_settled), "the snapshot never loaded"
+        assert win.calibration_errors == {"CMOS": ""}
+        assert Path(win.cb_CMOS.folder).name == SNAPSHOT_ID
+        assert win.cb_CMOS.filenames["orders"] == "pattern.txt"
+        assert win.cb_CMOS.filenames["wavelength"] == "wavelength.txt"
+
+        spy = LoadSpy(win)
+        _load(qt_app, win, "5102_cmos.SIF", spy, attempts=1)
+        assert spy.statuses == [gui.IMAGE_LOADED]
+        assert win.cameras_tried == ["CMOS"]
+        assert SNAPSHOT_ID in win.image_info_bw.toPlainText()
+        assert win.spectra.wavelength.size
+    finally:
+        win.close()
+        qt_app.processEvents()
+
+
+def test_a_shifted_snapshot_carries_the_overlays_and_the_axis_with_it(
+    qt_app, detector, tmp_path, window
+):
+    """The point of the flag: 2019 frames marked where 2019 says, not 2025.
+
+    The snapshot's wavelength table identifies the same lines eighteen pixels
+    further along the sensor than the packaged one does.  Every reader of the
+    loaded calibration must move by that much — the image overlay, the cursor
+    link, and the spectrum's wavelength axis — because they all read the one
+    calibration the window loaded and nothing else.
+    """
+
+    _settle_calibrations(qt_app, window)
+    packaged = _balmer_columns(qt_app, window, "5103_cmos.SIF")
+    window.cursor_link_check.setChecked(True)
+    pattern = _order_centers(CMOS_SHAPE)
+    column = 100
+    packaged_reading = window.cursor_link.show_for_image_point(
+        float(column), float(pattern[column, 0])
+    )
+    packaged_red_edge = float(np.nanmax(window.spectra.wavelength))
+
+    shifted = _snapshot_window(tmp_path / "shifted", pixel_shift=PIXEL_SHIFT)
+    try:
+        assert _pump(qt_app, shifted.calibrations_settled), "the snapshot never loaded"
+        assert shifted.calibration_errors == {"CMOS": ""}
+
+        moved = _balmer_columns(qt_app, shifted, "5103_cmos.SIF")
+        shared = sorted(set(packaged) & set(moved))
+        assert shared, "the two calibrations agree about no line at all"
+        for wavelength in shared:
+            assert moved[wavelength] == pytest.approx(
+                packaged[wavelength] + PIXEL_SHIFT, abs=0.5
+            )
+
+        # The same eighteen pixels, in nanometres, under the pointer …
+        per_pixel_nm = ORDER_SPAN_NM / CMOS_SHAPE[0]
+        shifted.cursor_link_check.setChecked(True)
+        shifted_reading = shifted.cursor_link.show_for_image_point(
+            float(column), float(pattern[column, 0])
+        )
+        assert shifted_reading[0] == packaged_reading[0]
+        assert shifted_reading[1] - packaged_reading[1] == pytest.approx(
+            PIXEL_SHIFT * per_pixel_nm, abs=0.02
+        )
+
+        # … and on the spectrum's own wavelength axis.
+        shifted_red_edge = float(np.nanmax(shifted.spectra.wavelength))
+        assert shifted_red_edge - packaged_red_edge == pytest.approx(
+            PIXEL_SHIFT * per_pixel_nm, abs=0.1
+        )
+    finally:
+        shifted.close()
+        qt_app.processEvents()
+
+
+def test_a_folder_that_is_not_a_snapshot_is_refused_before_a_window_opens(
+    tmp_path, capsys
+):
+    """Bounded and explanatory: never a wedge, never the packaged tables instead."""
+
+    plain = tmp_path / "just_a_folder"
+    plain.mkdir()
+
+    with pytest.raises(gui.CalibrationOverrideError) as absent:
+        gui.load_calibration_override(tmp_path / "nowhere")
+    assert "is not a directory" in str(absent.value)
+
+    with pytest.raises(gui.CalibrationOverrideError) as bare:
+        gui.load_calibration_override(plain)
+    assert "is not a calibration snapshot" in str(bare.value)
+
+    # And the entry point says it once and leaves, rather than opening a window
+    # wearing the packaged tables the operator did not ask for.
+    assert gui.start(["--calibration", str(plain)]) == 2
+    assert "is not a calibration snapshot" in capsys.readouterr().err
+
+
+def test_a_snapshot_missing_a_table_names_the_missing_table(tmp_path):
+    """A snapshot that lost a derived file fails validation, saying which."""
+
+    root = _write_snapshot(tmp_path)
+    (root / "wavelength.txt").unlink()
+
+    with pytest.raises(gui.CalibrationOverrideError) as err:
+        gui.load_calibration_override(root)
+
+    message = str(err.value)
+    assert "did not validate" in message
+    assert "wavelength.txt" in message
