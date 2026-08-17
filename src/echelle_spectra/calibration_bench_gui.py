@@ -8,6 +8,7 @@ import platform
 import re
 import sys
 from collections.abc import Sequence
+from dataclasses import replace
 from datetime import date, datetime
 from pathlib import Path, PurePath
 
@@ -768,6 +769,9 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         #: once and moved thereafter — the same pooling the order plot uses.
         self._histogram_items: dict[int, tuple] = {}
         self._catalog_cache: dict[tuple, tuple] = {}
+        #: Which solved correction the cached expected-line lists were placed
+        #: with.  A new solve makes it stale, and the next refresh notices.
+        self._drawn_correction: tuple[float, float, float] | None = None
         self._catalog_rows: tuple = ()
         self._queue: list[Path] = []
         #: Whether files have ARRIVED and not yet been judged as a set.  A load
@@ -3053,10 +3057,11 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         self.explain(
             f"{entry.label} — expected at pixel {entry.detector_pixel:.1f}",
             f"{entry.wavelength_nm:.4f} nm, order {entry.order_idx}, from "
-            f"{entry.source}. The pixel is where the current wavelength table "
-            "puts the line, so it says where to look, not where the line is: "
-            "click the peak itself to fit its centroid and accept it as an "
-            "anchor, and click an anchored stick again to take it back off.",
+            f"{entry.source}. The pixel is where the wavelength table puts the "
+            "line, moved by the solved alignment once there is one, so it says "
+            "where to look, not where the line is: click the peak itself to fit "
+            "its centroid and accept it as an anchor, and click an anchored "
+            "stick again to take it back off.",
         )
 
     def _refresh_reference(self) -> None:
@@ -3704,17 +3709,24 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
     def anchor_near(self, order_idx: int, pixel: float):
         """The anchor of *order_idx* whose stick a click at *pixel* lands on.
 
-        Either end counts: the curated row's expected pixel, where the stick is
-        drawn, and the fitted centroid, where the green marker sits.
+        Either end counts: the curated row's expected pixel *as this frame
+        shows it*, where the stick is drawn, and the fitted centroid, where the
+        green marker sits.  Reading the base pixel here once the sticks had
+        moved would leave a hot zone under bare spectrum and none under the
+        stick the operator is aiming at.
         """
 
+        anchors = [
+            anchor
+            for anchor in self.session.anchor_rows()
+            if anchor.line.order_idx == int(order_idx)
+        ]
+        shown = self.session.corrected_rows([anchor.line for anchor in anchors])
         best = None
-        for anchor in self.session.anchor_rows():
-            if anchor.line.order_idx != int(order_idx):
-                continue
+        for anchor, row in zip(anchors, shown):
             tolerance = max(3.0, anchor.line.width_px)
             distance = min(
-                abs(pixel - anchor.line.center_pixel),
+                abs(pixel - row.center_pixel),
                 abs(pixel - anchor.fit.center_pixel),
             )
             if distance <= tolerance and (best is None or distance < best[0]):
@@ -4768,12 +4780,31 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
             )
         return self.session.reference
 
+    def _correction_key(self) -> tuple[float, float, float] | None:
+        """The solved correction the drawn positions currently carry."""
+
+        transform = self.session.transform
+        if transform is None:
+            return None
+        return (transform.dx_px, transform.dy_px, transform.theta_rad)
+
     def _expected_rows_for_order(self, order_idx: int) -> tuple:
         """Cache the expected-line list per (order, reference) pair.
 
         Rebuilding it on every arrow-key press is work the answer does not
         change with, and F16's order-scrolling budget has no room for it.
+
+        The rows are placed where this frame shows them — base pixels until a
+        transform is solved, corrected ones after — so the sticks, this panel's
+        Pixel column and click-to-fit read one set of positions.  A re-solve
+        changes the correction, which empties the cache on the very next
+        ordinary refresh rather than through a hook of its own.
         """
+
+        correction = self._correction_key()
+        if correction != self._drawn_correction:
+            self._catalog_cache.clear()
+            self._drawn_correction = correction
 
         reference = self._display_reference()
         key = (
@@ -4784,11 +4815,27 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         )
         rows = self._catalog_cache.get(key)
         if rows is None:
+            # The fallback is read only when no reference set exists, so the
+            # whole table is corrected only when it is going to be drawn.
+            fallback = (
+                ()
+                if reference is not None
+                else self.session.corrected_rows(self.session.lines)
+            )
             rows = expected_lines_for_order(
-                reference, order_idx, fallback_lines=self.session.lines
+                self._shown_reference(reference),
+                order_idx,
+                fallback_lines=fallback,
             )
             self._catalog_cache[key] = rows
         return rows
+
+    def _shown_reference(self, reference: LampReferenceSet | None):
+        """The display reference with its rows moved to where they are seen."""
+
+        if reference is None or self.session.transform is None:
+            return reference
+        return replace(reference, lines=self.session.corrected_rows(reference.lines))
 
     def _pooled_marker(self, pool: list, index: int, pen, color: str):
         """Reuse the index-th stick and label of *pool*, creating it once."""

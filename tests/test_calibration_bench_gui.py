@@ -64,6 +64,7 @@ from echelle_spectra.calibration_campaign import (
     MeasurementRecord,
     MeasurementRole,
     default_validity,
+    lamp_reference_set,
     triage_exposure,
     triage_for_role,
 )
@@ -3684,4 +3685,157 @@ def test_a_refused_save_from_the_bench_leaves_no_folders_behind(qt_app, tmp_path
 
     assert not Path(window.config_root).exists()
     assert "were not saved" in window.save_message_value.text()
+    window.close()
+
+
+# --- The solved correction reaches every view of an expected line -----------
+
+
+def _shifted_window(tmp_path: Path, shift_px: float = 14.0) -> CalibrationBenchWindow:
+    """A bench whose frame shows every curated line *shift_px* to the right.
+
+    This is the 2019 folder in miniature: the curated table was written on a
+    detector that has since moved, so the sticks the bench draws from it stand
+    beside the light rather than on it until a transform is solved.
+    """
+
+    pattern = np.column_stack(
+        [np.full(_COLUMNS, 12, dtype=float), np.full(_COLUMNS, 30, dtype=float)]
+    )
+    lines = (
+        CalibrationTableLine(0, 21, 31, 26, 585.2488, "NeI", "ok"),
+        CalibrationTableLine(1, 51, 61, 56, 588.1895, "NeI", "ok"),
+    )
+    x = np.arange(_COLUMNS, dtype=float)
+    order_spectra = tuple(
+        5 + 200 * np.exp(-0.5 * ((x - (center + shift_px)) / 1.5) ** 2)
+        for center in (26.0, 56.0)
+    )
+    images = np.zeros((1, 44, _COLUMNS), dtype=float)
+    images[0, 12, :] = order_spectra[0]
+    images[0, 30, :] = order_spectra[1]
+    session = CalibrationBenchSession(pattern, lines, minimum_snr=3.0)
+    session.accept_frame(
+        BenchFrame(
+            tmp_path / "Ne-0.1s-x1-bright-lines.sif",
+            images,
+            images[0],
+            order_spectra,
+            {"ExposureTime": 0.1},
+        )
+    )
+    session.use_lamp_reference(lamp_reference_set("Ne", lines))
+    window = CalibrationBenchWindow(session, start_timer=False)
+    window.refresh()
+    return window
+
+
+def _views_agree(window) -> list[tuple[str, float]]:
+    """The one expected-line list, asserted to read the same in both views."""
+
+    drawn = _drawn_sticks(window)
+    listed = _listed_rows(window)
+    assert [name for name, _pixel in drawn] == [name for name, _pixel in listed]
+    for (_name, stick), (_row, cell) in zip(drawn, listed):
+        # The panel prints one decimal; the stick carries the full float.
+        assert stick == pytest.approx(cell, abs=0.05)
+    return drawn
+
+
+def _solve_by_clicking(window, qt_app, shift_px: float = 14.0) -> None:
+    """Bootstrap the alignment through the real plot-click path."""
+
+    window._order_plot_clicked(_click_at(window, 26.0 + shift_px))
+    qt_app.processEvents()
+    window.order_spin.setValue(1)
+    qt_app.processEvents()
+    window._order_plot_clicked(_click_at(window, 56.0 + shift_px))
+    qt_app.processEvents()
+
+
+def test_the_solved_correction_moves_the_sticks_and_the_pixel_column(
+    qt_app, tmp_path
+):
+    """The owner's 2019 screenshot: dx +18.02 solved, sticks still on the 2024
+    pixels, clicks landing on background.  Once a transform exists the sticks,
+    the panel's Pixel column and the click-fit window all read the corrected
+    position, and they move together on the ordinary refresh."""
+
+    window = _shifted_window(tmp_path)
+    window.show()
+    qt_app.processEvents()
+
+    # Before a solve the table's own pixel is all anybody knows.
+    assert _views_agree(window) == [("NeI 585.249", 26.0)]
+
+    _solve_by_clicking(window, qt_app)
+
+    assert window.session.transform is not None
+    assert window.session.transform.dx_px == pytest.approx(14.0, abs=0.05)
+    # No refresh hook of its own: the click handler's ordinary refresh moved
+    # both views, the cached per-order list included.
+    name, pixel = _views_agree(window)[0]
+    assert name == "NeI 588.189"
+    assert pixel == pytest.approx(70.0, abs=0.05)
+
+    window.order_spin.setValue(0)
+    qt_app.processEvents()
+    name, pixel = _views_agree(window)[0]
+    assert name == "NeI 585.249"
+    assert pixel == pytest.approx(40.0, abs=0.05)
+    window.close()
+
+
+def test_a_click_on_a_corrected_stick_anchors_the_line_under_it(qt_app, tmp_path):
+    """The click path itself: after the solve, the pixel the stick stands on is
+    the pixel that fits, and the anchor is still the curated row."""
+
+    window = _shifted_window(tmp_path)
+    window.show()
+    qt_app.processEvents()
+    _solve_by_clicking(window, qt_app)
+    window.order_spin.setValue(0)
+    qt_app.processEvents()
+    # Take the order-0 anchor back off by clicking its own stick, which now
+    # stands at the corrected pixel rather than at the table's.
+    window._order_plot_clicked(_click_at(window, 40.0))
+    qt_app.processEvents()
+    assert not [
+        anchor
+        for anchor in window.session.anchor_rows()
+        if anchor.line.order_idx == 0
+    ]
+
+    window._order_plot_clicked(_click_at(window, 40.0))
+    qt_app.processEvents()
+
+    anchored = [
+        anchor
+        for anchor in window.session.anchor_rows()
+        if anchor.line.order_idx == 0
+    ]
+    assert len(anchored) == 1
+    assert anchored[0].line.center_pixel == 26.0
+    assert anchored[0].fit.center_pixel == pytest.approx(40.0, abs=0.05)
+    window.close()
+
+
+def test_without_a_lamp_reference_the_fallback_rows_follow_too(qt_app, tmp_path):
+    """The panel falls back to the whole table when no lamp is assigned; that
+    list is drawn from the same corrected rows, not from a second source."""
+
+    window = _shifted_window(tmp_path)
+    window.session.use_lamp_reference(None)
+    window.show()
+    window.refresh()
+    qt_app.processEvents()
+    assert _views_agree(window) == [("NeI 585.249", 26.0)]
+
+    _solve_by_clicking(window, qt_app)
+    window.order_spin.setValue(0)
+    qt_app.processEvents()
+
+    name, pixel = _views_agree(window)[0]
+    assert name == "NeI 585.249"
+    assert pixel == pytest.approx(40.0, abs=0.05)
     window.close()

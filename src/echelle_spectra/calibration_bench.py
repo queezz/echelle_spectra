@@ -663,9 +663,51 @@ class CalibrationBenchSession:
             return None
         return self.reference.best_order
 
-    def lines_for_order(self, order_idx: int | None = None) -> tuple[CalibrationTableLine, ...]:
+    def corrected_rows(
+        self, rows: Sequence[CalibrationTableLine]
+    ) -> tuple[CalibrationTableLine, ...]:
+        """Place curated rows where *this frame* shows them.
+
+        Until two anchors have solved a transform these are the base table's
+        own pixels, which is how the first anchors are found at all: nothing
+        yet knows the detector moved, so the operator's eye is the only
+        correction there is.  Once a transform exists every row follows it,
+        through the same ``apply_rigid_correction_to_lines`` that
+        ``echelle-align --save`` writes its adjusted table with, so the sticks,
+        the expected-lines panel and the click-to-fit window point at the pixel
+        the line is actually on rather than at the one the 2024 table was
+        written for.  Re-solving moves them again on the next refresh: there is
+        nothing cached here to go stale.
+        """
+
+        rows = tuple(rows)
+        if self.transform is None or not rows:
+            return rows
+        return tuple(
+            apply_rigid_correction_to_lines(list(rows), self.pattern, self.transform)
+        )
+
+    def _order_rows(
+        self, order_idx: int | None = None
+    ) -> tuple[tuple[CalibrationTableLine, CalibrationTableLine], ...]:
+        """One order's curated rows paired with where this frame shows them.
+
+        The base row stays the anchor's identity and the transform's own input
+        — solving from corrected positions would fold the correction into
+        itself and shrink it to nothing on every pass — while the corrected row
+        is what the operator sees and clicks.
+        """
+
         selected = self.selected_order if order_idx is None else int(order_idx)
-        return tuple(line for line in self.reference_lines() if line.order_idx == selected)
+        base = tuple(
+            line for line in self.reference_lines() if line.order_idx == selected
+        )
+        return tuple(zip(base, self.corrected_rows(base)))
+
+    def lines_for_order(self, order_idx: int | None = None) -> tuple[CalibrationTableLine, ...]:
+        """The order's clickable rows, placed where this frame shows them."""
+
+        return tuple(shown for _, shown in self._order_rows(order_idx))
 
     def fit_anchor_at(self, order_idx: int, clicked_pixel: float) -> AnchorFitResult:
         """Fit the nearest line of the assigned lamp around the clicked pixel."""
@@ -675,7 +717,7 @@ class CalibrationBenchSession:
         reference = self.reference
         if reference is not None and not reference.is_referenceable:
             return AnchorFitResult(False, reference.message)
-        candidates = self.lines_for_order(order_idx)
+        candidates = self._order_rows(order_idx)
         if not candidates:
             scope = (
                 f"no {reference.catalog_label} rows"
@@ -683,8 +725,10 @@ class CalibrationBenchSession:
                 else "no calibration rows"
             )
             return AnchorFitResult(False, f"{scope} for this order")
-        line = min(candidates, key=lambda item: abs(item.center_pixel - clicked_pixel))
-        if abs(line.center_pixel - clicked_pixel) > self.click_match_radius_px:
+        line, shown = min(
+            candidates, key=lambda pair: abs(pair[1].center_pixel - clicked_pixel)
+        )
+        if abs(shown.center_pixel - clicked_pixel) > self.click_match_radius_px:
             known = (
                 f"{reference.catalog_label} calibration row"
                 if reference is not None and reference.catalog_label
@@ -692,11 +736,21 @@ class CalibrationBenchSession:
             )
             return AnchorFitResult(False, f"click is not near a {known}")
 
+        # Where to centre the +/-18 px probe.  With no transform solved the
+        # click is the only estimate there is, and centring on it is what lets
+        # the first anchors be placed on a frame the table is 18 px wrong
+        # about.  Once a transform exists the corrected row is the better
+        # estimate of the two, so a click landing anywhere within the match
+        # radius still opens its window on the line rather than on the line's
+        # edge — which is the whole 2019 defect.
+        probe_center = float(
+            shown.center_pixel if self.transform is not None else clicked_pixel
+        )
         probe_line = CalibrationTableLine(
             line.order_idx,
-            clicked_pixel - self.fit_window_radius_px,
-            clicked_pixel + self.fit_window_radius_px,
-            float(clicked_pixel),
+            probe_center - self.fit_window_radius_px,
+            probe_center + self.fit_window_radius_px,
+            probe_center,
             line.wavelength_nm,
             line.species,
             line.comment,
@@ -729,7 +783,7 @@ class CalibrationBenchSession:
 
         success, center, sigma, amplitude, baseline, snr, reason = fit_single_gaussian_centroid(
             self.active_order_spectra()[order_idx],
-            expected_center_px=float(clicked_pixel),
+            expected_center_px=probe_center,
             window_radius_px=self.fit_window_radius_px,
             min_snr=self.minimum_snr,
         )

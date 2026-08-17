@@ -490,3 +490,127 @@ def test_the_fit_lands_where_the_lamps_own_lines_are(tmp_path):
     # A lamp whose catalog this table never carries lands nowhere, quietly.
     session.use_lamp_reference(lamp_reference_set("Hg", lines))
     assert session.best_reference_order() is None
+
+
+# --- The solved correction moves the rows a click is measured against -------
+#
+# The 2019 folder is what named this: its transform solved dx +18.02 px, the
+# sticks stayed on the 2024 table's pixels, and every click after the solve
+# opened its +/-18 px window with the real peak outside it.  The fixture shifts
+# by 20 px for the same reason the screenshot did it at 18.02: past the window
+# radius, the fit has only the line's flank to work with.
+
+
+def _shifted_session(tmp_path: Path, shift_px: float = 20.0) -> CalibrationBenchSession:
+    """A frame whose lines all sit *shift_px* right of the curated table."""
+
+    lines = (_line(0, 30.0, 600.0), _line(1, 70.0, 610.0), _line(2, 90.0, 620.0))
+    session = CalibrationBenchSession(_pattern(), lines, minimum_snr=3.0)
+    session.accept_frame(
+        _frame(tmp_path, centers=(30.0 + shift_px, 70.0 + shift_px, 90.0 + shift_px))
+    )
+    return session
+
+
+def _solve_two_anchors(session: CalibrationBenchSession, shift_px: float = 20.0) -> None:
+    """Bootstrap the way an operator does: click the peaks that are visible."""
+
+    assert session.fit_anchor_at(0, 30.0 + shift_px).accepted
+    assert session.fit_anchor_at(1, 70.0 + shift_px).accepted
+    assert session.transform is not None
+    assert session.transform.dx_px == pytest.approx(shift_px, abs=0.05)
+
+
+def test_before_a_solve_the_rows_sit_where_the_table_put_them(tmp_path):
+    """First anchors are found against base pixels; nothing else is known yet."""
+
+    session = _shifted_session(tmp_path)
+
+    assert session.transform is None
+    assert [line.center_pixel for line in session.lines_for_order(2)] == [90.0]
+    assert session.corrected_rows(session.lines) == session.lines
+
+    # And the click is still what centres the window, which is the only reason
+    # a table 20 px out can be anchored by hand at all.
+    result = session.fit_anchor_at(2, 110.0)
+    assert result.accepted
+    assert result.anchor.fit.center_pixel == pytest.approx(110.0, abs=0.05)
+    assert result.anchor.line.center_pixel == 90.0
+
+
+def test_a_solved_transform_moves_the_expected_rows_onto_the_frame(tmp_path):
+    """The displayed row follows the correction; its identity does not."""
+
+    session = _shifted_session(tmp_path)
+    _solve_two_anchors(session)
+
+    shown = session.lines_for_order(2)
+    assert [line.center_pixel for line in shown] == [pytest.approx(110.0, abs=0.05)]
+    # The interval travels with the centre, so the row stays one whole line.
+    assert shown[0].pixel_from == pytest.approx(105.0, abs=0.05)
+    assert shown[0].pixel_to == pytest.approx(115.0, abs=0.05)
+    assert shown[0].wavelength_nm == 620.0
+
+    # The curated table itself is untouched: the correction is a view of it.
+    assert [line.center_pixel for line in session.lines] == [30.0, 70.0, 90.0]
+
+
+def test_a_click_on_the_corrected_row_fits_the_peak_that_is_there(tmp_path):
+    session = _shifted_session(tmp_path)
+    _solve_two_anchors(session)
+
+    result = session.fit_anchor_at(2, 110.0)
+
+    assert result.accepted
+    assert result.anchor.fit.center_pixel == pytest.approx(110.0, abs=0.05)
+    assert result.anchor.line.wavelength_nm == 620.0
+
+
+def test_a_click_on_the_base_row_still_matches_and_still_finds_the_peak(tmp_path):
+    """The defect itself: 20 px is inside the 30 px match radius, so the click
+    was always accepted — and then measured through a window centred 20 px off,
+    which held the line's flank and not its apex.  That fit succeeded and
+    returned 108, two pixels of pure error into the solve.  The window now
+    opens on the corrected pixel instead."""
+
+    session = _shifted_session(tmp_path)
+    _solve_two_anchors(session)
+
+    result = session.fit_anchor_at(2, 90.0)
+
+    assert result.accepted
+    assert result.anchor.fit.center_pixel == pytest.approx(110.0, abs=0.05)
+    # The anchor is the curated row, so the next solve still measures the whole
+    # correction rather than re-solving against its own output.
+    assert result.anchor.line.center_pixel == 90.0
+    assert result.anchor.key == (2, 90.0, 620.0)
+
+
+def test_the_correction_does_not_fold_into_itself_across_solves(tmp_path):
+    """Re-solving with corrected rows on screen must not shrink the shift."""
+
+    session = _shifted_session(tmp_path)
+    _solve_two_anchors(session)
+
+    assert session.fit_anchor_at(2, 110.0).accepted
+    assert session.transform.dx_px == pytest.approx(20.0, abs=0.05)
+    assert session.rms_px < 0.05
+
+    # Removing an anchor and placing it again lands on the same numbers.
+    session.remove_anchor((2, 90.0, 620.0))
+    assert session.fit_anchor_at(2, 90.0).accepted
+    assert session.transform.dx_px == pytest.approx(20.0, abs=0.05)
+
+
+def test_a_click_beyond_the_match_radius_of_the_corrected_row_is_refused(tmp_path):
+    """The radius is tested against the position the operator can see."""
+
+    session = _shifted_session(tmp_path)
+    _solve_two_anchors(session)
+
+    # 70 px is 20 from the base row (inside the old radius) and 40 from the
+    # corrected one, which is where the row is drawn and where it now counts.
+    refused = session.fit_anchor_at(2, 70.0)
+
+    assert not refused.accepted
+    assert "not near a known calibration row" in refused.reason
