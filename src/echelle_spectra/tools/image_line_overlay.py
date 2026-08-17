@@ -44,7 +44,10 @@ from .line_catalog import LINE_FAMILIES, SpectralLine
 from .line_overlay import LINE_OVERLAY_STYLES, select_overlay_lines
 
 __all__ = [
+    "CURSOR_LINK_COLOR",
+    "CURSOR_LINK_RATE_HZ",
     "DEFAULT_LINE_WIDTH_PX",
+    "CursorLink",
     "DetectorGeometry",
     "DetectorLineMark",
     "DetectorLineOverlay",
@@ -304,6 +307,61 @@ class DetectorGeometry:
 
         return tuple(mark for line in lines for mark in self.marks_for_line(line))
 
+    # -- the same map read forwards, for a cursor rather than for a catalog --
+
+    def wavelength_at(self, order_index: int, column: float) -> float | None:
+        """One order's sampled solution read at a (possibly fractional) column.
+
+        ``None`` off the end of the part of the order the solution covers — a
+        partial order runs out of sensor and its solution is NaN-padded there,
+        and a padded column carries no wavelength to report.
+        """
+
+        values = self.order_wavel[order_index]
+        usable = np.isfinite(values)
+        if int(usable.sum()) < 2:
+            return None
+        columns = self._grid[usable]
+        if column < columns[0] or column > columns[-1]:
+            return None
+        return float(np.interp(column, columns, values[usable]))
+
+    def order_at(self, column: float, row: float) -> int | None:
+        """Which order's band a detector row falls in at one column.
+
+        The band is the same reach the line boxes use — out to half the
+        distance to the neighbouring trace, floored at ``dv`` — so a cursor
+        anywhere on a blob names the order that blob belongs to.  A cursor in
+        the dark gutter beyond the outermost trace belongs to no order, and the
+        honest answer there is ``None`` rather than the nearest one.
+        """
+
+        if not 0.0 <= column <= self.columns - 1:
+            return None
+        nearest: tuple[float, int] | None = None
+        for index in range(self.order_count):
+            distance = abs(float(row) - self.row_at(index, column))
+            if distance > self.band_half_height(index, column):
+                continue
+            if nearest is None or distance < nearest[0]:
+                nearest = (distance, index)
+        return None if nearest is None else nearest[1]
+
+    def image_position(self, wavelength_nm: float):
+        """Where the stitched spectrum reads one wavelength from the sensor.
+
+        Returns ``(order_index, column, row)`` for the order the stitch mask
+        owns — the primary mark's order — or ``None`` when no order carries it.
+        """
+
+        index = self.owner_index(wavelength_nm)
+        if index is None:
+            return None
+        column = self.column_for(index, wavelength_nm)
+        if column is None:
+            return None
+        return index, column, self.row_at(index, column)
+
 
 class DetectorLineOverlay:
     """Pooled per-family line boxes over the 2-D detector image.
@@ -483,6 +541,264 @@ class DetectorLineOverlay:
                 high, low,
             )
         return columns, rows
+
+
+#: The cursor link belongs to no line family, so it takes none of their hues:
+#: a neutral near-white that reads over both the dark detector and the plots.
+CURSOR_LINK_COLOR = "#e6ecf2"
+
+#: How often the pointer is allowed to move the markers.  Mouse moves arrive
+#: far faster than a plot can usefully be redrawn, so they are proxied down to
+#: this; ~30 Hz is smooth to the hand and cheap to the scene.
+CURSOR_LINK_RATE_HZ = 30.0
+
+#: Half the arms of the crosshair drawn on the image, in detector pixels.
+CURSOR_CROSS_HALF_PX = 16.0
+
+
+class CursorLink:
+    """One pointer, marked in both views — while it is switched on.
+
+    The detector image and the spectrum plots show the same light in two
+    coordinate systems, and the loaded calibration already maps between them.
+    This reads that map at the pointer: a cursor over the image names the order
+    its row falls in and the wavelength its column carries, and marks that
+    wavelength on the spectra; a cursor over a spectrum marks where the
+    stitched trace read that wavelength from the sensor.
+
+    Off is genuinely free.  Nothing is connected and no item exists until
+    :meth:`set_enabled` is called with ``True``: mouse movement over the image
+    is the highest-rate event in the window, and a viewer that is not using the
+    link must not pay a slot call for every one of them.  Switched on, the
+    moves are rate-limited through :class:`pyqtgraph.SignalProxy`, and each
+    view owns exactly one marker item that is moved and hidden — never rebuilt
+    per move.
+    """
+
+    def __init__(
+        self,
+        image_plot,
+        spectrum_plots,
+        *,
+        readout=None,
+        rate_hz: float = CURSOR_LINK_RATE_HZ,
+        color: str = CURSOR_LINK_COLOR,
+    ):
+        self._image_plot = image_plot
+        self._spectrum_plots = dict(spectrum_plots)
+        self._readout = readout
+        self._rate_hz = float(rate_hz)
+        self._color = color
+        self._geometry: DetectorGeometry | None = None
+        self._enabled = False
+        self._proxies: list[pg.SignalProxy] = []
+        self._image_marker: pg.PlotDataItem | None = None
+        self._spectrum_markers: dict[str, pg.InfiniteLine] = {}
+        self._label = ""
+
+    # ------------------------------------------------------------- state ---
+
+    @property
+    def geometry(self) -> DetectorGeometry | None:
+        return self._geometry
+
+    @property
+    def is_enabled(self) -> bool:
+        return self._enabled
+
+    @property
+    def label(self) -> str:
+        """What the link last had to say, or ``""`` when it is saying nothing."""
+
+        return self._label
+
+    def proxy_count(self) -> int:
+        """How many mouse-move proxies are connected; zero while switched off."""
+
+        return len(self._proxies)
+
+    def set_geometry(self, source) -> bool:
+        """Adopt a freshly loaded calibration, or drop a stale one."""
+
+        if source is None or isinstance(source, DetectorGeometry):
+            self._geometry = source
+        else:
+            self._geometry = DetectorGeometry.from_calibration(source)
+        if self._geometry is None:
+            self.clear()
+        return self._geometry is not None
+
+    def set_enabled(self, enabled: bool) -> bool:
+        """Switch the link on or off; returns whether it can map anything yet."""
+
+        wanted = bool(enabled)
+        if wanted == self._enabled:
+            return self._geometry is not None
+        self._enabled = wanted
+        if wanted:
+            self._connect()
+        else:
+            self._disconnect()
+            self.clear()
+        return self._geometry is not None
+
+    # ------------------------------------------------------------ wiring ---
+
+    def _scenes(self):
+        """Every distinct scene the linked plots live in, in a stable order.
+
+        The two spectrum plots share one ``GraphicsLayoutWidget`` and therefore
+        one scene, so connecting per plot would deliver every move twice.
+        """
+
+        scenes = []
+        for plot in (self._image_plot, *self._spectrum_plots.values()):
+            scene = plot.scene()
+            if scene is not None and not any(scene is known for known in scenes):
+                scenes.append(scene)
+        return scenes
+
+    def _connect(self) -> None:
+        for scene in self._scenes():
+            self._proxies.append(
+                pg.SignalProxy(
+                    scene.sigMouseMoved,
+                    rateLimit=self._rate_hz,
+                    slot=self._pointer_moved,
+                )
+            )
+
+    def _disconnect(self) -> None:
+        for proxy in self._proxies:
+            proxy.disconnect()
+        self._proxies = []
+
+    def _pointer_moved(self, event) -> None:
+        position = event[0]
+        if self._image_plot.sceneBoundingRect().contains(position):
+            point = self._image_plot.getViewBox().mapSceneToView(position)
+            self.show_for_image_point(
+                point.x() - _PIXEL_CENTER, point.y() - _PIXEL_CENTER
+            )
+            return
+        for name, plot in self._spectrum_plots.items():
+            if plot.sceneBoundingRect().contains(position):
+                point = plot.getViewBox().mapSceneToView(position)
+                self.show_for_wavelength(point.x(), source=name)
+                return
+        self.clear()
+
+    # ------------------------------------------------------------ marking ---
+
+    def show_for_image_point(self, column: float, row: float):
+        """Mark the wavelength a detector position carries; ``None`` if none.
+
+        Returns ``(order, wavelength_nm)`` using the order's own *identifier*,
+        which is what the operator reads on the calibration bench, not its
+        index in the pattern.
+        """
+
+        if not self._enabled or self._geometry is None:
+            return None
+        index = self._geometry.order_at(column, row)
+        if index is None:
+            self.clear()
+            return None
+        wavelength = self._geometry.wavelength_at(index, column)
+        if wavelength is None:
+            self.clear()
+            return None
+        order = self._geometry.order_ids[index]
+        self._mark_spectra(wavelength)
+        self._hide_image_marker()
+        self._announce(order, wavelength)
+        return order, float(wavelength)
+
+    def show_for_wavelength(self, wavelength_nm: float, *, source: str | None = None):
+        """Mark where the stitched spectrum read one wavelength from the sensor.
+
+        Returns ``(order, column, row)``, or ``None`` when no order owns it.
+        """
+
+        if not self._enabled or self._geometry is None:
+            return None
+        placed = self._geometry.image_position(wavelength_nm)
+        if placed is None:
+            self.clear()
+            return None
+        index, column, row = placed
+        order = self._geometry.order_ids[index]
+        self._mark_image(column, row)
+        self._mark_spectra(wavelength_nm, skip=source)
+        self._announce(order, wavelength_nm)
+        return order, float(column), float(row)
+
+    def clear(self) -> None:
+        """Take both marks down — the pointer has left, or has nothing to say."""
+
+        self._hide_image_marker()
+        for marker in self._spectrum_markers.values():
+            marker.setVisible(False)
+        if self._label:
+            self._label = ""
+            if self._readout is not None:
+                self._readout("")
+
+    def image_marker(self) -> pg.PlotDataItem | None:
+        """The pooled crosshair, or ``None`` while the link costs nothing."""
+
+        return self._image_marker
+
+    def spectrum_marker(self, name: str) -> pg.InfiniteLine | None:
+        """One plot's pooled marker, or ``None`` while the link costs nothing."""
+
+        return self._spectrum_markers.get(name)
+
+    def _announce(self, order: int, wavelength_nm: float) -> None:
+        self._label = f"order {order} · {wavelength_nm:.2f} nm"
+        if self._readout is not None:
+            self._readout(self._label)
+
+    def _pen(self):
+        return pg.mkPen(self._color, width=1.0)
+
+    def _mark_spectra(self, wavelength_nm: float, *, skip: str | None = None) -> None:
+        for name, plot in self._spectrum_plots.items():
+            if name == skip:
+                # The pointer itself is the mark on the plot it is over, and a
+                # stale line left under it would be the only thing lying.
+                stale = self._spectrum_markers.get(name)
+                if stale is not None:
+                    stale.setVisible(False)
+                continue
+            marker = self._spectrum_markers.get(name)
+            if marker is None:
+                marker = pg.InfiniteLine(angle=90, movable=False, pen=self._pen())
+                marker.setZValue(30)
+                plot.addItem(marker, ignoreBounds=True)
+                self._spectrum_markers[name] = marker
+            marker.setPos(float(wavelength_nm))
+            marker.setVisible(True)
+
+    def _mark_image(self, column: float, row: float) -> None:
+        if self._image_marker is None:
+            self._image_marker = pg.PlotDataItem(
+                pen=self._pen(), connect="pairs", antialias=False
+            )
+            self._image_marker.setZValue(30)
+            self._image_plot.addItem(self._image_marker, ignoreBounds=True)
+        x = column + _PIXEL_CENTER
+        y = row + _PIXEL_CENTER
+        self._image_marker.setData(
+            x=[x - CURSOR_CROSS_HALF_PX, x + CURSOR_CROSS_HALF_PX, x, x],
+            y=[y, y, y - CURSOR_CROSS_HALF_PX, y + CURSOR_CROSS_HALF_PX],
+            connect="pairs",
+        )
+        self._image_marker.setVisible(True)
+
+    def _hide_image_marker(self) -> None:
+        if self._image_marker is not None:
+            self._image_marker.setVisible(False)
 
 
 class OrderTraceOverlay:

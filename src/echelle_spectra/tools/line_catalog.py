@@ -6,9 +6,9 @@ identification metadata without importing downstream molecular fitting logic.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from functools import lru_cache
-from importlib.resources import files
+from importlib.resources import as_file, files
 from typing import Iterable
 
 try:
@@ -16,24 +16,36 @@ try:
 except ModuleNotFoundError:  # pragma: no cover - Python 3.10 fallback.
     import tomli as tomllib  # type: ignore[no-redef]
 
+from .calibration_alignment import BH_PAPER_WAVELENGTH_TABLE, load_wavelength_table
 from .nist_lamp_calibration import (
+    COMMON_LAMP_PRESETS,
     COMMON_NIST_SPECIES,
     default_nist_cache_dir,
     load_nist_asd_exports,
+    normalize_species_key,
     resolve_cached_line_lists,
 )
 
 __all__ = [
+    "CURATED_LINE_TABLE",
+    "CURATED_MATCH_TOLERANCE_NM",
+    "LAMP_LINE_FAMILIES",
     "LINE_FAMILIES",
     "LINE_FAMILY_ISOTOPES",
     "LINE_FAMILY_LABELS",
     "SpectralLine",
+    "curated_line_count",
     "filter_line_table",
     "load_line_table",
 ]
 
 
 LINE_FAMILIES = ("balmer", "fulcher", "thar", "ne", "hg")
+
+#: The families whose tables are NIST lamp exports rather than a hand-kept list.
+#: These are the ones a curated wavelength table can vouch for, and the ones the
+#: overlays filter by strength.
+LAMP_LINE_FAMILIES = ("thar", "ne", "hg")
 LINE_FAMILY_LABELS = {
     "balmer": "Balmer",
     "fulcher": "Fulcher H2",
@@ -117,6 +129,17 @@ class SpectralLine:
     D-alpha can be recognised as one transition seen through two nuclei.  A
     consumer that must judge a measured centroid against both references pairs
     them on this, never on the text of the label.
+    """
+
+    curated: bool = False
+    """True when the vetted wavelength table names this line as one of its own.
+
+    The curated table is :data:`CURATED_LINE_TABLE`, whose ``OK`` marks carry
+    the BH paper's vetting: somebody found this line on this instrument, fitted
+    it, and signed for it.  That is a stronger statement about "is this line
+    here" than any database strength number, which is why the overlays never
+    let a curated row lose a selection contest to a NIST threshold — see
+    :func:`~echelle_spectra.tools.line_overlay.select_overlay_lines`.
     """
 
 
@@ -245,6 +268,112 @@ def _nist_lines(family: str) -> tuple[SpectralLine, ...]:
     return tuple(sorted(result, key=lambda line: (line.wavelength_nm, line.species)))
 
 
+#: The wavelength table whose rows the packaged catalogs treat as curated.
+#: It is the BH-paper table itself rather than one of its aligned descendants:
+#: an alignment moves pixels, never wavelengths, so the *identifications* — the
+#: only thing read here — are established once, at the head of the lineage.
+CURATED_LINE_TABLE = BH_PAPER_WAVELENGTH_TABLE
+
+#: How near a cached NIST row must sit to a curated row to be the same line.
+#: The curated wavelengths were transcribed from ASD to five decimals, so a
+#: genuine pair agrees far inside this; 0.005 nm is loose enough for a rounded
+#: transcription and tight enough to keep the 667.8277 / 667.8331 Ne I pair
+#: apart, where the curated row means the strong one.
+CURATED_MATCH_TOLERANCE_NM = 0.005
+
+
+@lru_cache(maxsize=None)
+def _curated_wavelengths(family: str) -> tuple[tuple[str, float], ...]:
+    """Return ``(species, wavelength_nm)`` for the curated rows of one lamp.
+
+    Only rows the table marks ``OK`` are read — the same predicate
+    :func:`~echelle_spectra.tools.calibration_alignment.select_candidate_lines`
+    uses — because it is the ``OK`` marks that carry the vetting.  A row left
+    at ``?`` is a question somebody wrote down, not an answer, and it earns no
+    more standing here than any other database line.  Rows whose species the
+    NIST species table does not know (blends, the H2 anchors) are left to the
+    families that own them.
+    """
+
+    species_keys = COMMON_LAMP_PRESETS[family].species
+    resource = files("echelle_spectra.resources").joinpath(
+        f"calibration_files/{CURATED_LINE_TABLE}"
+    )
+    with as_file(resource) as path:
+        rows = load_wavelength_table(path)
+    curated = []
+    for row in rows:
+        if row.species not in species_keys:
+            continue
+        if "ok" not in row.comment.lower():
+            continue
+        try:
+            name = COMMON_NIST_SPECIES[normalize_species_key(row.species)].nist_name
+        except KeyError:  # pragma: no cover - defended, not reachable today
+            continue
+        curated.append((name, float(row.wavelength_nm)))
+    return tuple(sorted(set(curated), key=lambda item: (item[1], item[0])))
+
+
+def _curated_row_line(species: str, wavelength_nm: float, family: str) -> SpectralLine:
+    """A curated row the packaged NIST cache holds no counterpart for.
+
+    It is still a line somebody measured on this instrument and signed for, so
+    it is carried under the curated table's own provenance rather than dropped.
+    It has no ``relative_intensity``: the cache is where that number lives, and
+    inventing one would be the database claim this row precisely is not.
+    """
+
+    return SpectralLine(
+        family=family,
+        label=f"{species} {wavelength_nm:.4f}",
+        wavelength_nm=wavelength_nm,
+        wavelength_medium="air",
+        species=species,
+        source_name="Echelle curated wavelength table (BH paper vetting)",
+        source_reference=f"echelle_spectra/resources/calibration_files/{CURATED_LINE_TABLE}",
+        source_resource=f"echelle_spectra/resources/calibration_files/{CURATED_LINE_TABLE}",
+        notes="Curated, OK-marked row with no counterpart in the packaged NIST cache.",
+        curated=True,
+    )
+
+
+def _with_curated_rows(family: str, table: tuple[SpectralLine, ...]):
+    """Flag every cached row a curated row vouches for, and add the rest.
+
+    Each curated wavelength claims the *nearest* cached row of its own species
+    inside :data:`CURATED_MATCH_TOLERANCE_NM`.  Two curated rows are allowed to
+    claim the same cached row, because the curated table really does name one
+    line twice: an echelle overlap exposes it on two orders, and it is measured
+    and written down once per order — Ne I 630.47893 and 630.47800 are one
+    line, and Hg I 708.19000 and 708.19010 are another.  Refusing the second
+    claim would invent a phantom line beside the real one.
+    """
+
+    marked = dict(enumerate(table))
+    extra: list[SpectralLine] = []
+    for species, wavelength in _curated_wavelengths(family):
+        candidates = [
+            (abs(line.wavelength_nm - wavelength), index)
+            for index, line in marked.items()
+            if line.species == species
+            and abs(line.wavelength_nm - wavelength) <= CURATED_MATCH_TOLERANCE_NM
+        ]
+        if not candidates:
+            extra.append(_curated_row_line(species, wavelength, family))
+            continue
+        _distance, index = min(candidates)
+        marked[index] = replace(marked[index], curated=True)
+    result = list(marked.values()) + extra
+    return tuple(sorted(result, key=lambda line: (line.wavelength_nm, line.species)))
+
+
+def curated_line_count(family: str) -> int:
+    """How many rows of one family the curated table vouches for, for QA."""
+
+    return sum(1 for line in load_line_table(family) if line.curated)
+
+
 @lru_cache(maxsize=None)
 def load_line_table(family: str, *, isotope: str | None = None) -> tuple[SpectralLine, ...]:
     """Return one immutable, wavelength-sorted family table.
@@ -272,7 +401,7 @@ def load_line_table(family: str, *, isotope: str | None = None) -> tuple[Spectra
                 f"{key} lines carry no hydrogen isotopologue, so isotope={isotope!r} "
                 "has no meaning for them"
             )
-        return _nist_lines(key)
+        return _with_curated_rows(key, _nist_lines(key))
     wanted = (isotope if isotope is not None else DEFAULT_ISOTOPE).strip().upper()
     if wanted not in available:
         return ()

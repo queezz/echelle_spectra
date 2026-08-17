@@ -14,7 +14,12 @@ from .resources import window_layout
 from .tools import echelle as ech
 from .tools import emissionbands as eb
 from .tools import emissiondata as ebd
-from .tools.image_line_overlay import DetectorLineOverlay, OrderTraceOverlay
+from .tools.detector_display import auto_display_levels
+from .tools.image_line_overlay import (
+    CursorLink,
+    DetectorLineOverlay,
+    OrderTraceOverlay,
+)
 from .tools.line_overlay import SPECTRUM_CURVE_COLORS, LineOverlayManager
 
 # What one camera's attempt at one file ended up seeing.  A single "it did not
@@ -103,6 +108,17 @@ class EchelleSpectraGUI(QMainWindow, window_layout.Ui_MainWindow):
         self.detector_line_overlays = DetectorLineOverlay(self.p1)
         # And its own toggle for the order pattern underneath them.
         self.order_trace_overlay = OrderTraceOverlay(self.p1)
+        # The same geometry read at the pointer instead of at a catalog row.
+        # Nothing is connected until its checkbox is ticked.
+        self.cursor_link = CursorLink(
+            self.p1,
+            {"counts": self.p2, "calibrated": self.p3},
+            readout=self.statusBar().showMessage,
+        )
+        # Which (file, frame) the image levels were last set for, so a frame
+        # the operator has already levelled by hand is not re-levelled under
+        # him on an unrelated redraw.
+        self._levelled_frame = None
 
         # define initial class attributes
         self.config = config
@@ -182,6 +198,7 @@ class EchelleSpectraGUI(QMainWindow, window_layout.Ui_MainWindow):
                 lambda visible, key=family: self.set_line_overlay(key, visible)
             )
         self.order_trace_check.toggled.connect(self.set_order_traces)
+        self.cursor_link_check.toggled.connect(self.set_cursor_link)
 
     def set_line_overlay(self, family, visible):
         """Toggle one known-line family on both the spectra and the image."""
@@ -215,6 +232,20 @@ class EchelleSpectraGUI(QMainWindow, window_layout.Ui_MainWindow):
         else:
             self.statusBar().showMessage(
                 f"Order traces shown — {orders} orders on the detector image."
+            )
+
+    def set_cursor_link(self, enabled):
+        """Toggle the pointer link between the detector image and the spectra."""
+        ready = self.cursor_link.set_enabled(enabled)
+        if not enabled:
+            self.statusBar().showMessage("Cursor link off.")
+        elif not ready:
+            self.statusBar().showMessage(
+                "Cursor link on; it starts reporting once an image loads."
+            )
+        else:
+            self.statusBar().showMessage(
+                "Cursor link on — hover the image or a spectrum."
             )
 
     def update_paths(self):
@@ -586,6 +617,7 @@ class EchelleSpectraGUI(QMainWindow, window_layout.Ui_MainWindow):
         # where a wavelength lands on the sensor.
         self.detector_line_overlays.set_geometry(getattr(self.em, "clbr", None))
         self.order_trace_overlay.set_geometry(getattr(self.em, "clbr", None))
+        self.cursor_link.set_geometry(getattr(self.em, "clbr", None))
 
         self._reset_frame()
         self._setup_frame()
@@ -620,6 +652,8 @@ class EchelleSpectraGUI(QMainWindow, window_layout.Ui_MainWindow):
         # were placed for.
         self.detector_line_overlays.set_geometry(None)
         self.order_trace_overlay.set_geometry(None)
+        self.cursor_link.set_geometry(None)
+        self._levelled_frame = None
         message = self._load_failure_text(outcome)
         self.image_info_bw.setText(
             '<font size = 4 color = "#d1451b">{}</font>'.format(message)
@@ -913,20 +947,37 @@ class EchelleSpectraGUI(QMainWindow, window_layout.Ui_MainWindow):
         frame = int(self.frame.value())
         self.frame_current = frame
 
-        self.img.setImage(self.em.images[frame])
-        if self.check_autoscale.isChecked():
-            self.hist.setLevels(
-                min=np.percentile(self.em.images[frame], 1),
-                max=np.percentile(self.em.images[frame], 99),
-            )
+        self.show_detector_frame(frame)
         self.show_spectrum()
+
+    def show_detector_frame(self, frame):
+        """Put one frame on the image, levelling it only when it is new.
+
+        The rule is the echelle-aware one in
+        :mod:`~echelle_spectra.tools.detector_display`: black at the background
+        floor, white at the 99.9th percentile, so the strong lamp lines clip
+        and the faint ones stay visible.  It runs when the displayed frame
+        changes and never again — ``setImage`` is told not to level for itself
+        either — so a histogram the operator has dragged survives every redraw
+        of the same frame.  The levels are set here; they are not held here.
+        """
+        key = (str(getattr(self, "filename", "")), int(frame))
+        fresh = key != self._levelled_frame
+        levels = None
+        if fresh and self.check_autoscale.isChecked():
+            levels = auto_display_levels(self.em.images[frame])
+        # Only a frame nobody has levelled yet falls back to pyqtgraph's own
+        # min/max, and only so that switching the rule off still shows an image.
+        self.img.setImage(self.em.images[frame], autoLevels=fresh and levels is None)
+        if levels is not None:
+            self.hist.setLevels(min=levels[0], max=levels[1])
+        self._levelled_frame = key
 
     def show_spectrum(self):
         """Show the current frame spectrum in counts and calibrated"""
         frame = int(self.frame.value())
-        self.spec_counts.setData(
-            x=self.spectra.wavelength, y=self.spectra.counts[frame]
-        )
+        counts = self.spectra.counts[frame]
+        self.spec_counts.setData(x=self.spectra.wavelength, y=counts)
 
         # show calibrated spectrum
         # str() - for PyQt4, to convert QString into py string
@@ -935,8 +986,16 @@ class EchelleSpectraGUI(QMainWindow, window_layout.Ui_MainWindow):
             "left",
             text=f'<font color = "#d62300" size="6">{self.spec_labels[units]}</font>',
         )
-        self.spec_wm.setData(
-            x=self.spectra.wavelength, y=self.spectra.spectra_to_save[units][frame]
+        calibrated = self.spectra.spectra_to_save[units][frame]
+        self.spec_wm.setData(x=self.spectra.wavelength, y=calibrated)
+        # The overlay ranks its labels on the trace that is actually on screen,
+        # so a NIST-weak line sitting on a bright blob is named before a
+        # NIST-strong line sitting on nothing.
+        self.line_overlays.set_measured_spectrum(
+            "counts", self.spectra.wavelength, counts
+        )
+        self.line_overlays.set_measured_spectrum(
+            "calibrated", self.spectra.wavelength, calibrated
         )
         self.line_overlays.refresh()
 

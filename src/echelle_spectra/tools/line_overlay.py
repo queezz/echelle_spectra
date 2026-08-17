@@ -3,17 +3,26 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Mapping
+from typing import Mapping, Sequence
 
+import numpy as np
 import pyqtgraph as pg
 
-from .line_catalog import LINE_FAMILIES, SpectralLine, load_line_table
+from .line_catalog import (
+    LAMP_LINE_FAMILIES,
+    LINE_FAMILIES,
+    SpectralLine,
+    load_line_table,
+)
 
 __all__ = [
+    "LABEL_PEAK_WINDOW_NM",
     "LINE_OVERLAY_STYLES",
     "SPECTRUM_CURVE_COLORS",
     "LineOverlayManager",
     "OverlayStyle",
+    "choose_label_lines",
+    "measured_peak_height",
     "select_overlay_lines",
 ]
 
@@ -91,9 +100,17 @@ def _atomic_strength_threshold(width_nm: float) -> float:
     return 0.08
 
 
-def _evenly_spaced(lines: list[SpectralLine], count: int) -> list[SpectralLine]:
+#: How far either side of a catalog wavelength the measured spectrum is read
+#: when ranking which stick earns a label.  A line on this instrument is a few
+#: hundredths of a nanometre wide in the stitched spectrum, and the wavelength
+#: solution is not perfect, so the window has to be wider than the line and
+#: narrower than the gap to its neighbour.
+LABEL_PEAK_WINDOW_NM = 0.06
+
+
+def _evenly_spaced(lines: Sequence[SpectralLine], count: int) -> list[SpectralLine]:
     if count <= 1:
-        return lines[:1]
+        return list(lines[:1])
     last = len(lines) - 1
     indices = {round(index * last / (count - 1)) for index in range(count)}
     return [lines[index] for index in sorted(indices)]
@@ -106,11 +123,21 @@ def select_overlay_lines(
     *,
     max_labels: int = 14,
 ) -> tuple[SpectralLine, ...]:
-    """Choose legible labels for the current horizontal view.
+    """Choose which catalog rows earn a marker in the current view.
 
-    Atomic tables reveal progressively weaker cached NIST rows as the user
-    zooms.  Dense equal-weight molecular tables are sampled across a broad view
-    and become complete in a narrow view.
+    For the lamp families the answer is a **union**: the cached NIST rows
+    strong enough for a view this wide, *plus* every row the curated wavelength
+    table vouches for.  A curated row is a line somebody found on this
+    instrument, fitted, and signed for, so it never loses a selection contest
+    to a database strength number — which is what used to happen to Ne I
+    667.83 and 671.70, genuinely weak in NIST and unmissable in a real neon
+    lamp.  Zooming still reveals progressively weaker *uncurated* rows.
+
+    Dense equal-weight molecular tables carry no strength and no curation, so
+    they are sampled down to ``max_labels`` across a broad view and become
+    complete in a narrow one.  ``max_labels`` bounds only that sampling; the
+    lamp union is bounded by the tables themselves, and how many of the
+    resulting sticks can carry text is :func:`choose_label_lines`' question.
     """
 
     if max_labels < 1:
@@ -122,27 +149,88 @@ def select_overlay_lines(
         for line in load_line_table(family)
         if low <= line.wavelength_nm <= high
     ]
-    if family in {"thar", "ne", "hg"}:
+    if family in LAMP_LINE_FAMILIES:
         threshold = _atomic_strength_threshold(width)
-        in_view = [
+        return tuple(
             line
             for line in in_view
-            if line.relative_intensity is not None
-            and line.relative_intensity >= threshold
-        ]
+            if line.curated
+            or (
+                line.relative_intensity is not None
+                and line.relative_intensity >= threshold
+            )
+        )
     if len(in_view) <= max_labels:
         return tuple(in_view)
-    if any(line.relative_intensity is not None for line in in_view):
-        strongest = sorted(
-            in_view,
+    return tuple(_evenly_spaced(in_view, max_labels))
+
+
+def measured_peak_height(spectrum, wavelength_nm: float) -> float | None:
+    """The tallest measured sample within a window of one catalog wavelength.
+
+    ``spectrum`` is an ``(wavelengths, values)`` pair as plotted, ascending in
+    wavelength.  Returns ``None`` when the view's data says nothing there —
+    a wavelength off the end of the spectrum, or an all-NaN window.
+    """
+
+    if spectrum is None:
+        return None
+    wavelengths, values = spectrum
+    if wavelengths.size == 0:
+        return None
+    first = int(np.searchsorted(wavelengths, wavelength_nm - LABEL_PEAK_WINDOW_NM))
+    last = int(np.searchsorted(wavelengths, wavelength_nm + LABEL_PEAK_WINDOW_NM))
+    window = values[first:last]
+    if window.size == 0 or not np.any(np.isfinite(window)):
+        return None
+    return float(np.nanmax(window))
+
+
+def choose_label_lines(
+    lines: Sequence[SpectralLine],
+    limit: int,
+    *,
+    spectrum=None,
+) -> tuple[SpectralLine, ...]:
+    """Pick which of the drawn sticks can carry text without colliding.
+
+    Every selected line keeps its stick; only the text is rationed.  When the
+    displayed spectrum is available the ranking is the **measured** peak beside
+    each line, because the evidence for "this line matters in this frame" is on
+    the screen already — a NIST-weak line sitting on the brightest blob in the
+    view gets named before a NIST-strong line sitting on nothing.  Without a
+    spectrum the cached strength ranks them, and a table with no strength at
+    all is thinned evenly so the labels stay spread across the view.
+    """
+
+    ordered = tuple(lines)
+    if limit < 1:
+        return ()
+    if limit >= len(ordered):
+        return ordered
+    heights = [measured_peak_height(spectrum, line.wavelength_nm) for line in ordered]
+    if any(height is not None for height in heights):
+        ranked = sorted(
+            zip(ordered, heights),
+            key=lambda pair: (
+                -(pair[1] if pair[1] is not None else -np.inf),
+                pair[0].wavelength_nm,
+                pair[0].label,
+            ),
+        )
+        chosen = [line for line, _height in ranked[:limit]]
+    elif any(line.relative_intensity is not None for line in ordered):
+        chosen = sorted(
+            ordered,
             key=lambda line: (
                 -(line.relative_intensity or 0.0),
                 line.wavelength_nm,
                 line.label,
             ),
-        )[:max_labels]
-        return tuple(sorted(strongest, key=lambda line: line.wavelength_nm))
-    return tuple(_evenly_spaced(in_view, max_labels))
+        )[:limit]
+    else:
+        chosen = _evenly_spaced(ordered, limit)
+    return tuple(sorted(chosen, key=lambda line: line.wavelength_nm))
 
 
 class LineOverlayManager:
@@ -155,6 +243,8 @@ class LineOverlayManager:
         self._visible = {family: False for family in LINE_FAMILIES}
         self._items: dict[str, dict[str, list[pg.InfiniteLine]]] = {}
         self._rendered: dict[str, dict[str, tuple[SpectralLine, ...]]] = {}
+        self._labelled: dict[str, dict[str, tuple[SpectralLine, ...]]] = {}
+        self._spectra: dict[str, tuple] = {}
 
     def register_plot(self, name: str, plot, *, labels: bool = True) -> None:
         """Attach a wavelength plot and update it whenever its x range changes."""
@@ -165,8 +255,28 @@ class LineOverlayManager:
         self._labels[name] = labels
         self._items[name] = {family: [] for family in LINE_FAMILIES}
         self._rendered[name] = {family: () for family in LINE_FAMILIES}
+        self._labelled[name] = {family: () for family in LINE_FAMILIES}
         plot.getViewBox().sigXRangeChanged.connect(
             lambda *_args, plot_name=name: self.refresh(plot_name)
+        )
+
+    def set_measured_spectrum(self, plot_name: str, wavelengths, values) -> None:
+        """Hand one plot the trace it is currently showing, for label ranking.
+
+        The overlay never draws this; it reads it to decide which sticks are
+        worth naming when the view is too crowded to name them all.  Pass
+        ``None`` for either array to forget it and fall back to cached
+        strengths.
+        """
+
+        if plot_name not in self._plots:
+            raise ValueError(f"overlay plot {plot_name!r} is not registered")
+        if wavelengths is None or values is None:
+            self._spectra.pop(plot_name, None)
+            return
+        self._spectra[plot_name] = (
+            np.asarray(wavelengths, dtype=float),
+            np.asarray(values, dtype=float),
         )
 
     def set_family_visible(self, family: str, visible: bool) -> None:
@@ -188,6 +298,11 @@ class LineOverlayManager:
 
         return self._rendered[plot_name][family]
 
+    def labelled_lines(self, plot_name: str, family: str) -> tuple[SpectralLine, ...]:
+        """Return the drawn records that also carry text, primarily for QA."""
+
+        return self._labelled[plot_name][family]
+
     def refresh(self, plot_name: str | None = None, *, family: str | None = None) -> None:
         """Rebuild visible markers after data or zoom changes."""
 
@@ -201,6 +316,7 @@ class LineOverlayManager:
                     plot.removeItem(item)
                 self._items[name][key] = []
                 self._rendered[name][key] = ()
+                self._labelled[name][key] = ()
                 if not self._visible[key]:
                     continue
                 table = load_line_table(key)
@@ -210,23 +326,32 @@ class LineOverlayManager:
                 view_width = max(float(high - low), 1e-12)
                 occupied_pixels = float(plot.getViewBox().width()) * family_width / view_width
                 spaced_limit = max(1, int(occupied_pixels / 52.0))
-                selected = select_overlay_lines(
-                    key,
-                    low,
-                    high,
-                    max_labels=min(self.max_labels, spaced_limit),
+                budget = min(self.max_labels, spaced_limit)
+                selected = select_overlay_lines(key, low, high, max_labels=budget)
+                # Every selected line gets a stick; the text is what the view
+                # can run out of room for, and the measured trace decides who
+                # keeps it.
+                labelled = (
+                    choose_label_lines(
+                        selected, budget, spectrum=self._spectra.get(name)
+                    )
+                    if self._labels[name]
+                    else ()
                 )
+                named = {id(line) for line in labelled}
                 style = LINE_OVERLAY_STYLES[key]
                 pen = pg.mkPen(style.color, width=1.2, dash=style.dash)
-                for index, line in enumerate(selected):
-                    label = line.label if self._labels[name] else None
+                stagger = 0
+                for line in selected:
+                    label = line.label if id(line) in named else None
                     label_options = None
                     if label is not None:
                         label_options = {
-                            "position": 0.96 - 0.12 * (index % 3),
+                            "position": 0.96 - 0.12 * (stagger % 3),
                             "color": style.color,
                             "fill": (0, 0, 0, 155),
                         }
+                        stagger += 1
                     item = pg.InfiniteLine(
                         pos=line.wavelength_nm,
                         angle=90,
@@ -239,3 +364,4 @@ class LineOverlayManager:
                     plot.addItem(item, ignoreBounds=True)
                     self._items[name][key].append(item)
                 self._rendered[name][key] = selected
+                self._labelled[name][key] = labelled

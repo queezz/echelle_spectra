@@ -5,7 +5,11 @@ from __future__ import annotations
 import pytest
 
 from echelle_spectra import load_line_table
-from echelle_spectra.tools.line_catalog import LINE_FAMILIES, filter_line_table
+from echelle_spectra.tools.line_catalog import (
+    CURATED_LINE_TABLE,
+    LINE_FAMILIES,
+    filter_line_table,
+)
 
 
 def test_all_shared_line_families_load_in_wavelength_order():
@@ -54,9 +58,15 @@ def test_atomic_tables_map_cached_nist_rows_without_duplicates(family, species):
     lines = load_line_table(family)
     assert {line.species for line in lines} == species
     assert len({(line.species, line.wavelength_nm) for line in lines}) == len(lines)
-    assert all(line.source_name == "NIST Atomic Spectra Database (ASD)" for line in lines)
-    assert all(line.source_resource.endswith(".csv") for line in lines)
-    assert all(line.relative_intensity is not None for line in lines)
+    # Every row is a cached NIST export except the handful the curated table
+    # names and the cache has no counterpart for; those carry the curated
+    # table's own provenance and no invented strength.
+    cached = [line for line in lines if line.relative_intensity is not None]
+    curated_only = [line for line in lines if line.relative_intensity is None]
+    assert all(line.source_name == "NIST Atomic Spectra Database (ASD)" for line in cached)
+    assert all(line.source_resource.endswith(".csv") for line in cached)
+    assert all(line.curated for line in curated_only)
+    assert all(CURATED_LINE_TABLE in line.source_reference for line in curated_only)
 
 
 def test_filter_line_table_keeps_full_records():
@@ -74,16 +84,21 @@ def test_filter_line_table_keeps_full_records():
 def test_every_lamp_row_across_the_instrument_carries_a_strength():
     """The annotation has to reach every row, not only the ones in one window.
 
-    Selection filters on ``relative_intensity``, so a row without one is a row
-    that cannot be drawn — which is how Ne I 640.2248, the brightest line on
-    the owner's frame, went unmarked while sitting two nanometres outside the
-    packaged cache.
+    Selection filters on ``relative_intensity``, so a cached row without one is
+    a row that cannot be drawn — which is how Ne I 640.2248, the brightest line
+    on the owner's frame, went unmarked while sitting two nanometres outside
+    the packaged cache.  A curated row is the one exception, and it is not the
+    same defect: it is drawn on its vetting rather than on a strength, so the
+    field being empty is the honest answer rather than a hole.
     """
 
     for family in ("ne", "hg", "thar"):
         lines = load_line_table(family)
-        assert all(line.relative_intensity is not None for line in lines), family
-        assert all(0.0 < line.relative_intensity <= 1.0 for line in lines), family
+        for line in lines:
+            if line.relative_intensity is None:
+                assert line.curated, (family, line.label)
+                continue
+            assert 0.0 < line.relative_intensity <= 1.0, (family, line.label)
         assert lines[0].wavelength_nm <= 401.0, family
         assert lines[-1].wavelength_nm >= 802.0, family
 
@@ -103,7 +118,7 @@ def test_a_lamp_prefers_its_neutral_lines_to_its_ions():
             species: max(
                 line.relative_intensity
                 for line in lines
-                if line.species == species
+                if line.species == species and line.relative_intensity is not None
             )
             for species in (neutral, ion)
         }

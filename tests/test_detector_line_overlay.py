@@ -27,6 +27,7 @@ from PyQt5 import QtCore, QtWidgets
 
 from echelle_spectra.tools.image_line_overlay import (
     DEFAULT_LINE_WIDTH_PX,
+    CursorLink,
     DetectorGeometry,
     DetectorLineOverlay,
     OrderTraceOverlay,
@@ -401,12 +402,21 @@ def test_unknown_family_is_named_not_ignored(qt_app):
 
 
 def test_dense_lamp_families_stay_bounded(qt_app):
-    """A whole-detector view of ThAr must not spray thousands of items."""
+    """A whole-detector view of ThAr must not spray thousands of items.
+
+    The bound is the strength threshold and the curated table, not ``max_marks``
+    — a lamp family's selection is a union of the two and a curated row is
+    never dropped to fit a cap.  The 11 000-row ThAr table has to come out in
+    the hundreds, and it all still costs two pooled items.
+    """
 
     widget = pg.PlotWidget()
     overlay = DetectorLineOverlay(widget.getPlotItem(), max_marks=25)
     overlay.set_geometry(_geometry())
-    assert 0 < overlay.set_family_visible("thar", True) <= 25
+    drawn = overlay.set_family_visible("thar", True)
+    assert 0 < drawn <= 400
+    assert len([item for item in (overlay.item("thar"), overlay.duplicate_item("thar"))
+                if item is not None]) <= 2
     widget.close()
 
 
@@ -649,3 +659,158 @@ def test_every_box_for_an_excited_line_contains_its_blobs_centroid():
             mark = placed[0]
             assert abs(mark.column - column) <= mark.half_width
             assert abs(mark.row - row) <= mark.half_height
+
+
+# ------------------------------------------------------------ cursor link ---
+#
+# The owner's second field request: "can we also add a 2D to 1D cursor link,
+# toggleable?"  Same geometry, read at the pointer instead of at a catalog row.
+
+
+def _cursor_link(readout=None, spectra=None):
+    """A link over three throwaway plots, with the synthetic geometry loaded."""
+
+    image = pg.PlotWidget()
+    counts = pg.PlotWidget()
+    calibrated = pg.PlotWidget()
+    plots = {
+        "counts": counts.getPlotItem(),
+        "calibrated": calibrated.getPlotItem(),
+    }
+    link = CursorLink(image.getPlotItem(), plots, readout=readout)
+    link.set_geometry(_geometry(spectra))
+    # The widgets are returned only so the caller can keep them alive; a
+    # PlotWidget collected mid-test takes its ViewBox with it.
+    return link, (image, counts, calibrated)
+
+
+def test_the_cursor_link_is_off_by_default_and_connects_nothing(qt_app):
+    """Mouse moves are the highest-rate event in the window: off must be free."""
+
+    link, widgets = _cursor_link()
+
+    assert link.is_enabled is False
+    assert link.proxy_count() == 0
+    assert link.image_marker() is None
+    assert link.spectrum_marker("counts") is None
+    assert link.label == ""
+    # And a move that arrives anyway maps nothing while it is off.
+    assert link.show_for_image_point(20.0, 32.0) is None
+
+    for widget in widgets:
+        widget.close()
+
+
+def test_the_cursor_link_maps_a_detector_point_to_its_order_and_wavelength(qt_app):
+    """Column 20 of order 0 is 690 nm, and the band is the box's own band.
+
+    The same inversion the marks use, read the other way: order 0 starts at
+    700 nm and falls half a nanometre per column, so twenty columns in is
+    690 nm, and the trace sits at row 32 there.
+    """
+
+    said = []
+    link, widgets = _cursor_link(readout=said.append)
+    link.set_enabled(True)
+
+    assert link.proxy_count() >= 1
+    assert link.show_for_image_point(20.0, 32.0) == (21, pytest.approx(690.0))
+    assert link.label == "order 21 · 690.00 nm"
+    assert said[-1] == "order 21 · 690.00 nm"
+
+    marker = link.spectrum_marker("calibrated")
+    assert marker is not None
+    assert marker.isVisible()
+    assert marker.value() == pytest.approx(690.0)
+    # The pointer is already on the image, so nothing is drawn under it there.
+    assert link.image_marker() is None or not link.image_marker().isVisible()
+
+    # Anywhere inside the band names the same order; the band reaches the
+    # gutter, not merely the extraction half-width.
+    assert link.show_for_image_point(20.0, 32.0 + BAND_HALF_HEIGHT - 0.5)[0] == 21
+
+    for widget in widgets:
+        widget.close()
+
+
+def test_a_cursor_outside_every_order_band_marks_nothing(qt_app):
+    """Below the lowest trace there is no order, and no answer is the answer."""
+
+    said = []
+    link, widgets = _cursor_link(readout=said.append)
+    link.set_enabled(True)
+    assert link.show_for_image_point(20.0, 32.0) is not None
+
+    assert link.show_for_image_point(20.0, 0.0) is None
+    assert not link.spectrum_marker("calibrated").isVisible()
+    assert not link.spectrum_marker("counts").isVisible()
+    assert link.label == ""
+    assert said[-1] == ""
+
+    # Off the end of the sensor is the same answer.
+    assert link.show_for_image_point(-4.0, 32.0) is None
+
+    for widget in widgets:
+        widget.close()
+
+
+def test_hovering_a_spectrum_marks_where_the_stitch_read_it(qt_app):
+    """The reverse link takes the order the stitched spectrum actually reads.
+
+    690 nm is carried only by order 0 here; 555 nm sits in the 0/1 overlap and
+    the border mask decides, so the mark follows the mask rather than the first
+    order that happens to reach.
+    """
+
+    columns = np.arange(COLUMNS)
+    borders = np.array(
+        [columns <= 250, np.ones(COLUMNS, dtype=bool), np.ones(COLUMNS, dtype=bool)]
+    )
+    link, widgets = _cursor_link(spectra=borders)
+    link.set_enabled(True)
+
+    order, column, row = link.show_for_wavelength(690.0)
+    assert (order, column) == (21, pytest.approx(20.0))
+    assert row == pytest.approx(32.0)
+    marker = link.image_marker()
+    assert marker is not None and marker.isVisible()
+    x, y = marker.getData()
+    assert x[0] == pytest.approx(20.5 - 16.0)
+    assert y[2] == pytest.approx(32.5 - 16.0)
+
+    # 555 nm is on both order 0 and order 1; the mask gives it to order 1.
+    order, _column, _row = link.show_for_wavelength(555.0)
+    assert order == 22
+
+    # A wavelength no order carries takes both marks down.
+    assert link.show_for_wavelength(200.0) is None
+    assert not link.image_marker().isVisible()
+
+    for widget in widgets:
+        widget.close()
+
+
+def test_switching_the_cursor_link_off_disconnects_and_hides(qt_app):
+    """Off again is off again: no proxies left, no marks left, nothing said."""
+
+    said = []
+    link, widgets = _cursor_link(readout=said.append)
+    link.set_enabled(True)
+    link.show_for_image_point(20.0, 32.0)
+    assert link.spectrum_marker("calibrated").isVisible()
+
+    link.set_enabled(False)
+
+    assert link.is_enabled is False
+    assert link.proxy_count() == 0
+    assert not link.spectrum_marker("calibrated").isVisible()
+    assert link.label == ""
+    assert said[-1] == ""
+    # The pooled items are kept, so switching it on again allocates nothing.
+    before = link.spectrum_marker("calibrated")
+    link.set_enabled(True)
+    link.show_for_image_point(20.0, 32.0)
+    assert link.spectrum_marker("calibrated") is before
+
+    for widget in widgets:
+        widget.close()

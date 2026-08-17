@@ -553,3 +553,94 @@ def test_failed_load_clears_the_detector_marks(qt_app, window):
     assert window.order_trace_overlay.geometry is None
     assert window.order_trace_overlay.order_count() == 0
     assert not window.order_trace_overlay.item().isVisible()
+
+
+def test_the_cursor_link_starts_off_and_costs_nothing_until_switched_on(
+    qt_app, window
+):
+    """Mouse moves over the image are the fastest event the window sees.
+
+    So the link connects nothing at all until it is asked for, and switching it
+    off again takes the connection back down rather than leaving a slot on the
+    scene doing nothing.
+    """
+
+    _settle_calibrations(qt_app, window)
+    spy = LoadSpy(window)
+    _load(qt_app, window, "5011_cmos.SIF", spy, attempts=1)
+
+    link = window.cursor_link
+    assert not window.cursor_link_check.isChecked()
+    assert link.is_enabled is False
+    assert link.proxy_count() == 0
+    assert link.geometry is not None
+
+    window.cursor_link_check.setChecked(True)
+    assert link.is_enabled is True
+    assert link.proxy_count() >= 1
+    assert "Cursor link on" in window.statusBar().currentMessage()
+
+    # The loaded calibration answers for a point on the reddest order's trace.
+    pattern = _order_centers(CMOS_SHAPE)
+    column = 100
+    reported = link.show_for_image_point(float(column), float(pattern[column, 0]))
+    assert reported is not None
+    order, wavelength = reported
+    assert order == ORDER_IDS[0]
+    assert wavelength == pytest.approx(
+        _order_wavelengths(CMOS_SHAPE[0])[0][column], abs=0.05
+    )
+    assert window.statusBar().currentMessage() == f"order {order} · {wavelength:.2f} nm"
+    assert link.spectrum_marker("calibrated").isVisible()
+
+    window.cursor_link_check.setChecked(False)
+    assert link.proxy_count() == 0
+    assert not link.spectrum_marker("calibrated").isVisible()
+    assert "Cursor link off" in window.statusBar().currentMessage()
+
+
+def test_a_hand_set_display_level_survives_a_redraw_of_the_same_frame(
+    qt_app, window, monkeypatch
+):
+    """The rule sets the levels; it never holds them.
+
+    Auto-levelling runs when the displayed frame changes and at no other time,
+    so an operator who has dragged the histogram keeps his choice through every
+    other redraw of that frame.  What the levels *are* is pinned on real data
+    in ``test_detector_display``; what is pinned here is that the viewer asks
+    for them exactly once per frame.
+    """
+
+    asked = []
+
+    def levels(image, **kwargs):
+        asked.append(np.asarray(image).shape)
+        return 7.0, 42.0
+
+    monkeypatch.setattr(gui, "auto_display_levels", levels)
+
+    _settle_calibrations(qt_app, window)
+    spy = LoadSpy(window)
+    _load(qt_app, window, "5012_cmos.SIF", spy, attempts=1)
+
+    assert len(asked) == 1
+    assert window.hist.getLevels() == pytest.approx((7.0, 42.0))
+
+    window.hist.setLevels(min=5.0, max=17.0)
+    window.show_image_frame()
+    assert len(asked) == 1, "the same frame was levelled twice"
+    assert window.hist.getLevels() == pytest.approx((5.0, 17.0))
+
+    # A genuinely new frame is levelled again.
+    window._levelled_frame = None
+    window.show_image_frame()
+    assert len(asked) == 2
+    assert window.hist.getLevels() == pytest.approx((7.0, 42.0))
+
+    # And the checkbox still decides whether the rule runs at all; with it off
+    # a new frame falls back to pyqtgraph's own min/max, as it always did.
+    window.check_autoscale.setChecked(False)
+    window._levelled_frame = None
+    window.show_image_frame()
+    assert len(asked) == 2
+    assert window.hist.getLevels() != pytest.approx((7.0, 42.0))

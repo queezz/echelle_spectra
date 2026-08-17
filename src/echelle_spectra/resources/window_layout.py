@@ -84,7 +84,13 @@ class Ui_MainWindow(object):
         self.last_shot_btn = QtWidgets.QPushButton("Select last")
         self.last_shot_btn.setToolTip("Select last shot from data folder")
         self.check_autoscale = QtWidgets.QCheckBox("Autoscale")
-        msg = "Autoscale spectrum when hovering over image with Ctrl depressed"
+        msg = (
+            "Set the detector image's display levels for each newly shown frame:\n"
+            "black at the background floor, white at the 99.9th percentile, so\n"
+            "the strong lamp lines clip and the faint ones stay visible.\n"
+            "Dragging the histogram afterwards is never overridden until the\n"
+            "displayed frame changes"
+        )
         self.check_autoscale.setToolTip(msg)
         self.check_autoscale.setChecked(True)
 
@@ -186,7 +192,21 @@ class Ui_MainWindow(object):
             "Draw the loaded calibration's order pattern over the detector\n"
             "image, one trace per diffraction order, as on the calibration bench"
         )
-        self.w3.addWidget(self.order_trace_check, 16, 0, 1, 2)
+        self.w3.addWidget(self.order_trace_check, 16, 0)
+
+        # The same calibration read forwards: not "where is this line" but
+        # "what is under my pointer".  Off by default, and off costs nothing —
+        # nothing is connected to the scene until it is switched on.
+        self.cursor_link_check = QtWidgets.QCheckBox("Cursor link")
+        self.cursor_link_check.setObjectName("overlay_cursor_link")
+        self.cursor_link_check.setToolTip(
+            "Link the pointer between the detector image and the spectra:\n"
+            "hovering the image marks the corresponding wavelength on the\n"
+            "spectrum plots, hovering a spectrum marks where the stitched\n"
+            "trace read it from the sensor, and the status bar names the\n"
+            "order and wavelength"
+        )
+        self.w3.addWidget(self.cursor_link_check, 16, 1)
 
         self.controls_open = [
             self.btn_open,
