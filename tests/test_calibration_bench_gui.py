@@ -3864,3 +3864,106 @@ def test_the_transform_line_shows_all_three_numbers_on_one_line(tmp_path):
     assert text.endswith("°")
     assert text.count(",") == 2
     assert not window.transform_value.wordWrap()
+
+
+# ---------------------------------------------------------------------------
+# The pattern the sphere does not fit, on screen.
+#
+# The bench cannot see a vertical detector shift through its fit — anchor rows
+# come out of the reference pattern — so the sphere's own band centres are the
+# only place it can be read.  The reading is said beside the factor curves it
+# belongs to, and again on the save panel, where it cannot stop the press.
+# ---------------------------------------------------------------------------
+
+_BAND_ORDER_ROWS = (40.0, 100.0, 160.0, 220.0)
+_BAND_COLUMNS = 640
+_BAND_ROWS = 260
+
+
+def _band_traces(shift_rows: float = 0.0) -> np.ndarray:
+    columns = np.arange(_BAND_COLUMNS, dtype=float)
+    return np.column_stack(
+        [row + 0.01 * columns + shift_rows for row in _BAND_ORDER_ROWS]
+    )
+
+
+def _sphere_bands(path: Path, shift_rows: float) -> BenchFrame:
+    rows = np.arange(_BAND_ROWS, dtype=float)[:, None]
+    traces = _band_traces(shift_rows)
+    image = np.full((_BAND_ROWS, _BAND_COLUMNS), 40.0)
+    for order_idx in range(traces.shape[1]):
+        image = image + 20000.0 * np.exp(
+            -0.5 * ((rows - traces[:, order_idx][None, :]) / 5.0) ** 2
+        )
+    spectra = tuple(
+        image[int(round(traces[0, order_idx])), :].copy()
+        for order_idx in range(traces.shape[1])
+    )
+    return BenchFrame(
+        Path(path), image[np.newaxis, :, :], image, spectra, {"ExposureTime": 0.1}
+    )
+
+
+def _bench_on_a_sphere(tmp_path: Path, shift_rows: float):
+    """A bench whose campaign holds a real pattern and an opened sphere."""
+
+    window = _manual_window(tmp_path)
+    pattern_path = tmp_path / "pattern_bands.txt"
+    np.savetxt(pattern_path, np.rint(_band_traces()).astype(int), fmt="%d")
+    window.campaign = CalibrationCampaignSession(
+        pattern_source=pattern_path,
+        wavelength_source=tmp_path / "wavelength.txt",
+        integral_source=tmp_path / "integral.txt",
+    )
+    sphere = tmp_path / "sphere-0.1s-x3.sif"
+    sphere.write_bytes(b"sphere\n")
+    frame = _sphere_bands(sphere, shift_rows)
+    window.campaign.record_frame(frame)
+    window.campaign.classify_file(sphere, MeasurementRole.SPHERE)
+    window.refresh_campaign()
+    return window
+
+
+def test_the_sphere_view_says_when_the_pattern_does_not_fit(qt_app, tmp_path: Path):
+    window = _bench_on_a_sphere(tmp_path, 3.5)
+
+    message = window.sphere_view_message.text()
+    assert "PATTERN DOES NOT FIT" in message
+    assert "rows above the chosen pattern" in message
+    assert "echelle-pattern" in message
+
+
+def test_a_fitting_pattern_is_reported_beside_the_factors_without_alarm(
+    qt_app, tmp_path: Path
+):
+    window = _bench_on_a_sphere(tmp_path, 0.0)
+
+    message = window.sphere_view_message.text()
+    assert "PATTERN DOES NOT FIT" not in message
+    assert "rder bands sit" in message
+
+
+def test_the_save_press_is_warned_about_and_still_goes_through(qt_app, tmp_path: Path):
+    """Loud, and never a refusal: the press still starts the save it asked for."""
+
+    window = _bench_on_a_sphere(tmp_path, 3.5)
+    started = []
+    window._start_campaign_task = lambda operation: started.append(operation)
+
+    window._save_snapshot()
+
+    assert started, "the warning must not swallow the press"
+    said = window.save_message_value.text()
+    assert "PATTERN DOES NOT FIT THIS SPHERE" in said
+    assert "Saving anyway" in said
+    assert "recorded in the snapshot manifest" in said
+
+
+def test_a_fitting_pattern_says_nothing_at_the_save_press(qt_app, tmp_path: Path):
+    window = _bench_on_a_sphere(tmp_path, 0.0)
+    window._start_campaign_task = lambda operation: None
+    window.save_message_value.setText("")
+
+    window._save_snapshot()
+
+    assert window.save_message_value.text() == ""

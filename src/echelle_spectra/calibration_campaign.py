@@ -33,7 +33,14 @@ try:  # pragma: no cover - selected by the running Python version
 except ModuleNotFoundError:  # pragma: no cover - Python 3.9/3.10
     import tomli as tomllib
 
-from .calibration_bench import AlignmentState, BenchFrame, CalibrationBenchSession
+from .calibration_bench import (
+    BAND_OFFSET_ATTENTION_ROWS,
+    AlignmentState,
+    BandCenterOffsets,
+    BenchFrame,
+    CalibrationBenchSession,
+    band_center_offsets,
+)
 from .snapshot import (
     Snapshot,
     SnapshotError,
@@ -57,10 +64,12 @@ from .tools.line_catalog import LINE_FAMILY_LABELS, SpectralLine, load_line_tabl
 
 __all__ = [
     "ALIGNMENT_SETTINGS_FILENAME",
+    "BAND_OFFSET_ATTENTION_ROWS",
     "KNOWN_LAMP_NAMES",
     "LAMP_TABLE_SPECIES",
     "PREVIOUS_CAMPAIGN_LAMPS",
     "AbsoluteCalibrationResult",
+    "BandCenterOffsets",
     "CalibrationCampaignSession",
     "CatalogOrderLine",
     "ChecklistItem",
@@ -376,6 +385,11 @@ class LoadedFrameRecord:
     triage: ExposureTriage
     exposure: ExposureGuidance
     suggestion: FileRoleSuggestion
+    #: Where this frame's order bands sit against the campaign's chosen pattern.
+    #: Measured before any role exists, exactly like the triage beside it, and
+    #: read back only for the sphere — the one frame that lights every order.
+    #: ``None`` means the pattern could not be read at all.
+    band_offsets: BandCenterOffsets | None = None
 
 
 @dataclass(frozen=True)
@@ -1490,6 +1504,8 @@ class CalibrationCampaignSession:
         self.previous_sphere_background = (
             Path(previous_sphere_background) if previous_sphere_background else None
         )
+        #: The chosen pattern's rows, read from ``pattern_source`` on first use.
+        self._pattern_cache: np.ndarray | None = None
         self.observed: dict[Path, FileRoleSuggestion] = {}
         self.loaded: dict[Path, LoadedFrameRecord] = {}
         self.measurements: dict[Path, MeasurementRecord] = {}
@@ -1530,9 +1546,83 @@ class CalibrationCampaignSession:
             triage,
             evaluate_exposure(frame, saturation_level=saturation_level),
             suggestion,
+            self._band_offsets(frame, saturation_level=saturation_level),
         )
         self.loaded[record.path] = record
         return record
+
+    def _band_offsets(
+        self, frame: BenchFrame, *, saturation_level: float
+    ) -> BandCenterOffsets | None:
+        """Read this frame's band centres against the campaign's own pattern.
+
+        Taken while the detector image is in hand, because the frame itself is
+        not kept: only its verdicts are.  The pattern is the file this campaign
+        was opened with, which is the pattern the snapshot will be built from
+        and therefore the only one worth checking the light against.
+        """
+
+        pattern = self._pattern_rows()
+        if pattern is None:
+            return None
+        try:
+            return band_center_offsets(
+                frame.detector_image, pattern, saturation_level=saturation_level
+            )
+        except ValueError as exc:  # a frame or pattern this reading cannot use
+            return BandCenterOffsets(reason=str(exc))
+
+    def _pattern_rows(self) -> np.ndarray | None:
+        """The chosen pattern's own rows, read once and remembered."""
+
+        if self._pattern_cache is None:
+            try:
+                rows = np.loadtxt(self.pattern_source, dtype=int)
+            except (OSError, ValueError):
+                return None
+            if rows.ndim != 2 or not rows.size:
+                return None
+            self._pattern_cache = rows
+        return self._pattern_cache
+
+    def sphere_band_offsets(self) -> BandCenterOffsets | None:
+        """Where the assigned sphere frame's bands sit against the pattern.
+
+        ``None`` when no sphere signal carries the role, or when the file that
+        does was never opened on the bench: an unmeasured campaign says so
+        rather than reporting a zero nobody measured.
+        """
+
+        record = self._one(MeasurementRole.SPHERE)
+        if record is None:
+            return None
+        loaded = self.loaded.get(record.path)
+        if loaded is None:
+            return None
+        return loaded.band_offsets
+
+    def pattern_band_warning(
+        self, threshold: float = BAND_OFFSET_ATTENTION_ROWS
+    ) -> str:
+        """Plain words for a chosen pattern that does not fit this sphere.
+
+        Empty whenever the light and the pattern agree, or whenever there is no
+        reading to speak from.  This is the one sentence that would have caught
+        the 2024 folder calibrated against the packaged 2025 pattern, which the
+        fit itself cannot see: anchor rows are read out of the pattern, so a
+        vertical mismatch never reaches the residuals.
+        """
+
+        reading = self.sphere_band_offsets()
+        if reading is None or not reading.exceeds(threshold):
+            return ""
+        return (
+            f"the chosen pattern {self.pattern_source.name} does not fit this "
+            f"sphere's geometry — {reading.summary()}, so every order is "
+            "extracted off the edge of its own band; extract a pattern from this "
+            f"sphere (echelle-pattern with {self.pattern_source.name} as the "
+            "prior) or open the bench on the pattern this era was calibrated with"
+        )
 
     def forget_file(self, path: str | Path) -> bool:
         """Drop one loaded file and any role it carried."""
@@ -2040,19 +2130,7 @@ class CalibrationCampaignSession:
                     "carry no role yet"
                 )
         return (
-            ChecklistItem(
-                "references",
-                "Pattern, wavelength, and sphere reference",
-                ChecklistState.DONE if references_ready else ChecklistState.ATTENTION,
-                "loaded" if references_ready else "one or more reference files are missing",
-                unblocked_by=""
-                if references_ready
-                else (
-                    "these three tables are named when the bench is opened, not "
-                    "picked from the files list: reopen the bench pointing at "
-                    "tables that exist"
-                ),
-            ),
+            self._reference_item(references_ready),
             ChecklistItem(
                 "files",
                 "SIFs loaded and exposure-triaged",
@@ -2061,6 +2139,63 @@ class CalibrationCampaignSession:
                 unblocked_by="" if on_bench else "drop any SIF onto the bench window",
             ),
         )
+
+    def _reference_item(self, references_ready: bool) -> ChecklistItem:
+        """The tables this campaign was opened on, and whether the light fits them.
+
+        Existing on disk was never the whole question.  A pattern from the
+        wrong era is present, readable, and wrong — and the fit cannot tell,
+        because it reads its detector rows out of that very pattern.  So the
+        row that names the pattern is also the row that reports what the sphere
+        says about it.
+        """
+
+        if not references_ready:
+            return ChecklistItem(
+                "references",
+                "Pattern, wavelength, and sphere reference",
+                ChecklistState.ATTENTION,
+                "one or more reference files are missing",
+                unblocked_by=(
+                    "these three tables are named when the bench is opened, not "
+                    "picked from the files list: reopen the bench pointing at "
+                    "tables that exist"
+                ),
+            )
+        warning = self.pattern_band_warning()
+        if warning:
+            return ChecklistItem(
+                "references",
+                "Pattern, wavelength, and sphere reference",
+                ChecklistState.ATTENTION,
+                warning,
+                unblocked_by=(
+                    f"run echelle-pattern on {self._sphere_name()} with "
+                    f"{self.pattern_source.name} as the prior and reopen the bench "
+                    "on the pattern it writes, or reopen it on the pattern this "
+                    "era was calibrated with — saving is still allowed, and the "
+                    "measured offset is written into the snapshot either way"
+                ),
+            )
+        reading = self.sphere_band_offsets()
+        detail = "loaded"
+        if reading is not None and reading.measured:
+            # Below the threshold this is a quiet reading, not an alarm: it
+            # belongs in the record and on the row that owns the pattern, and
+            # nowhere else.
+            detail = f"loaded; {reading.summary()}"
+        return ChecklistItem(
+            "references",
+            "Pattern, wavelength, and sphere reference",
+            ChecklistState.DONE,
+            detail,
+        )
+
+    def _sphere_name(self) -> str:
+        """The assigned sphere signal's filename, for advice that names it."""
+
+        record = self._one(MeasurementRole.SPHERE)
+        return record.path.name if record is not None else "the sphere frame"
 
     def _sphere_items(self) -> tuple[ChecklistItem, ...]:
         items = []
@@ -2444,6 +2579,10 @@ class CalibrationCampaignSession:
                     f"factor_sample_count = {self.comparison.sample_count}",
                 ]
             )
+        # Where the sphere's own bands sat against the pattern this campaign
+        # chose.  Written whether it is comfortable or not: a later reader
+        # deciding how much to trust these factors is reading for exactly this.
+        campaign_lines.extend(self._band_offset_lines())
         for record in (sphere, sphere_background, *lamp_records):
             campaign_lines.extend(
                 [
@@ -2559,6 +2698,48 @@ class CalibrationCampaignSession:
             "alignment": "\n".join(alignment_lines) + "\n",
             "export": "\n".join(export_lines) + "\n",
         }
+
+    def _band_offset_lines(self) -> list[str]:
+        """The sphere-against-pattern reading, in TOML, absence included."""
+
+        reading = self.sphere_band_offsets()
+        if reading is None:
+            return [
+                "pattern_band_offset_note = "
+                + _toml_string(
+                    "the sphere frame was never opened on the bench, so its band "
+                    "centres were not measured against this pattern"
+                )
+            ]
+        lines = [f"pattern_band_offset_note = {_toml_string(reading.summary())}"]
+        if reading.measured:
+            lines.insert(
+                0, f"pattern_band_offset_rows = {reading.median_offset_rows:.12g}"
+            )
+            lines.insert(1, f"pattern_band_offset_orders = {reading.order_count}")
+        return lines
+
+    def _band_offset_record(self) -> dict[str, object]:
+        """The same reading, shaped for the snapshot manifest.
+
+        Present in every snapshot this bench writes, in comfort and out of it.
+        A number that only appears when it is small tells a later reader
+        nothing about the snapshots where it was large.
+        """
+
+        reading = self.sphere_band_offsets()
+        if reading is None:
+            return {
+                "pattern_band_offset_note": (
+                    "the sphere frame was never opened on the bench, so its band "
+                    "centres were not measured against this pattern"
+                )
+            }
+        record: dict[str, object] = {"pattern_band_offset_note": reading.summary()}
+        if reading.measured:
+            record["pattern_band_offset_rows"] = float(reading.median_offset_rows)
+            record["pattern_band_offset_orders"] = reading.order_count
+        return record
 
     def write_tomls(
         self,
@@ -2881,6 +3062,7 @@ class CalibrationCampaignSession:
                     "wavelength_max_shift_px": correction.max_shift_px,
                     "pattern_correction_applied": pattern_correction.applied,
                     "pattern_max_shift_px": pattern_correction.max_shift_px,
+                    **self._band_offset_record(),
                     **self._vetting_record(),
                     **self._validation_record(alignment),
                 },

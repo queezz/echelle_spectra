@@ -16,6 +16,7 @@ from echelle_spectra.calibration_bench import (
     FrameLoader,
     StableFileState,
     StableSifWatcher,
+    band_center_offsets,
 )
 from echelle_spectra.tools.calibration_alignment import (
     CalibrationTableLine,
@@ -614,3 +615,210 @@ def test_a_click_beyond_the_match_radius_of_the_corrected_row_is_refused(tmp_pat
 
     assert not refused.accepted
     assert "not near a known calibration row" in refused.reason
+
+
+# ---------------------------------------------------------------------------
+# The vertical blind spot: a wrong pattern SOURCE.
+#
+# Every anchor this bench fits is a dispersion measurement — the centroid
+# supplies the column and the detector row that goes with it is read out of the
+# reference pattern, never off the frame — so a pattern belonging to another era
+# passes the fit, the residuals and the save without a mark.  The owner's 2024
+# folder calibrated against the packaged 2025 pattern is exactly that, and its
+# snapshot saved green.  The sphere frame is the one frame that lights every
+# order, so it is the one frame that can answer the question the fit cannot ask.
+# ---------------------------------------------------------------------------
+
+_SPHERE_COLUMNS = 640
+_SPHERE_ROWS = 260
+#: Four order bands, sixty rows apart, sloping the way real traces do.
+_SPHERE_ORDER_ROWS = (40.0, 100.0, 160.0, 220.0)
+_SPHERE_SLOPE = 0.01
+#: Wider than the extraction half width, as a real order band is.
+_SPHERE_BAND_SIGMA = 5.0
+_SPHERE_LEVEL = 20000.0
+_SPHERE_FLOOR = 40.0
+
+
+def _sphere_traces(shift_rows: float = 0.0) -> np.ndarray:
+    columns = np.arange(_SPHERE_COLUMNS, dtype=float)
+    return np.column_stack(
+        [row + _SPHERE_SLOPE * columns + shift_rows for row in _SPHERE_ORDER_ROWS]
+    )
+
+
+def _sphere_pattern(shift_rows: float = 0.0) -> np.ndarray:
+    """The integer pattern file, as one is really written."""
+
+    return np.rint(_sphere_traces(shift_rows)).astype(int)
+
+
+def _sphere_image(
+    shift_rows: float = 0.0, *, dark_orders: tuple[int, ...] = ()
+) -> np.ndarray:
+    """A continuum frame whose bands sit *shift_rows* off the base pattern."""
+
+    rows = np.arange(_SPHERE_ROWS, dtype=float)[:, None]
+    traces = _sphere_traces(shift_rows)
+    image = np.full((_SPHERE_ROWS, _SPHERE_COLUMNS), _SPHERE_FLOOR)
+    for order_idx in range(traces.shape[1]):
+        if order_idx in dark_orders:
+            continue
+        centers = traces[:, order_idx][None, :]
+        image = image + _SPHERE_LEVEL * np.exp(
+            -0.5 * ((rows - centers) / _SPHERE_BAND_SIGMA) ** 2
+        )
+    return image
+
+
+def test_band_centres_read_the_row_shift_the_fit_cannot_see():
+    """A sphere three and a half rows off its pattern says so, per order."""
+
+    reading = band_center_offsets(_sphere_image(3.5), _sphere_pattern())
+
+    assert reading.measured
+    assert reading.median_offset_rows == pytest.approx(3.5, abs=0.3)
+    assert reading.order_count == len(_SPHERE_ORDER_ROWS)
+    for order in reading.orders:
+        assert order.offset_rows == pytest.approx(3.5, abs=0.3), order
+    assert reading.exceeds()
+    assert "rows above the chosen pattern" in reading.summary()
+    assert "median of 4 order(s)" in reading.summary()
+
+
+def test_a_sphere_below_its_pattern_is_reported_as_below():
+    """The sign is words, not a convention the reader has to look up."""
+
+    reading = band_center_offsets(_sphere_image(-3.5), _sphere_pattern())
+
+    assert reading.median_offset_rows == pytest.approx(-3.5, abs=0.3)
+    assert "rows below the chosen pattern" in reading.summary()
+
+
+def test_a_sphere_on_its_own_pattern_reads_as_no_shift():
+    """The matched era is quiet: near zero, and under the threshold."""
+
+    reading = band_center_offsets(_sphere_image(), _sphere_pattern())
+
+    assert reading.measured
+    assert reading.median_offset_rows == pytest.approx(0.0, abs=0.2)
+    assert not reading.exceeds()
+
+
+def test_a_saturated_band_column_is_left_out_of_the_reading():
+    """Saturation is excluded the way triage counts it: clusters, not spikes."""
+
+    image = _sphere_image(3.5)
+    saturated_columns = range(0, _SPHERE_COLUMNS, 64)
+    for column in saturated_columns:
+        row = int(round(_sphere_traces(3.5)[column, 1]))
+        image[row - 1 : row + 2, column] = 65535.0
+    # One lone full-scale pixel, in an order that keeps every column.
+    image[int(round(_sphere_traces(3.5)[0, 0])), 0] = 65535.0
+
+    reading = band_center_offsets(image, _sphere_pattern())
+
+    saturated = reading.orders[1]
+    assert saturated.offset_rows is None
+    assert saturated.columns_excluded == len(list(saturated_columns))
+    assert reading.columns_excluded == saturated.columns_excluded
+    # The lone spike neither excluded its column nor moved the answer.
+    assert reading.orders[0].columns_excluded == 0
+    assert reading.orders[0].offset_rows == pytest.approx(3.5, abs=0.3)
+    assert reading.median_offset_rows == pytest.approx(3.5, abs=0.3)
+
+
+def test_an_order_carrying_no_light_is_unmeasured_never_zero():
+    """A dark order states its absence and never averages into the median."""
+
+    reading = band_center_offsets(
+        _sphere_image(3.5, dark_orders=(2,)), _sphere_pattern()
+    )
+
+    dark = reading.orders[2]
+    assert dark.offset_rows is None
+    assert "no usable light" in dark.reason
+    assert reading.order_count == len(_SPHERE_ORDER_ROWS) - 1
+    assert reading.median_offset_rows == pytest.approx(3.5, abs=0.3)
+
+
+def test_a_frame_with_no_light_at_all_says_so_instead_of_zero():
+    reading = band_center_offsets(
+        np.full((_SPHERE_ROWS, _SPHERE_COLUMNS), 12.0), _sphere_pattern()
+    )
+
+    assert not reading.measured
+    assert reading.median_offset_rows is None
+    assert "no order carried enough light" in reading.reason
+    assert not reading.exceeds()
+
+
+def test_a_pattern_from_another_detector_is_refused_by_its_own_width():
+    reading = band_center_offsets(_sphere_image(), _sphere_pattern()[:100])
+
+    assert not reading.measured
+    assert "100 column(s) wide" in reading.reason
+    assert f"frame is {_SPHERE_COLUMNS}" in reading.reason
+
+
+def test_a_frame_stack_is_averaged_before_it_is_read():
+    """Three exposures of one acquisition are one reading, as they are shot."""
+
+    stack = np.stack([_sphere_image(3.5)] * 3)
+
+    reading = band_center_offsets(stack, _sphere_pattern())
+
+    assert reading.median_offset_rows == pytest.approx(3.5, abs=0.3)
+
+
+def test_the_reading_window_never_reaches_into_the_neighbouring_order():
+    """Traces closer than the default window shrink it rather than mix orders."""
+
+    columns = np.arange(_SPHERE_COLUMNS, dtype=float)
+    crowded = np.rint(
+        np.column_stack([40 + 0.0 * columns, 58 + 0.0 * columns])
+    ).astype(int)
+    rows = np.arange(_SPHERE_ROWS, dtype=float)[:, None]
+    image = np.full((_SPHERE_ROWS, _SPHERE_COLUMNS), _SPHERE_FLOOR)
+    for center in (43.5, 61.5):
+        image = image + _SPHERE_LEVEL * np.exp(-0.5 * ((rows - center) / 2.0) ** 2)
+
+    reading = band_center_offsets(image, crowded)
+
+    assert reading.measured
+    for order in reading.orders:
+        assert order.offset_rows == pytest.approx(3.5, abs=0.3), order
+
+
+#: The owner's own light, when the working folder travels with the checkout.
+#: The packaged 2025 pattern and the 2025 sphere are the matched era, so this
+#: reading is the one that has to come out near zero — a guard that cried wolf
+#: on the era it was written for would be turned off by the second evening.
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+_LIVE_SPHERE = _REPO_ROOT / "local" / "20250926_calib" / "sphere-0.1s-x3.sif"
+_PACKAGED_2025_PATTERN = (
+    _REPO_ROOT
+    / "src"
+    / "echelle_spectra"
+    / "resources"
+    / "calibration_files"
+    / "pattern_CMOS_20250926.txt"
+)
+
+
+@pytest.mark.skipif(
+    not _LIVE_SPHERE.is_file(), reason="local/20250926_calib is not in this checkout"
+)
+def test_the_2025_sphere_sits_on_the_packaged_2025_pattern():
+    """The matched era reads quiet, through the bench's own reader."""
+
+    pattern = np.loadtxt(_PACKAGED_2025_PATTERN, dtype=int)
+    frame = FrameLoader(pattern)(_LIVE_SPHERE)
+
+    reading = band_center_offsets(frame.detector_image, pattern)
+
+    assert reading.measured
+    assert reading.order_count == pattern.shape[1]
+    # Loosely pinned: this is a measurement of real optics, not a fixture.
+    assert abs(reading.median_offset_rows) < 1.0
+    assert not reading.exceeds()

@@ -2543,3 +2543,195 @@ def test_transform_that_moves_nothing_copies_the_base_pattern_byte_for_byte(tmp_
     assert "moves no trace" in campaign.pattern_correction.reason
     assert snapshot.manifest["alignment"]["pattern_correction_applied"] is False
     assert hashlib.sha256(base.read_bytes()).hexdigest() == base_digest
+
+
+# ---------------------------------------------------------------------------
+# The pattern SOURCE guard.
+#
+# The bench cannot measure a vertical detector shift: anchor rows are read out
+# of the reference pattern and the centroid fit is one-dimensional in x.  So a
+# pattern from the wrong era passes the fit, the residuals and the save in
+# silence — the owner's 2024 folder calibrated against the packaged 2025
+# pattern saved green while every order was extracted off the edge of its own
+# band.  The sphere is the one frame that lights every order, so its own band
+# centres are what the bench holds the chosen pattern against.
+# ---------------------------------------------------------------------------
+
+_BAND_COLUMNS = 640
+_BAND_ROWS = 260
+_BAND_ORDER_ROWS = (40.0, 100.0, 160.0, 220.0)
+_BAND_SLOPE = 0.01
+_BAND_SIGMA = 5.0
+_BAND_LEVEL = 20000.0
+
+
+def _band_traces(shift_rows: float = 0.0) -> np.ndarray:
+    columns = np.arange(_BAND_COLUMNS, dtype=float)
+    return np.column_stack(
+        [row + _BAND_SLOPE * columns + shift_rows for row in _BAND_ORDER_ROWS]
+    )
+
+
+def _band_sources(tmp_path: Path) -> dict[str, Path]:
+    """The shared fixture, with a pattern file that is really a pattern."""
+
+    sources = _curated_sources(tmp_path)
+    np.savetxt(sources["pattern.txt"], np.rint(_band_traces()).astype(int), fmt="%d")
+    return sources
+
+
+def _sphere_frame(path: Path, shift_rows: float) -> BenchFrame:
+    """A continuum frame whose bands sit *shift_rows* off the base pattern."""
+
+    rows = np.arange(_BAND_ROWS, dtype=float)[:, None]
+    traces = _band_traces(shift_rows)
+    image = np.full((_BAND_ROWS, _BAND_COLUMNS), 40.0)
+    for order_idx in range(traces.shape[1]):
+        image = image + _BAND_LEVEL * np.exp(
+            -0.5 * ((rows - traces[:, order_idx][None, :]) / _BAND_SIGMA) ** 2
+        )
+    spectra = tuple(
+        image[int(round(traces[0, order_idx])), :].copy()
+        for order_idx in range(traces.shape[1])
+    )
+    return BenchFrame(
+        Path(path), image[np.newaxis, :, :], image, spectra, {"ExposureTime": 0.1}
+    )
+
+
+def _campaign_with_sphere(
+    tmp_path: Path, shift_rows: float, *, open_the_sphere: bool = True
+):
+    """A campaign whose sphere pair is assigned, and opened unless told not to."""
+
+    sources = _band_sources(tmp_path)
+    campaign = _campaign(tmp_path, sources)
+    frame = _sphere_frame(sources["sphere.sif"], shift_rows)
+    if open_the_sphere:
+        campaign.record_frame(frame)
+    campaign.classify_file(sources["sphere.sif"], MeasurementRole.SPHERE, frame=frame)
+    campaign.classify_file(
+        sources["sphere_bg.sif"], MeasurementRole.SPHERE_BACKGROUND, frame=frame
+    )
+    campaign.classify_file(
+        sources["thar.sif"], MeasurementRole.LAMP, lamp_family="ThAr", frame=frame
+    )
+    campaign.classify_file(
+        sources["thar_bg.sif"],
+        MeasurementRole.LAMP_BACKGROUND,
+        lamp_family="ThAr",
+        frame=frame,
+    )
+    return campaign, sources
+
+
+def _row(checklist, key: str):
+    return next(item for item in checklist if item.key == key)
+
+
+def test_a_pattern_the_sphere_does_not_fit_turns_the_reference_row_amber(tmp_path):
+    """The one row that names the pattern is the row that reports the light."""
+
+    campaign, _sources = _campaign_with_sphere(tmp_path, 3.5)
+    alignment = _aligned_session(tmp_path)
+
+    reading = campaign.sphere_band_offsets()
+    assert reading is not None and reading.measured
+    assert reading.median_offset_rows == pytest.approx(3.5, abs=0.3)
+
+    references = _row(campaign.checklist(alignment), "references")
+    assert references.state is ChecklistState.ATTENTION
+    assert "does not fit this sphere" in references.detail
+    assert "rows above the chosen pattern" in references.detail
+    assert "extracted off the edge of its own band" in references.detail
+    # Plain words about what to do, and no suggestion that saving is barred.
+    assert "echelle-pattern" in references.unblocked_by
+    assert "prior" in references.unblocked_by
+    assert "saving is still allowed" in references.unblocked_by
+
+
+def test_a_sphere_that_fits_its_pattern_is_recorded_without_noise(tmp_path):
+    """Below the threshold the reading is kept, not announced."""
+
+    campaign, _sources = _campaign_with_sphere(tmp_path, 0.0)
+    alignment = _aligned_session(tmp_path)
+
+    assert campaign.pattern_band_warning() == ""
+    references = _row(campaign.checklist(alignment), "references")
+    assert references.state is ChecklistState.DONE
+    assert references.detail.startswith("loaded; order bands sit")
+    assert references.unblocked_by == ""
+
+
+def test_the_snapshot_records_the_band_offset_it_measured(tmp_path):
+    """Warned about, never refused — and the number goes into the record."""
+
+    campaign, sources = _campaign_with_sphere(tmp_path, 3.5)
+    alignment = _aligned_session(tmp_path)
+    campaign.compute_sphere_comparison(_calculator)
+    campaign.write_tomls(tmp_path / "configs", "20250813_cmos", alignment)
+
+    assert campaign.pattern_band_warning()
+    snapshot = campaign.save_snapshot(
+        tmp_path / "calibrations",
+        snapshot_id="20250813_cmos",
+        detector="cmos",
+        alignment=alignment,
+    )
+
+    assert campaign.save_state is SaveState.VALIDATED
+    recorded = snapshot.manifest["alignment"]
+    assert recorded["pattern_band_offset_rows"] == pytest.approx(3.5, abs=0.3)
+    assert recorded["pattern_band_offset_orders"] == len(_BAND_ORDER_ROWS)
+    assert "rows above the chosen pattern" in recorded["pattern_band_offset_note"]
+    campaign_toml = tomllib.loads(
+        (tmp_path / "configs" / "20250813_cmos" / "campaign.toml").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert campaign_toml["pattern_band_offset_rows"] == pytest.approx(3.5, abs=0.3)
+    assert campaign_toml["pattern_band_offset_orders"] == len(_BAND_ORDER_ROWS)
+
+
+def test_a_sphere_nobody_opened_records_no_reading_instead_of_a_zero(tmp_path):
+    """An unmeasured campaign says so; it never reports a shift of zero."""
+
+    campaign, _sources = _campaign_with_sphere(tmp_path, 3.5, open_the_sphere=False)
+    alignment = _aligned_session(tmp_path)
+    campaign.compute_sphere_comparison(_calculator)
+    campaign.write_tomls(tmp_path / "configs", "20250813_cmos", alignment)
+
+    assert campaign.sphere_band_offsets() is None
+    assert campaign.pattern_band_warning() == ""
+    references = _row(campaign.checklist(alignment), "references")
+    assert references.state is ChecklistState.DONE
+    assert references.detail == "loaded"
+
+    snapshot = campaign.save_snapshot(
+        tmp_path / "calibrations",
+        snapshot_id="20250813_cmos",
+        detector="cmos",
+        alignment=alignment,
+    )
+    recorded = snapshot.manifest["alignment"]
+    assert "pattern_band_offset_rows" not in recorded
+    assert "never opened on the bench" in recorded["pattern_band_offset_note"]
+    campaign_toml = tomllib.loads(
+        (tmp_path / "configs" / "20250813_cmos" / "campaign.toml").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert "pattern_band_offset_rows" not in campaign_toml
+    assert "never opened on the bench" in campaign_toml["pattern_band_offset_note"]
+
+
+def test_a_lamp_frame_never_speaks_for_the_pattern(tmp_path):
+    """Only the sphere's reading is read back; a lamp frame's is not consulted."""
+
+    sources = _band_sources(tmp_path)
+    campaign = _campaign(tmp_path, sources)
+    campaign.record_frame(_sphere_frame(sources["thar.sif"], 3.5))
+    campaign.classify_file(sources["thar.sif"], MeasurementRole.LAMP, lamp_family="ThAr")
+
+    assert campaign.sphere_band_offsets() is None
+    assert campaign.pattern_band_warning() == ""

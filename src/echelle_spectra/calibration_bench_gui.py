@@ -3502,6 +3502,17 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
             pattern_correction = getattr(self.campaign, "pattern_correction", None)
             if pattern_correction is not None:
                 detail += f" Saved pattern.txt: {pattern_correction.reason}."
+            # The warning said before the press must survive the press: this
+            # line is the last thing the save panel shows, and a snapshot saved
+            # over a pattern the light does not fit has to say so here too.
+            band_warning = (
+                "" if self.campaign is None else self.campaign.pattern_band_warning()
+            )
+            if band_warning:
+                detail += (
+                    f" PATTERN DOES NOT FIT THIS SPHERE — {band_warning}; the "
+                    "measured offset is in the manifest."
+                )
             # The one place the operator learns where the campaign went.  It
             # says the whole path, because "calibrations" said nothing about
             # which machine's calibrations folder it meant.
@@ -3605,6 +3616,16 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
     def _save_snapshot(self) -> None:
         if self.campaign is None:
             return
+        # Said before the save, not instead of it.  An operator who knows why
+        # this pattern is the right one for this sphere may go ahead; what the
+        # bench owes is that nobody saves this without having been told, and
+        # that the number goes into the manifest whichever way it goes.
+        warning = self.campaign.pattern_band_warning()
+        if warning:
+            self._save_says(
+                f"PATTERN DOES NOT FIT THIS SPHERE — {warning}. Saving anyway: "
+                "the measured offset is recorded in the snapshot manifest."
+            )
         snapshot_id = self.snapshot_id_edit.text().strip()
         detector = self.detector_edit.text().strip()
         base_snapshot = self.base_snapshot_edit.text().strip() or None
@@ -4598,9 +4619,20 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         comparison = self.campaign.comparison
         self._set_factor_curve(self.candidate_curve, comparison.candidate)
         self._set_factor_curve(self.previous_curve, comparison.previous)
-        self.sphere_view_message.setText(
+        message = (
             f"{comparison.state.value.replace('-', ' ').upper()} — {comparison.reason}"
         )
+        # Where this sphere's light actually sits on the chosen pattern, read
+        # beside the factors it produced: the factor curve is computed by
+        # summing each order over that pattern, so a pattern the bands do not
+        # fit is a fact about these very curves.
+        warning = self.campaign.pattern_band_warning()
+        reading = self.campaign.sphere_band_offsets()
+        if warning:
+            message += f"\nPATTERN DOES NOT FIT — {warning}."
+        elif reading is not None and reading.measured:
+            message += f"\n{reading.summary()[0].upper()}{reading.summary()[1:]}."
+        self.sphere_view_message.setText(message)
 
     @staticmethod
     def _set_factor_curve(curve: pg.PlotDataItem, result) -> None:

@@ -36,16 +36,19 @@ from .tools.calibration_alignment import (
 )
 
 __all__ = [
+    "BAND_OFFSET_ATTENTION_ROWS",
     "AlignmentState",
     "Anchor",
     "AnchorFitResult",
     "AutoAnchorRejection",
     "AutoAnchorResult",
+    "BandCenterOffsets",
     "BenchFrame",
     "CalibrationBenchSession",
     "FileFingerprint",
     "FileLoadState",
     "FrameLoader",
+    "OrderBandOffset",
     "Residual",
     "SaturationState",
     "ScienceValidation",
@@ -53,7 +56,14 @@ __all__ = [
     "StableFileResult",
     "StableFileState",
     "StableSifWatcher",
+    "band_center_offsets",
 ]
+
+#: How far the light may sit from the chosen pattern before the bench says so,
+#: in detector rows.  This is well inside the extraction half width, so an
+#: offset under it still sums each order over its own band; past it the trace
+#: is riding the band's shoulder and the extracted flux starts to leave.
+BAND_OFFSET_ATTENTION_ROWS = 1.5
 
 
 class StableFileState(Enum):
@@ -288,6 +298,240 @@ class FrameLoader:
             metadata=dict(image.info),
             frame_order_spectra=tuple(tuple(rows) for rows in per_frame),
         )
+
+
+@dataclass(frozen=True)
+class OrderBandOffset:
+    """Where one order's light sits relative to its pattern trace, in rows."""
+
+    order_idx: int
+    #: Measured centre minus pattern row.  ``None`` when this order could not
+    #: be read at all, and ``reason`` then says why.
+    offset_rows: float | None
+    columns_measured: int = 0
+    #: Columns dropped because their window was saturated or unreadable.
+    columns_excluded: int = 0
+    reason: str = ""
+
+
+@dataclass(frozen=True)
+class BandCenterOffsets:
+    """Where a frame's order bands actually sit against a chosen pattern.
+
+    The bench cannot see this any other way.  An anchor is a *dispersion*
+    measurement — the centroid supplies the column and the detector row that
+    goes with it is read out of the reference pattern, never off the frame — so
+    a pattern belonging to another era passes every check the fit can make while
+    every order is extracted off the edge of its own band.  That is not
+    hypothetical: the 2024 folder calibrated against the packaged 2025 pattern
+    reads about five rows out here, and its snapshot saved green.
+
+    A positive offset means the light sits at a *higher* row index than the
+    pattern says, which these detector plots draw above the trace; a negative
+    one, below it.
+    """
+
+    orders: tuple[OrderBandOffset, ...] = ()
+    #: Median over the orders that could be read.  ``None`` means none could.
+    median_offset_rows: float | None = None
+    columns_excluded: int = 0
+    #: Why nothing could be measured, when nothing could.
+    reason: str = ""
+
+    @property
+    def measured(self) -> bool:
+        """Whether a real number is in, as opposed to a stated reason."""
+
+        return self.median_offset_rows is not None
+
+    @property
+    def order_count(self) -> int:
+        """How many orders carried enough light to be read."""
+
+        return sum(1 for item in self.orders if item.offset_rows is not None)
+
+    @property
+    def extremes(self) -> tuple[float, float] | None:
+        """The smallest and largest per-order offset, or ``None`` if unmeasured."""
+
+        values = [item.offset_rows for item in self.orders if item.offset_rows is not None]
+        if not values:
+            return None
+        return (min(values), max(values))
+
+    def exceeds(self, threshold: float = BAND_OFFSET_ATTENTION_ROWS) -> bool:
+        """Whether the light sits far enough off the pattern to be said aloud."""
+
+        if self.median_offset_rows is None:
+            return False
+        return abs(self.median_offset_rows) > float(threshold)
+
+    def summary(self) -> str:
+        """The one sentence an operator reads, in rows and in plain words."""
+
+        if self.median_offset_rows is None:
+            return self.reason or "no order band could be read against the pattern"
+        side = "below" if self.median_offset_rows < 0 else "above"
+        return (
+            f"order bands sit {abs(self.median_offset_rows):.1f} rows {side} the "
+            f"chosen pattern (median of {self.order_count} order(s))"
+        )
+
+
+def band_center_offsets(
+    image: np.ndarray,
+    pattern: np.ndarray,
+    *,
+    dv: int = 8,
+    saturation_level: float = 0.98 * 65535,
+    column_step: int = 64,
+    minimum_columns: int = 5,
+    minimum_contrast: float = 1.0,
+) -> BandCenterOffsets:
+    """Measure a frame's own order-band centres against *pattern*, per order.
+
+    For each sampled column the flux-weighted row centroid is taken over a
+    window centred on the pattern's own trace, above the window's own floor.
+    The window is deliberately wider than the extraction half width ``dv``: the
+    bands of a sphere frame are broader than the strip that is summed out of
+    them, so a window the width of ``dv`` sits entirely inside the flat top of
+    the band and reports a centre it never saw the edges of.  It is still kept
+    inside the gap to the neighbouring order, so no order is measured on its
+    neighbour's light.
+
+    A column whose window holds a *cluster* of full-scale pixels is left out,
+    the same way exposure triage separates real saturation from a lone hot
+    pixel: two adjacent full-scale pixels are saturation and the column goes,
+    one on its own is an anomaly and the column stays.
+
+    The reading is only meaningful on a frame that lights every order across
+    the detector — the integrating sphere is exactly that frame, which is why
+    it is the one the bench reads it on.
+    """
+
+    frame = np.asarray(image, dtype=float)
+    if frame.ndim == 3:
+        with np.errstate(invalid="ignore"):
+            frame = np.nanmean(frame, axis=0)
+    if frame.ndim != 2:
+        raise ValueError("image must be a detector frame or a stack of them")
+    rows = np.asarray(pattern, dtype=float)
+    if rows.ndim != 2 or not rows.size:
+        raise ValueError("pattern must have shape (detector columns, orders)")
+    if rows.shape[0] != frame.shape[1]:
+        return BandCenterOffsets(
+            reason=(
+                f"the chosen pattern is {rows.shape[0]} column(s) wide and this "
+                f"frame is {frame.shape[1]} — they do not describe the same detector"
+            )
+        )
+    if dv < 1:
+        raise ValueError("dv must be at least one row")
+
+    columns = np.arange(0, rows.shape[0], max(1, int(column_step)), dtype=int)
+    radius = _band_search_radius(rows, columns, int(dv))
+    measured = [
+        _order_band_offset(
+            frame,
+            rows,
+            order_idx,
+            columns,
+            radius=radius,
+            saturation_level=float(saturation_level),
+            minimum_columns=int(minimum_columns),
+            minimum_contrast=float(minimum_contrast),
+        )
+        for order_idx in range(rows.shape[1])
+    ]
+    excluded_total = sum(item.columns_excluded for item in measured)
+    offsets = [item.offset_rows for item in measured if item.offset_rows is not None]
+    if not offsets:
+        return BandCenterOffsets(
+            tuple(measured),
+            None,
+            excluded_total,
+            "no order carried enough light to locate its band on this frame",
+        )
+    return BandCenterOffsets(
+        tuple(measured), float(np.median(offsets)), excluded_total
+    )
+
+
+def _order_band_offset(
+    frame: np.ndarray,
+    rows: np.ndarray,
+    order_idx: int,
+    columns: np.ndarray,
+    *,
+    radius: int,
+    saturation_level: float,
+    minimum_columns: int,
+    minimum_contrast: float,
+) -> OrderBandOffset:
+    """One order's own offset: the median of its readable sampled columns."""
+
+    samples: list[float] = []
+    excluded = 0
+    for column in columns:
+        row = int(round(float(rows[column, order_idx])))
+        low, high = row - radius, row + radius + 1
+        if low < 0 or high > frame.shape[0]:
+            excluded += 1
+            continue
+        window = frame[low:high, column]
+        if not np.all(np.isfinite(window)):
+            excluded += 1
+            continue
+        # Two adjacent full-scale pixels are saturation and this column goes;
+        # one on its own is a cosmic ray or a hot pixel and it stays.  That is
+        # the same separation exposure triage makes over the whole frame.
+        full_scale = window >= saturation_level
+        if np.any(full_scale[:-1] & full_scale[1:]):
+            excluded += 1
+            continue
+        weights = window - float(np.min(window))
+        # One digitizer count.  A window whose brightest pixel does not stand a
+        # single count above its own floor holds no band, only arithmetic, and
+        # weighting that arithmetic would put a centroid on the window's edge
+        # and report it as a twenty-row shift.
+        if float(np.max(weights)) < minimum_contrast:
+            excluded += 1
+            continue
+        total = float(np.sum(weights))
+        if total <= 0.0:
+            excluded += 1
+            continue
+        index = np.arange(low, high, dtype=float)
+        samples.append(float(np.sum(weights * index) / total) - float(row))
+    if len(samples) < minimum_columns:
+        return OrderBandOffset(
+            order_idx,
+            None,
+            len(samples),
+            excluded,
+            f"only {len(samples)} of {columns.size} sampled column(s) could be "
+            "read; this order carries no usable light here",
+        )
+    return OrderBandOffset(order_idx, float(np.median(samples)), len(samples), excluded)
+
+
+def _band_search_radius(pattern: np.ndarray, columns: np.ndarray, dv: int) -> int:
+    """A window wide enough to see both edges of a band, and no wider.
+
+    Wide enough is two and a half extraction half widths, which on this
+    instrument spans the whole band with room on each side.  No wider is half
+    the closest approach of two neighbouring traces, so the window can never
+    reach into the next order's light.
+    """
+
+    radius = max(int(dv), int(round(2.5 * dv)))
+    if pattern.shape[1] < 2:
+        return radius
+    gaps = np.diff(pattern[columns, :], axis=1)
+    closest = float(np.min(np.abs(gaps))) if gaps.size else 0.0
+    if closest <= 0.0:
+        return radius
+    return int(max(dv, min(radius, closest / 2.0 - 1.0)))
 
 
 @dataclass(frozen=True)
