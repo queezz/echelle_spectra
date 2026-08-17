@@ -17,7 +17,11 @@ import pytest
 from PyQt5 import QtCore, QtGui, QtWidgets
 
 from echelle_spectra import calibration_bench_gui as bench_gui
-from echelle_spectra.calibration_bench import BenchFrame, CalibrationBenchSession
+from echelle_spectra.calibration_bench import (
+    BenchFrame,
+    CalibrationBenchSession,
+    Residual,
+)
 from echelle_spectra.calibration_bench_gui import (
     _PACKAGE_DIR,
     _ROOT_SHARES,
@@ -28,6 +32,8 @@ from echelle_spectra.calibration_bench_gui import (
     BENCH_HEADLINE_POINT_SIZE,
     BENCH_HISTOGRAM_LINES,
     BENCH_PREFERRED_LINES,
+    BENCH_RESIDUAL_FLOOR_LINES,
+    BENCH_RESIDUAL_LINES,
     BENCH_TOOLTIP_LIMIT,
     BENCH_TOP_END_LINES,
     CONFIG_ROOT_NAME,
@@ -421,6 +427,43 @@ def test_roles_are_assigned_by_hand_per_file_whatever_the_name(qt_app, tmp_path)
     checklist = {item.key for item in window.campaign.checklist(window.session)}
     assert "lamp-Kr-signal" in checklist
     assert not any("ThAr" in key for key in checklist)
+    window.close()
+
+
+def test_opening_a_frame_is_a_load_but_not_an_arrival(qt_app, tmp_path):
+    """A folder's filenames are judged when files ARRIVE, and only then.
+
+    Assigning a role makes the bench open the assigned lamp signal for fitting,
+    which is a load like any other — and the whole-drop judgement used to hang
+    off any load finishing with an empty queue. So resolving the one ambiguous
+    name by hand made every other suggestion in the folder apply itself a
+    moment later, on no event the operator caused. Only an arrival counts now.
+    """
+
+    window = _manual_window(tmp_path)
+    window.show()
+    nameless = tmp_path / "IMG_0042.sif"
+    nameless.write_bytes(b"sif\n")
+    lamp_named = tmp_path / "Ne-0.02s-x3-bright-lines.sif"
+    lamp_named.write_bytes(b"sif\n")
+    _drop(window, [nameless, lamp_named])
+    _wait_for_loads(window, qt_app)
+    # One ambiguous name in the drop, so nothing is applied and nothing is
+    # pending: the drop has been judged, once.
+    assert not window.campaign.measurements
+    assert window._arrivals_pending is False
+
+    window.file_table.cellWidget(0, 2).setCurrentText("Kr")
+    role_combo = window.file_table.cellWidget(0, 1)
+    role_combo.setCurrentIndex(role_combo.findData(MeasurementRole.LAMP))
+    # Let the frame the assignment opens finish loading — the load that used to
+    # re-judge the folder behind the operator's back.
+    _wait_for_loads(window, qt_app)
+    qt_app.processEvents()
+
+    assert window.campaign.assigned_lamps == ("Kr",)
+    assert lamp_named not in window.campaign.measurements
+    assert window._arrivals_pending is False
     window.close()
 
 
@@ -1667,6 +1710,332 @@ def test_anchors_come_off_at_the_spectrum(qt_app, tmp_path):
     window._order_plot_clicked(_click_at(window, 5.0, QtCore.Qt.RightButton))
     qt_app.processEvents()
     assert "No anchor sits at that pixel" in window.message_value.text()
+    window.close()
+
+
+def _anchor_pair(window) -> None:
+    """Two anchors in different orders: the least that solves a transform."""
+
+    assert window.session.fit_anchor_at(0, 26).accepted
+    assert window.session.fit_anchor_at(1, 56).accepted
+    window.refresh()
+
+
+def _residual_click_at(
+    window, index: float, button=QtCore.Qt.LeftButton, span=None
+) -> _PlotClick:
+    """A click on the residual strip at bar *index*, mid-height.
+
+    *span* widens the view first, which is the only way to put a click beyond
+    the last bar inside the strip's own rectangle.
+    """
+
+    box = window.residual_plot.getViewBox()
+    # Off-screen the strip is never painted, so it has to be asked to fit the
+    # bars it holds before a data coordinate means anything in the scene.
+    box.autoRange(padding=0.02)
+    if span is not None:
+        box.setXRange(*span, padding=0.0)
+    (_x0, _x1), (y0, y1) = box.viewRange()
+    scene_pos = box.mapViewToScene(QtCore.QPointF(float(index), (y0 + y1) / 2.0))
+    assert window.residual_plot.sceneBoundingRect().contains(scene_pos)
+    return _PlotClick(button, scene_pos)
+
+
+def _residual_bars(window):
+    """The one bar item the strip draws, or None while there is nothing to draw."""
+
+    return window._residual_bars
+
+
+def _distinct_colours(pixmap) -> int:
+    """How many colours a grab actually painted."""
+
+    image = pixmap.toImage()
+    return len(
+        {
+            image.pixel(x, y)
+            for y in range(image.height())
+            for x in range(0, image.width(), 2)
+        }
+    )
+
+
+def _assert_labels_are_legible(window) -> None:
+    """No drawn wavelength may touch its neighbour or fall off the strip."""
+
+    axis = window.residual_plot.getAxis("bottom")
+    box = window.residual_plot.getViewBox()
+    metrics = QtGui.QFontMetrics(axis.style["tickFont"])
+    labels = window.residual_tick_labels()
+    assert labels, "the strip drew no wavelengths at all"
+    values = [value for value, _text in axis._tickLevels[0]]
+    spans = []
+    for value, text in zip(values, labels):
+        centre = box.mapViewToScene(QtCore.QPointF(float(value), 0.0)).x()
+        half = metrics.horizontalAdvance(text) / 2.0
+        spans.append((centre - half, centre + half))
+    for (_left, right), (next_left, _next_right) in zip(spans, spans[1:]):
+        assert next_left > right, (labels, spans)
+    rect = window.residual_plot.sceneBoundingRect()
+    assert spans[0][0] >= rect.left() - 1, (labels, spans[0], rect.left())
+    assert spans[-1][1] <= rect.right() + 1, (labels, spans[-1], rect.right())
+
+
+def test_the_residual_strip_stands_with_the_anchor_table_it_scores(qt_app, tmp_path):
+    """Owner, 2026-08-17: "what about moving the anchor plot into the anchors tab?"
+
+    The residual bars used to sit under the spectrum in the Lamp fit view, so
+    they were only in front of the operator while that one view was open — and
+    they were nowhere near the rows they score. In the anchors panel they are
+    in the right rail, under the table, and therefore never behind a tab.
+    """
+
+    forget_session_layout()
+    window = _window(tmp_path)
+    window.resize(*bench_default_geometry(QtCore.QSize(1920, 1080)))
+    window.show()
+    qt_app.processEvents()
+
+    # Where it lives now: the anchors panel, under the table.
+    panel_layout = window.anchors_panel.layout()
+    assert window.anchors_panel.isAncestorOf(window.residual_widget)
+    assert window.tables_rail.isAncestorOf(window.residual_widget)
+    assert panel_layout.indexOf(window.residual_widget) > panel_layout.indexOf(
+        window.anchor_table
+    )
+
+    # And where it does not: the Lamp fit view it was taken out of.
+    lamp_view = next(
+        window.view_tabs.widget(index)
+        for index in range(window.view_tabs.count())
+        if window.view_tabs.tabText(index) == "Lamp fit"
+    )
+    assert not lamp_view.isAncestorOf(window.residual_widget)
+    assert window.order_plot.scene() is not window.residual_plot.scene()
+
+    # In view from every control tab, exactly as the table above it is.
+    for index in range(window.control_tabs.count()):
+        window.control_tabs.setCurrentIndex(index)
+        qt_app.processEvents()
+        assert window.residual_widget.isVisible(), (
+            f"hidden on the {window.control_tabs.tabText(index)!r} tab"
+        )
+
+    # Subordinate to the table, structurally: capped, no appetite for height,
+    # and never at the cost of the table's own workable rows.
+    assert window.residual_widget.maximumHeight() <= (
+        BENCH_RESIDUAL_LINES * window.layout_unit
+    )
+    assert window.residual_widget.maximumHeight() >= (
+        BENCH_RESIDUAL_FLOOR_LINES * window.layout_unit
+    )
+    assert (
+        window.residual_widget.sizePolicy().verticalPolicy()
+        == QtWidgets.QSizePolicy.Maximum
+    )
+    assert panel_layout.stretch(panel_layout.indexOf(window.residual_widget)) == 0
+    assert panel_layout.stretch(panel_layout.indexOf(window.anchor_table)) >= 1
+    assert window.residual_widget.height() < window.anchor_table.height()
+    assert _visible_rows(window.anchor_table) >= (
+        CalibrationBenchWindow.EXPECTED_LINE_ROWS
+    )
+    # The rail's width is the rail's: the strip adapts to it, never widens it.
+    assert window.residual_widget.minimumWidth() == 0
+    window.close()
+    forget_session_layout()
+
+
+def test_the_residual_strip_labels_its_wavelengths_and_tracks_every_anchor(
+    qt_app, tmp_path
+):
+    """One bar per accepted anchor, in the table's order, wavelengths under it.
+
+    Owner, 2026-08-17: "dropping wavelength hints on the plots? Why? Quite
+    usable. Useful." So a few anchors are all labelled, and the operator reads
+    the wavelengths off the axis without clicking anything.
+    """
+
+    forget_session_layout()
+    window = _window(tmp_path)
+    window.resize(*bench_default_geometry(QtCore.QSize(1920, 1080)))
+    window.show()
+    qt_app.processEvents()
+
+    # Nothing anchored: no bars, no labels, and an empty strip rather than a
+    # drawn zero.
+    assert _residual_bars(window) is None
+    assert window.residual_tick_labels() == []
+
+    _anchor_pair(window)
+    qt_app.processEvents()
+    residuals = window.session.residuals
+    assert len(residuals) == 2
+    bars = _residual_bars(window)
+    assert bars is not None
+    # One bar per accepted anchor, in the anchor table's own order.
+    assert list(bars.opts["height"]) == [residual.dx_px for residual in residuals]
+    assert [residual.key for residual in residuals] == [
+        anchor.key for anchor in window.session.anchor_rows()
+    ]
+    assert window.anchor_table.rowCount() == len(residuals)
+
+    # Sparse anchors: every one of them is named, in nm, in bar order.
+    assert window.residual_tick_labels() == [
+        f"{residual.wavelength_nm:.1f}" for residual in residuals
+    ]
+    bottom = window.residual_plot.getAxis("bottom")
+    assert bottom.style["showValues"] is True
+    # Drawn smaller than the bench's body text — that is what buys a rail
+    # several wavelengths — and the axis has the height to draw a row of them.
+    assert bottom.style["tickFont"].pointSizeF() < window.body_pt
+    assert bottom.height() >= QtGui.QFontMetrics(bottom.style["tickFont"]).height()
+
+    # And legible at the width the rail actually gives it: this is a strip a
+    # rail wide, not a plot, and every label sits clear of its neighbour and
+    # inside the strip.  (The offscreen platform rasterises no glyphs at all,
+    # so what is checked is where the text goes, from the same font metrics
+    # that place it, and that the strip really paints at that size.)
+    assert window.residual_widget.width() < window.width() // 3
+    _assert_labels_are_legible(window)
+    painted = window.residual_widget.grab()
+    assert painted.width() == window.residual_widget.width()
+    assert painted.height() == window.residual_widget.height()
+    assert _distinct_colours(painted) > 1, "the strip painted nothing at rail width"
+
+    # Removing one anchor drops the transform and with it the bars; the strip
+    # follows the same triggers it always did, and no new ones.
+    window.session.remove_anchor(window.session.anchor_rows()[0].key)
+    window.refresh()
+    qt_app.processEvents()
+    assert window.session.residuals == ()
+    assert _residual_bars(window) is None
+
+    _anchor_pair(window)
+    qt_app.processEvents()
+    assert len(_residual_bars(window).opts["height"]) == 2
+    window.session.clear_anchors()
+    window.refresh()
+    qt_app.processEvents()
+    assert _residual_bars(window) is None
+    assert window.residual_tick_labels() == []
+    window.close()
+    forget_session_layout()
+
+
+def _crowd_residuals(window, count: int) -> tuple:
+    """An auto-anchored campaign's worth of residuals, without the fitting."""
+
+    residuals = tuple(
+        Residual(
+            (index % 3, 100.0 + index, 500.0 + index * 7.3),
+            index % 3,
+            500.0 + index * 7.3,
+            0.4 * ((-1) ** index) * (1 + index % 4),
+            0.0,
+            abs(0.4 * (1 + index % 4)),
+        )
+        for index in range(count)
+    )
+    window.session.residuals = residuals
+    window._refresh_residual_plot()
+    return residuals
+
+
+def test_dense_anchors_thin_the_wavelengths_rather_than_smear_them(qt_app, tmp_path):
+    """Auto-anchor fills the table, and a rail cannot label every bar.
+
+    So the labels are sampled evenly across the whole anchor set — the same
+    thinning the spectrum overlays do when a family carries more lines than a
+    view can label — rather than drawn on top of each other. Both ends of the
+    set are always named, and every label that is drawn stays legible.
+    """
+
+    forget_session_layout()
+    window = _window(tmp_path)
+    window.resize(*bench_default_geometry(QtCore.QSize(1920, 1080)))
+    window.show()
+    qt_app.processEvents()
+
+    residuals = _crowd_residuals(window, 24)
+    qt_app.processEvents()
+    labels = window.residual_tick_labels()
+    every = [f"{residual.wavelength_nm:.1f}" for residual in residuals]
+
+    # One bar each, but not one label each.
+    assert len(_residual_bars(window).opts["height"]) == len(residuals)
+    assert 1 < len(labels) < len(residuals), labels
+    assert set(labels) <= set(every)
+    # The ends of the set are named, and the labels read left to right.
+    assert labels[0] == every[0]
+    assert labels[-1] == every[-1]
+    assert labels == sorted(labels, key=float)
+    _assert_labels_are_legible(window)
+
+    # A wider rail spends the width on more of them, and still no smear.
+    narrow = len(labels)
+    window.resize(2400, 1400)
+    qt_app.processEvents()
+    window._relayout_wrapped_text()
+    qt_app.processEvents()
+    assert len(window.residual_tick_labels()) > narrow
+    _assert_labels_are_legible(window)
+
+    # And a set small enough to label in full is labelled in full.
+    _crowd_residuals(window, 3)
+    qt_app.processEvents()
+    assert len(window.residual_tick_labels()) == 3
+    window.close()
+    forget_session_layout()
+
+
+def test_clicking_a_residual_bar_selects_its_anchor_row(qt_app, tmp_path):
+    """What the labels cannot do on their own: name every bar, on request.
+
+    A bar names its own anchor by selecting it in the table above, which is
+    what carries the order, the wavelength and the residual in figures — and
+    which already explains the anchor in the Why dock. The selected anchor's
+    bar is drawn in the selection colour, so the sync reads both ways.
+    """
+
+    window = _window(tmp_path)
+    window.show()
+    qt_app.processEvents()
+    _anchor_pair(window)
+    qt_app.processEvents()
+
+    anchors = window.session.anchor_rows()
+    residuals = window.session.residuals
+    assert len(residuals) == 2
+
+    for index in (1, 0):
+        window._residual_plot_clicked(_residual_click_at(window, index))
+        qt_app.processEvents()
+        row = window.anchor_table.currentRow()
+        assert anchors[row].key == residuals[index].key, index
+        assert window.anchor_table.selectionModel().hasSelection()
+        # The row it selected is the row that names the line.
+        assert window.anchor_table.item(row, 1).text() == (
+            f"{anchors[row].line.wavelength_nm:.3f}"
+        )
+        # ...and the clicked bar wears the selection colour, alone.
+        brushes = _residual_bars(window).opts["brushes"]
+        selected = [
+            position
+            for position, brush in enumerate(brushes)
+            if brush.color().name() == CalibrationBenchWindow._RESIDUAL_BAR_SELECTED
+        ]
+        assert selected == [index], (index, selected)
+
+    # Past the last bar there is no anchor to name, and a right-click is not a
+    # selection at all — neither one invents a row.
+    window.anchor_table.clearSelection()
+    window._residual_plot_clicked(_residual_click_at(window, 4.0, span=(-5.0, 5.0)))
+    window._residual_plot_clicked(
+        _residual_click_at(window, 0, button=QtCore.Qt.RightButton)
+    )
+    qt_app.processEvents()
+    assert not window.anchor_table.selectionModel().hasSelection()
     window.close()
 
 

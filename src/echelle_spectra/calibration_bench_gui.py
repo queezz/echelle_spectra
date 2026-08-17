@@ -178,6 +178,38 @@ BENCH_HISTOGRAM_LINES = 8
 #: of them (F21 item 4b).
 BENCH_TOP_END_LINES = 4
 
+#: The anchor-residual strip's ceiling, in the same unit and for exactly the
+#: same reason as the top-end strip above.  The residuals live in the anchors
+#: panel now (owner, 2026-08-17: "what about moving the anchor plot into the
+#: anchors tab?"), and the table is what that panel is *for*: the strip is the
+#: shape of the residuals at a glance, read beside the rows, never instead of
+#: them.  Capped, so it can never grow into a second working surface.
+BENCH_RESIDUAL_LINES = 5
+
+#: And what it shrinks to when the panel is short.  The subordination here has
+#: to be stronger than the triage strip's, because that strip shares its column
+#: with a plot and this one shares its panel with a *table* whose workable row
+#: count is a law of the rail (``EXPECTED_LINE_ROWS``).  So the strip takes
+#: what is left over after the table is workable, between these two bounds:
+#: the shortest strip that still carries a row of wavelengths under its bars,
+#: and the full strip once the window is maximized or the rail is dragged
+#: wider.  A fixed cap at the ceiling would have cost the anchor table four of
+#: its six rows at the size the bench opens at.
+BENCH_RESIDUAL_FLOOR_LINES = 2
+
+#: The point size the strip's wavelengths are drawn at.  Below the body text on
+#: purpose and the only thing on the bench that is: these are tick labels on a
+#: strip a rail wide, and the alternative to a smaller font is fewer of them.
+#: The operator reads a wavelength off the axis rather than having to click
+#: (owner, 2026-08-17: "dropping wavelength hints on the plots? Why? Quite
+#: usable. Useful.").
+BENCH_RESIDUAL_TICK_POINT_SIZE = 7.0
+
+#: Clear space either side of a wavelength label before the next one may be
+#: drawn.  What separates "thinned" from "a smear": labels are dropped until
+#: the ones that remain have this much room.
+BENCH_RESIDUAL_TICK_GAP = 14
+
 #: How many summary rows the triage table shows before it scrolls.  Enough for
 #: a whole campaign folder; past that the reading is a scroll either way.
 BENCH_SUMMARY_ROWS = 8
@@ -630,6 +662,11 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         self._catalog_cache: dict[tuple, tuple] = {}
         self._catalog_rows: tuple = ()
         self._queue: list[Path] = []
+        #: Whether files have ARRIVED and not yet been judged as a set.  A load
+        #: is not the same event as an arrival: the bench opens frames of its
+        #: own accord too, and only an arrival puts a folder's filenames up for
+        #: the whole-drop judgement in ``_apply_unambiguous_suggestions``.
+        self._arrivals_pending = False
         self._file_rows: list[Path] = []
         #: The last line the bench wrote about the roles themselves.  While it
         #: is still the line on screen, the bench's own follow-up narration
@@ -866,7 +903,13 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         )
         self.anchors_panel.setMinimumHeight(
             self._table_panel_minimum_height(
-                self.anchors_panel, self.anchor_table, self.anchor_buttons
+                self.anchors_panel,
+                self.anchor_table,
+                self.anchor_buttons,
+                # Only the strip's floor is a demand on the panel: above that it
+                # spends what the table has not claimed, so it can never be the
+                # reason this panel refuses to shrink.
+                extra=BENCH_RESIDUAL_FLOOR_LINES * self.layout_unit,
             )
         )
         self._measure_status_band()
@@ -885,17 +928,23 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
     #: rather than crush one of them out of existence to spare the other.
     TABLE_FLOOR_ROWS = 3
 
-    def _table_panel_minimum_height(self, panel, table, header_widget) -> int:
+    def _table_panel_minimum_height(
+        self, panel, table, header_widget, *, extra: int = 0
+    ) -> int:
         """The height below which a rail panel stops being a working surface.
 
         Derived from the table's own metrics, so the floor moves with the
         platform font instead of pinning a row count to one designer's display.
+        *extra* is anything else the panel carries beside the table and its
+        header — a capped strip, say — which the floor has to include or the
+        table pays for it out of its own rows.
         """
 
         layout = panel.layout()
         margins = layout.contentsMargins()
         return int(
-            self.TABLE_FLOOR_ROWS * table.verticalHeader().defaultSectionSize()
+            (extra + layout.spacing() if extra else 0)
+            + self.TABLE_FLOOR_ROWS * table.verticalHeader().defaultSectionSize()
             + table.horizontalHeader().sizeHint().height()
             + 2 * table.frameWidth()
             + header_widget.sizeHint().height()
@@ -925,11 +974,102 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         self._distributing = True
         try:
             self._apply_splitter_shares(self.root_splitter, "root", _ROOT_SHARES)
-            self._apply_splitter_shares(self.tables_splitter, "tables", _TABLES_SHARES)
+            self._apply_splitter_shares(
+                self.tables_splitter, "tables", self._tables_default_shares()
+            )
             self._watch_splitter(self.readings_splitter, "readings")
             self._pin_status_band_height()
+            self._fit_residual_strip()
         finally:
             self._distributing = False
+
+    def _workable_panel_heights(self):
+        """What each rail panel costs with a workable table, measured.
+
+        Measured rather than estimated, for the same reason the strip's own
+        height is: the furniture — a group title, a wrapping header, two
+        buttons — is whatever this platform's font makes of it, and a formula
+        that guesses it is wrong by a row exactly when the rail is tightest.
+        ``None`` while there is no geometry to read yet.
+        """
+
+        measured = []
+        for panel, table, strip in (
+            (self.anchors_panel, self.anchor_table, self.residual_widget),
+            (self.expected_lines_panel, self.line_help_table, None),
+        ):
+            if panel.height() <= 0 or table.height() <= 0:
+                return None
+            furniture = panel.height() - table.height()
+            floor = 0
+            if strip is not None:
+                furniture -= strip.height()
+                floor = BENCH_RESIDUAL_FLOOR_LINES * self.layout_unit
+            measured.append(
+                furniture
+                + floor
+                + self.EXPECTED_LINE_ROWS * table.verticalHeader().defaultSectionSize()
+                + (table.height() - table.viewport().height())
+            )
+        return tuple(measured)
+
+    def _tables_default_shares(self):
+        """Cut the rail where each panel becomes workable, not at a fixed guess.
+
+        The fixed pair was tuned when the anchors panel held nothing but a
+        table.  It now holds a labelled residual strip as well, and a share
+        that cannot know that spends the difference out of the anchor table's
+        own rows — which is the one thing the rail's law forbids.  So the
+        default cut is read off what the two panels actually cost with workable
+        tables, and only what neither of them needs is split evenly.  A rail
+        too short for both falls back to the fixed shares, which lose rows from
+        the two tables evenly rather than starving one of them.
+        """
+
+        needs = self._workable_panel_heights()
+        extent = self.tables_splitter.height() or self.height()
+        if needs is None or extent <= 0 or sum(needs) > extent:
+            return _TABLES_SHARES
+        spare = (extent - sum(needs)) / 2.0
+        return tuple((need + spare) / extent for need in needs)
+
+    def _fit_residual_strip(self) -> None:
+        """Spend on the residual strip only what the anchor table has not.
+
+        Layout, not data: this runs on the same show, resize and splitter-drag
+        passes every other cut in the rail is made on, and never on an anchor
+        being added or a transform being solved.  The table keeps its workable
+        rows first and the strip takes the remainder, so the panel reads the
+        same way on the geometry the bench opens at and on a maximized one —
+        the strip is a sparkline on the first and a real strip on the second,
+        rather than a fixed block that eats four of the table's six rows.
+        """
+
+        table = self.anchor_table
+        if self.anchors_panel.height() <= 0 or table.height() <= 0:
+            # Before the first layout pass there is no geometry to divide; the
+            # show and resize passes both come back through here.
+            return
+        # Measured, not estimated: what the table and the strip share is
+        # whatever the panel's furniture — the group title, the buttons, the
+        # margins — is not already using, and the table's claim on it is its
+        # workable rows plus its own header and frame.
+        shared = table.height() + self.residual_widget.height()
+        workable = self.EXPECTED_LINE_ROWS * table.verticalHeader().defaultSectionSize() + (
+            table.height() - table.viewport().height()
+        )
+        spare = shared - workable
+        height = int(
+            min(
+                BENCH_RESIDUAL_LINES * self.layout_unit,
+                max(BENCH_RESIDUAL_FLOOR_LINES * self.layout_unit, spare),
+            )
+        )
+        if height != self.residual_widget.maximumHeight():
+            self.residual_widget.setMaximumHeight(height)
+        # How many wavelengths fit is a question about the width this pass just
+        # settled, so it is answered in the same pass.
+        self._label_residual_axis()
 
     def _apply_splitter_shares(self, splitter, key: str, default) -> None:
         """Lay this splitter's cut down as shares of its current extent."""
@@ -960,8 +1100,14 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
             return
         self._splitter_keys.add(key)
         splitter.splitterMoved.connect(
-            lambda *_args, _s=splitter, _k=key: self._remember_cut(_s, _k)
+            lambda *_args, _s=splitter, _k=key: self._cut_moved(_s, _k)
         )
+
+    def _cut_moved(self, splitter, key: str) -> None:
+        """A dragged handle is remembered, and re-spends the rail's leftovers."""
+
+        self._remember_cut(splitter, key)
+        self._fit_residual_strip()
 
     @staticmethod
     def _remember_cut(splitter, key: str) -> None:
@@ -1028,17 +1174,27 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
             rail.setStretchFactor(index, stretch)
 
     def _build_anchors_panel(self) -> None:
-        """The anchor table, down the right rail beside the lines it anchors.
+        """The anchor table, its residual strip, and its two buttons.
 
-        Only the table and its two buttons: the numbers the fit produces are
-        readings and live on the readings strip, where they are in view from
-        every tab rather than behind whichever one happens to be open.
+        Down the right rail beside the lines it anchors.  The scalar numbers
+        the fit produces — RMS, the transform — are readings and live on the
+        readings strip, where they are in view from every tab rather than
+        behind whichever one happens to be open.  The per-anchor residuals are
+        not a scalar: they are the shape of the disagreement, one bar per row
+        of this very table, so they belong *here*, under the rows they belong
+        to (owner, 2026-08-17: "what about moving the anchor plot into the
+        anchors tab?").  Under the spectrum they were a plot the operator had
+        to leave the anchor table to read.
         """
 
         panel = QtWidgets.QGroupBox("Anchors")
         layout = QtWidgets.QVBoxLayout(panel)
         layout.setContentsMargins(6, 6, 6, 4)
-        layout.setSpacing(5)
+        # Three stacked things now instead of two, so the gaps between them are
+        # tighter than the rail's other panel: every pixel of white space here
+        # is one the table or the wavelengths under it did not get, and this
+        # panel is the one that has to fit both.
+        layout.setSpacing(3)
 
         self.anchor_table = QtWidgets.QTableWidget(0, 5)
         self.anchor_table.setHorizontalHeaderLabels(
@@ -1054,6 +1210,73 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         self.anchor_table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
         self.anchor_table.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
         layout.addWidget(self.anchor_table, 1)
+
+        # The residuals, directly under the rows they score.  A strip, not a
+        # plot: the same subordination as the triage top end (BENCH_TOP_END_
+        # LINES), because the table is this panel's working surface and the
+        # residuals qualify it.  Capped height, no appetite for growth, and no
+        # minimum width at all — the rail's width is the rail's, and this
+        # adapts to it rather than widening it (the two-rails law).
+        self.residual_widget = pg.GraphicsLayoutWidget()
+        self.residual_widget.setBackground("#10151b")
+        # Every pixel of this widget's height is a pixel the anchor table did
+        # not get, so the graphics layout's own padding is given back: at the
+        # height a short panel can spare, pyqtgraph's default margins were most
+        # of the strip and the bars were a hairline.
+        self.residual_widget.ci.layout.setContentsMargins(0, 0, 0, 0)
+        self.residual_widget.ci.layout.setSpacing(0)
+        # No plot title either: at that height a title would be the whole of
+        # it.  What the strip is, is said by the axis it is drawn against, by
+        # the Resid column right above it, and in full by the Why dock when the
+        # strip is clicked.
+        self.residual_plot = self.residual_widget.addPlot(row=0, col=0)
+        self.residual_plot.setContentsMargins(0, 2, 2, 0)
+        self.residual_plot.setLabel("left", "resid", units="px")
+        self.residual_plot.getAxis("left").enableAutoSIPrefix(False)
+        self.residual_plot.getAxis("left").setWidth(38)
+        # The wavelengths stay under the bars.  They overlapped even across the
+        # full width of the old centre view, and a rail is narrower still — so
+        # what adapts is the labelling, not the labels: a smaller font than the
+        # bench uses anywhere else, and as many wavelengths as the width can
+        # hold, spread evenly across the anchors when it cannot hold them all.
+        # Every anchor is still named somewhere: clicking a bar selects its row,
+        # which carries the order, the wavelength and the residual in figures.
+        self._residual_tick_font = QtGui.QFont(self.font())
+        self._residual_tick_font.setPointSizeF(BENCH_RESIDUAL_TICK_POINT_SIZE)
+        self.residual_plot.getAxis("bottom").setStyle(
+            tickFont=self._residual_tick_font,
+            tickLength=3,
+            tickTextOffset=1,
+        )
+        self.residual_plot.addLine(
+            y=0, pen=pg.mkPen("#64748b", style=QtCore.Qt.DashLine)
+        )
+        # A strip is read, not navigated: panning it would only lose the bars,
+        # and a stray drag must never be mistaken for the click that selects.
+        self.residual_plot.setMouseEnabled(x=False, y=False)
+        self.residual_plot.setMenuEnabled(False)
+        self.residual_widget.setMaximumHeight(
+            BENCH_RESIDUAL_FLOOR_LINES * self.layout_unit
+        )
+        self.residual_widget.setMinimumWidth(0)
+        self.residual_widget.setSizePolicy(
+            QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Maximum
+        )
+        self._explainable(
+            self.residual_widget,
+            "How far each anchor sits from the solved transform",
+            "One bar per accepted anchor, in the same order as the rows above, "
+            "showing the along-dispersion residual in detector pixels. The bars "
+            "carry no wavelength labels because the rail is too narrow for one "
+            "per anchor: click a bar and the table above selects that anchor, "
+            "names its line, and explains it here. Two anchors in different "
+            "orders are needed before there is a transform to residual against.",
+        )
+        layout.addWidget(self.residual_widget, 0)
+
+        #: The bars currently drawn, kept so a table selection can recolour one
+        #: of them without rebuilding the item.
+        self._residual_bars = None
 
         # The action that FILLS this table stands on it, always visible, in
         # every tab.  Putting it away in the Lamp fit control tab was the
@@ -2205,12 +2428,15 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         self.detector_image = pg.ImageItem(axisOrder="col-major")
         self.detector_plot.addItem(self.detector_image)
 
-        # The spectrum and its residuals live in their own graphics widget so
-        # the fit strip can sit between them and the detector image — directly
-        # above the trace whose lines are being clicked (owner, 2026-08-16:
-        # "the order scroll belongs to the bottom, next to the lines I'm
-        # supposed to click"). One widget for all three plots left no seam to
-        # put it in.
+        # The spectrum lives in its own graphics widget so the fit strip can
+        # sit between it and the detector image — directly above the trace
+        # whose lines are being clicked (owner, 2026-08-16: "the order scroll
+        # belongs to the bottom, next to the lines I'm supposed to click").
+        # One widget for both plots left no seam to put it in.  The residual
+        # bars used to sit under this spectrum and are now in the anchors panel
+        # of the right rail, beside the rows they score; the whole of the height
+        # they cost here goes back to the spectrum, which is the surface the
+        # lines are actually clicked on.
         lower_graphics = pg.GraphicsLayoutWidget()
         lower_graphics.setBackground("#10151b")
         self.order_plot = lower_graphics.addPlot(
@@ -2239,13 +2465,6 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         )
         self.order_plot.addItem(self._anchor_scatter)
 
-        self.residual_plot = lower_graphics.addPlot(row=1, col=0, title="Anchor residuals")
-        self.residual_plot.setMaximumHeight(180)
-        self.residual_plot.setLabel("bottom", "accepted anchor")
-        self.residual_plot.setLabel("left", "fit residual", units="px")
-        self.residual_plot.getAxis("bottom").setHeight(58)
-        self.residual_plot.getAxis("left").enableAutoSIPrefix(False)
-        self.residual_plot.addLine(y=0, pen=pg.mkPen("#64748b", style=QtCore.Qt.DashLine))
         split.addWidget(graphics)
         lower = QtWidgets.QWidget()
         lower_layout = QtWidgets.QVBoxLayout(lower)
@@ -2405,6 +2624,10 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         self.triage_summary_table.cellClicked.connect(self._summary_row_clicked)
         self.checklist_tree.currentRowChanged.connect(self._checklist_row_selected)
         self.anchor_table.itemSelectionChanged.connect(self._anchor_row_selected)
+        # The two directions of the anchors panel's own sync: a bar names its
+        # row, a row lights its bar.  Both ride signals that already exist.
+        self.anchor_table.itemSelectionChanged.connect(self._highlight_selected_residual)
+        self.residual_plot.scene().sigMouseClicked.connect(self._residual_plot_clicked)
         self.line_help_table.itemSelectionChanged.connect(self._expected_line_selected)
         self.next_step_button.clicked.connect(self._run_next_action)
         self.generate_tomls_button.clicked.connect(lambda: self._generate_tomls())
@@ -2680,6 +2903,15 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
             self.last_folder = source.parent
             if source not in self._queue:
                 self._queue.append(source)
+        # Only files that ARRIVE are judged as a set: a drop, an Add files, a
+        # new file in the watch folder.  Re-reading a file the bench already
+        # holds is a load but not an arrival — opening one for fitting comes
+        # through here too, both when the operator asks and when the bench
+        # follows the assigned lamp signal itself — and judging the whole folder
+        # again when one of those lands would apply suggestions to a folder the
+        # operator is halfway through assigning by hand, on no event he caused.
+        if any(source not in self._file_rows for source in accepted):
+            self._arrivals_pending = True
         if rejected:
             self.message_value.setText("; ".join(rejected))
         elif accepted:
@@ -3213,10 +3445,14 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
             self._load_thread.deleteLater()
         self._load_thread = None
         self._start_next_load()
-        if self._load_thread is None and not self._queue:
+        if self._load_thread is None and not self._queue and self._arrivals_pending:
             # The drop is fully read. Filenames are judged as a set — a folder
             # arrives as a folder — so this waits for the last file rather than
-            # deciding on each one as it lands.
+            # deciding on each one as it lands.  And it is the *arrival* that is
+            # judged: opening a lamp signal for fitting is a load too, and
+            # judging the folder again when that one lands would apply
+            # suggestions the operator never dropped anything to ask about.
+            self._arrivals_pending = False
             self._apply_unambiguous_suggestions()
 
     def _order_changed(self, order_idx: int) -> None:
@@ -4432,24 +4668,181 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
             item.setZValue(12 if selected else 10)
         self._selected_trace = order_idx
 
+    #: The residual strip's two colours: every bar, and the one whose anchor is
+    #: selected in the table above it.
+    _RESIDUAL_BAR = "#49b5df"
+    _RESIDUAL_BAR_SELECTED = "#ffe08a"
+
     def _refresh_residual_plot(self) -> None:
+        """One bar per accepted anchor, in the anchor table's own order.
+
+        Driven by exactly the triggers it always was — an anchor added, removed
+        or cleared, and the transform re-solved — all of which arrive through
+        the same ``refresh`` this hangs off.  Nothing here watches a view range.
+        """
+
         self.residual_plot.clear()
+        self._residual_bars = None
         self.residual_plot.addLine(
             y=0,
             pen=pg.mkPen("#64748b", style=QtCore.Qt.DashLine),
         )
-        if not self.session.residuals:
+        residuals = self.session.residuals
+        self._label_residual_axis()
+        if not residuals:
             return
-        x = np.arange(len(self.session.residuals), dtype=float)
-        y = np.array([residual.dx_px for residual in self.session.residuals])
-        bars = pg.BarGraphItem(x=x, height=y, width=0.68, brush="#49b5df")
-        self.residual_plot.addItem(bars)
-        labels = [
-            f"o{residual.order_idx}\n{residual.wavelength_nm:.2f}"
-            for residual in self.session.residuals
-        ]
+        # ``Residual`` and ``anchor_rows`` are both sorted by anchor key, so bar
+        # *i* is row *i*; the click still matches on the key rather than trusting
+        # that, because the key is what actually identifies an anchor.
+        x = np.arange(len(residuals), dtype=float)
+        y = np.array([residual.dx_px for residual in residuals])
+        self._residual_bars = pg.BarGraphItem(
+            x=x, height=y, width=0.68, brush=self._RESIDUAL_BAR
+        )
+        self.residual_plot.addItem(self._residual_bars)
+        self._highlight_selected_residual()
+
+    def residual_tick_labels(self) -> list[str]:
+        """The wavelengths currently drawn under the bars, in bar order."""
+
+        levels = self.residual_plot.getAxis("bottom")._tickLevels or [[]]
+        return [text for _value, text in levels[0]]
+
+    def _residual_label_budget(self, labels) -> int:
+        """How many of these wavelengths this width can carry, clear of each other.
+
+        Measured off the widest label the data actually has rather than a
+        template, because a four-figure wavelength is a wider label than a
+        three-figure one and the count has to be honest about the labels being
+        drawn, not about a typical one.
+        """
+
+        width = self.residual_plot.getViewBox().width()
+        if width <= 0:
+            # Before the first layout pass the strip has no width to divide.
+            # The rail's own floor is the honest stand-in, and the show pass
+            # comes straight back through here with the real one.
+            width = self._tables_minimum_width()
+        metrics = QtGui.QFontMetrics(self._residual_tick_font)
+        widest = max(metrics.horizontalAdvance(text) for text in labels)
+        return max(1, int(width // (widest + BENCH_RESIDUAL_TICK_GAP)))
+
+    def _label_residual_axis(self) -> None:
+        """Wavelengths under the bars, thinned to what the rail can show.
+
+        Sparse anchors are all labelled.  Dense ones are sampled evenly across
+        the whole set, ends included — the same thinning the spectrum overlays
+        do when a family has more lines than a view can label legibly — so the
+        axis always reads as a wavelength axis rather than as a smear, and the
+        two ends of the anchor set are always named.
+
+        Geometry, not data: this is called both when the anchors change and
+        when the rail is resized or dragged, because how many labels fit is a
+        question about the width, and the answer changes with it.
+        """
+
         axis = self.residual_plot.getAxis("bottom")
-        axis.setTicks([list(zip(x, labels))])
+        residuals = self.session.residuals
+        if not residuals:
+            axis.setTicks([[], []])
+            return
+        labels = [f"{residual.wavelength_nm:.1f}" for residual in residuals]
+        metrics = QtGui.QFontMetrics(self._residual_tick_font)
+        budget = self._residual_label_budget(labels)
+        last = len(labels) - 1
+        if len(labels) <= budget:
+            shown = range(len(labels))
+        elif budget <= 1:
+            shown = (0,)
+        else:
+            shown = sorted(
+                {round(index * last / (budget - 1)) for index in range(budget)}
+            )
+        shown = list(shown)
+        axis.setTicks([[(float(index), labels[index]) for index in shown], []])
+        # The first and last wavelengths are centred on the first and last bars,
+        # so half of each hangs outside the bars' own span: without a margin cut
+        # to their width they are drawn off the end of the strip and clipped.
+        # This is what makes the ends legible, which is the whole reason the
+        # ends are the labels thinning never drops.
+        box = self.residual_plot.getViewBox()
+        width = box.width()
+        outer = (
+            max(
+                metrics.horizontalAdvance(labels[shown[0]]),
+                metrics.horizontalAdvance(labels[shown[-1]]),
+            )
+            / 2.0
+        )
+        margin = 0.5
+        if width > 2 * outer:
+            margin += outer * max(1.0, float(last)) / (width - 2 * outer)
+        box.setXRange(-margin, last + margin, padding=0.0)
+
+    def _selected_anchor_key(self):
+        """The key of the anchor whose row is selected, if a row is."""
+
+        table = self.anchor_table
+        model = table.selectionModel()
+        if model is None or not model.hasSelection():
+            return None
+        anchors = self.session.anchor_rows()
+        row = table.currentRow()
+        return anchors[row].key if 0 <= row < len(anchors) else None
+
+    def _highlight_selected_residual(self) -> None:
+        """Draw the selected anchor's own bar in the selection colour.
+
+        The cheap half of the two-way sync: one ``setOpts`` on the item that is
+        already drawn, no rebuild, no extra refresh path.
+        """
+
+        bars = self._residual_bars
+        if bars is None:
+            return
+        selected = self._selected_anchor_key()
+        bars.setOpts(
+            brushes=[
+                pg.mkBrush(
+                    self._RESIDUAL_BAR_SELECTED
+                    if selected is not None and residual.key == selected
+                    else self._RESIDUAL_BAR
+                )
+                for residual in self.session.residuals
+            ]
+        )
+
+    def _residual_plot_clicked(self, event) -> None:
+        """Click a bar to select its anchor's row in the table above it.
+
+        This is what replaces the per-anchor tick labels: the rail is nowhere
+        near wide enough for one wavelength under every bar — they overlapped
+        even across the old full-width view — so the identity of a bar is asked
+        for rather than always printed, and the answer arrives in the row, in
+        the readings it carries, and in the Why dock the row already fills.
+        """
+
+        if event.button() != QtCore.Qt.LeftButton:
+            return
+        residuals = self.session.residuals
+        if not residuals:
+            return
+        if not self.residual_plot.sceneBoundingRect().contains(event.scenePos()):
+            return
+        point = self.residual_plot.getViewBox().mapSceneToView(event.scenePos())
+        index = int(round(point.x()))
+        # Half a slot either side: the gap between bars belongs to the nearer
+        # bar, so a click never has to land on a one-pixel-wide sliver.
+        if not (0 <= index < len(residuals)) or abs(point.x() - index) > 0.5:
+            return
+        key = residuals[index].key
+        for row, anchor in enumerate(self.session.anchor_rows()):
+            if anchor.key == key:
+                self.anchor_table.selectRow(row)
+                item = self.anchor_table.item(row, 0)
+                if item is not None:
+                    self.anchor_table.scrollToItem(item)
+                return
 
 
 def _build_parser() -> argparse.ArgumentParser:
