@@ -13,6 +13,7 @@ from .tools.calibration_alignment import (
     AlignmentRunConfig,
     run_calibration_alignment,
     save_alignment_settings,
+    write_corrected_pattern_table,
     write_wavelength_table,
 )
 
@@ -83,6 +84,16 @@ def _build_parser() -> argparse.ArgumentParser:
         "--table-out",
         default=None,
         help="Adjusted wavelength table output path. Defaults to alignments/<output-name>.",
+    )
+    parser.add_argument(
+        "--pattern-out",
+        default=None,
+        help=(
+            "Adjusted order pattern output path. Defaults to "
+            "alignments/<pattern-stem>_aligned_to_<dataset>.txt. The pattern is "
+            "corrected with the same transform as the table, so the two files "
+            "describe one detector."
+        ),
     )
     parser.add_argument("--species", default="NeI", help="Comma-separated species to fit.")
     parser.add_argument("--min-snr", type=float, default=5.0, help="Minimum fitted SNR.")
@@ -164,6 +175,11 @@ def _metadata(result, settings_out: Path) -> list[tuple[str, str]]:
         ("Sphere", settings.sphere_file),
         ("Sphere background", settings.sphere_background_file),
         ("Correction model", "rigid detector transform, dx/dy/theta"),
+        (
+            "Transform",
+            f"dx {settings.transform.dx_px:+.4f} px, dy {settings.transform.dy_px:+.4f} px, "
+            f"theta {settings.transform.theta_deg:+.5f} deg",
+        ),
         ("Settings file", settings_out.name),
         ("Note", settings.notes),
     ]
@@ -196,8 +212,14 @@ def main(argv: list[str] | None = None) -> None:
         else alignment_dir / f"lhd_cmos_alignment_{args.dataset_id}.settings.toml"
     )
     table_out = Path(args.table_out) if args.table_out else alignment_dir / args.output_name
+    pattern_path = calibration_dir / args.pattern
+    pattern_out = (
+        Path(args.pattern_out)
+        if args.pattern_out
+        else alignment_dir / f"{pattern_path.stem}_aligned_to_{args.dataset_id}.txt"
+    )
     if args.save and not args.overwrite:
-        existing = [path for path in (settings_out, table_out) if path.exists()]
+        existing = [path for path in (settings_out, table_out, pattern_out) if path.exists()]
         if existing:
             print(
                 "ERROR: output exists; pass --overwrite: "
@@ -222,6 +244,7 @@ def main(argv: list[str] | None = None) -> None:
             alignment_lamp=args.lamp,
             created_at=args.created_at,
             output_wavelength_file=table_out.name,
+            output_pattern_file=pattern_out.name,
             window_radius_px=args.window_radius,
             min_snr=args.min_snr,
             saturation_level=args.saturation_level,
@@ -233,16 +256,31 @@ def main(argv: list[str] | None = None) -> None:
     if args.save:
         settings_out.parent.mkdir(parents=True, exist_ok=True)
         table_out.parent.mkdir(parents=True, exist_ok=True)
+        pattern_out.parent.mkdir(parents=True, exist_ok=True)
         save_alignment_settings(result.settings, settings_out)
         write_wavelength_table(
             result.adjusted_rows,
             table_out,
             metadata=_metadata(result, settings_out),
         )
+        # The bench saves both halves of a calibration through this same
+        # function, and so does this CLI: an adjusted table used beside the
+        # base pattern would extract every order off the band the table
+        # points into.
+        pattern_correction = write_corrected_pattern_table(
+            pattern_path,
+            pattern_out,
+            transform=result.settings.transform,
+            metadata=_metadata(result, settings_out),
+        )
         print(f"Saved settings: {settings_out}")
         print(f"Saved adjusted table: {table_out}")
+        print(f"Saved adjusted pattern: {pattern_out} — {pattern_correction.reason}")
     else:
-        print("Preview only; pass --save to write settings and adjusted wavelength table.")
+        print(
+            "Preview only; pass --save to write settings, adjusted wavelength "
+            "table and adjusted order pattern."
+        )
 
     sys.exit(0)
 

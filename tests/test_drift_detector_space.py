@@ -351,6 +351,15 @@ def test_accepted_shift_recalibrates_every_order_and_re_audits_aligned(tmp_path:
         payload["summary"]["median_shift_px"]
     )
     assert accepted.is_file()
+    # A refinement re-solves the wavelength table and nothing else.  Its shift
+    # was measured through the base snapshot's own order pattern, so carrying
+    # that pattern across untouched is what keeps the measurement and the file
+    # it was measured in agreement — unlike a bench save, which solves a rigid
+    # transform against a reference and must move both halves together.
+    assert (
+        refined.source_path("pattern").read_bytes()
+        == snapshot.source_path("pattern").read_bytes()
+    )
 
     revised, _manifest = recalibrate_cube(
         cube,

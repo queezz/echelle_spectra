@@ -13,6 +13,8 @@ to use from notebooks, tests, or a future command-line entry point.
 
 from __future__ import annotations
 
+import shutil
+import warnings
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, List, Optional, Sequence, Tuple
@@ -48,8 +50,12 @@ __all__ = [
     "fit_rigid_transform",
     "detector_points_from_lines",
     "apply_rigid_correction_to_lines",
+    "apply_rigid_correction_to_pattern",
     "shift_lines_in_pixels",
     "write_wavelength_table",
+    "PatternCorrection",
+    "write_pattern_table",
+    "write_corrected_pattern_table",
     "save_alignment_settings",
     "load_alignment_settings",
     "run_calibration_alignment",
@@ -176,6 +182,7 @@ class AlignmentSettings:
     sphere_file: str = ""
     sphere_background_file: str = ""
     output_wavelength_file: str = ""
+    output_pattern_file: str = ""
     notes: str = ""
 
 
@@ -197,6 +204,7 @@ class AlignmentRunConfig:
     alignment_lamp: str = "Ne"
     created_at: str = "2026-06-04"
     output_wavelength_file: str = "Th_wavelength_CMOS_20240305_aligned_to_20250926.txt"
+    output_pattern_file: str = "pattern_CMOS_20250926_aligned_to_20250926.txt"
     window_radius_px: int = 18
     min_snr: float = 5.0
     saturation_level: float = 0.98 * 65535
@@ -955,6 +963,156 @@ def apply_rigid_correction_to_lines(
     ]
 
 
+def apply_rigid_correction_to_pattern(
+    pattern: np.ndarray,
+    transform: RigidTransform,
+) -> np.ndarray:
+    """Return the order pattern moved by ``transform``, still one row per column.
+
+    The pattern is the wavelength table's other half: the table says which
+    detector column a line sits in, the pattern says which detector row that
+    column's order runs along.  ``apply_rigid_correction_to_lines`` moves the
+    table's points; this moves the pattern's, so a caller that corrects one
+    can correct the other with the same solved transform and end up with two
+    files describing the same detector.
+
+    Column ``x`` of order ``o`` carries the point ``(x, pattern[x, o])``.  The
+    transform moves that point to ``(x', y')`` — a *point*, not a column — so
+    the corrected trace is resampled back onto the integer column grid rather
+    than written at the column it started in: that is what keeps the corrected
+    pattern consistent with the corrected table, whose rows are likewise
+    re-read at their moved ``x``.
+
+    Columns whose corrected trace has no source column — the few at either
+    detector edge that the transform slid out of, or in from beyond — hold the
+    nearest corrected trace row rather than extrapolating a slope off the end
+    of the measurement.  A trace never wraps and never runs away at the edges;
+    it goes flat there, which the extraction's own band half-width absorbs.
+
+    Rows are not clipped to the detector height.  A pattern that the transform
+    pushes past the top edge stays a truthful description of where the order
+    went, and ``Calibrations.make_cutting_masks`` already trims the orders that
+    leave the frame; silently pulling the trace back inside would move it off
+    its own light instead.
+    """
+
+    values = np.asarray(pattern)
+    if values.ndim != 2:
+        raise ValueError("pattern must be a 2-D (columns, orders) array")
+    columns = np.arange(values.shape[0], dtype=float)
+    corrected = np.empty(values.shape, dtype=float)
+    for order_idx in range(values.shape[1]):
+        points = np.column_stack([columns, values[:, order_idx].astype(float)])
+        moved = transform.apply(points)
+        ordering = np.argsort(moved[:, 0], kind="stable")
+        corrected[:, order_idx] = np.interp(
+            columns, moved[ordering, 0], moved[ordering, 1]
+        )
+    if np.issubdtype(values.dtype, np.integer):
+        return np.rint(corrected).astype(values.dtype)
+    return corrected
+
+
+def write_pattern_table(
+    pattern: np.ndarray,
+    path: str | Path,
+    metadata: Optional[Sequence[Tuple[str, str]]] = None,
+) -> None:
+    """Write an order pattern as the integer row-per-column table readers expect.
+
+    ``Calibrations.load_pattern`` reads this back with ``dtype=int``, so the
+    rows are rounded here rather than left as the floats the correction
+    produced.  The ``#`` header is provenance only; every reader in this
+    package parses the file with :func:`numpy.loadtxt`, which skips it.
+    """
+
+    values = np.rint(np.asarray(pattern, dtype=float)).astype(int)
+    if values.ndim != 2:
+        raise ValueError("pattern must be a 2-D (columns, orders) array")
+    out = Path(path)
+    with out.open("w", newline="\n") as fh:
+        fh.write("# Adjusted echelle order pattern\n")
+        if metadata:
+            for key, value in metadata:
+                fh.write(f"# {key}: {value}\n")
+        fh.write("# one row per detector column, one column per diffraction order\n")
+        for row in values:
+            fh.write(" ".join(str(int(item)) for item in row) + "\n")
+
+
+@dataclass(frozen=True)
+class PatternCorrection:
+    """What a saved ``pattern.txt`` is, and why it is that."""
+
+    applied: bool
+    reason: str
+    max_shift_px: float
+    order_count: int
+
+
+#: Below this the correction would only reformat the pattern, never move a trace.
+IDENTITY_PATTERN_SHIFT_PX = 1e-6
+
+
+def write_corrected_pattern_table(
+    base_pattern: str | Path,
+    destination: str | Path,
+    *,
+    transform: RigidTransform,
+    metadata: Sequence[Tuple[str, str]] = (),
+    identity_shift_px: float = IDENTITY_PATTERN_SHIFT_PX,
+) -> PatternCorrection:
+    """Write the base order pattern moved by *transform*, or copy it unchanged.
+
+    Both writers of a corrected calibration — the bench's snapshot save and
+    ``echelle-align --save`` — go through this one function, so the pattern
+    beside a corrected wavelength table always speaks the same detector frame
+    as that table, whichever surface wrote it.
+
+    A transform that moves no trace by a measurable row would only reformat
+    the base pattern, so its bytes are copied instead and the returned reason
+    states which of the two outcomes the caller got.
+    """
+
+    source = Path(base_pattern)
+    target = Path(destination)
+    try:
+        with warnings.catch_warnings():
+            # An empty table is a state to report, never a warning to raise.
+            warnings.simplefilter("ignore")
+            values = np.loadtxt(source, dtype=int, ndmin=2)
+    except (ValueError, IndexError, StopIteration):
+        values = np.empty((0, 0), dtype=int)
+    if values.size == 0:
+        shutil.copy2(source, target)
+        return PatternCorrection(
+            False,
+            f"{source.name} holds no order columns this correction can read, "
+            "so its bytes were copied unchanged",
+            0.0,
+            0,
+        )
+    corrected = apply_rigid_correction_to_pattern(values, transform)
+    max_shift_px = float(np.max(np.abs(corrected.astype(float) - values.astype(float))))
+    if max_shift_px <= float(identity_shift_px):
+        shutil.copy2(source, target)
+        return PatternCorrection(
+            False,
+            f"the solved transform moves no trace of {source.name} measurably "
+            f"({max_shift_px:.3g} px), so its bytes were copied unchanged",
+            max_shift_px,
+            int(values.shape[1]),
+        )
+    write_pattern_table(corrected, target, metadata=metadata)
+    return PatternCorrection(
+        True,
+        f"{values.shape[1]} order traces of {source.name} were moved by the solved "
+        f"transform (largest shift {max_shift_px:.3f} px)",
+        max_shift_px,
+        int(values.shape[1]),
+    )
+
+
 def shift_lines_in_pixels(
     lines: Sequence[CalibrationTableLine], dx_px: float
 ) -> List[CalibrationTableLine]:
@@ -1013,6 +1171,7 @@ def save_alignment_settings(settings: AlignmentSettings, path: str | Path) -> No
         fh.write(f'sphere_file = "{_toml_quote(settings.sphere_file)}"\n')
         fh.write(f'sphere_background_file = "{_toml_quote(settings.sphere_background_file)}"\n')
         fh.write(f'output_wavelength_file = "{_toml_quote(settings.output_wavelength_file)}"\n')
+        fh.write(f'output_pattern_file = "{_toml_quote(settings.output_pattern_file)}"\n')
         fh.write(f"n_lines = {settings.n_lines:d}\n")
         fh.write(f"rms_px = {settings.rms_px:.10g}\n")
         fh.write(f'notes = "{_toml_quote(settings.notes)}"\n')
@@ -1042,6 +1201,7 @@ def load_alignment_settings(path: str | Path) -> AlignmentSettings:
         sphere_file=str(data.get("sphere_file", "")),
         sphere_background_file=str(data.get("sphere_background_file", "")),
         output_wavelength_file=str(data.get("output_wavelength_file", "")),
+        output_pattern_file=str(data.get("output_pattern_file", "")),
         notes=str(data.get("notes", "")),
         transform=RigidTransform(
             dx_px=float(transform_data["dx_px"]),
@@ -1161,6 +1321,7 @@ def run_calibration_alignment(config: AlignmentRunConfig) -> AlignmentRunResult:
         sphere_file=Path(config.sphere_file).name,
         sphere_background_file=Path(config.sphere_background_file).name,
         output_wavelength_file=config.output_wavelength_file,
+        output_pattern_file=config.output_pattern_file,
         transform=transform,
         n_lines=len(good_fits),
         rms_px=rms_px,

@@ -452,7 +452,7 @@ rules.
 ├── ThAr-0.3s-x3-bg.sif
 └── calibrations/20260901_cmos/
     ├── snapshot.toml   # …and this points back at them, with their digests
-    ├── pattern.txt
+    ├── pattern.txt     # base pattern moved by the same solved transform
     ├── wavelength.txt  # base table moved by the solved transform
     ├── alignment.toml  # transform, RMS, fitted-line count
     └── integral.txt
@@ -478,6 +478,17 @@ base bytes are copied instead. The message panel and the procedure checklist say
 which of the two happened and how far the largest row moved, and the manifest's
 `[alignment]` table records `wavelength_correction_applied` alongside the solved
 `dx_px`, `dy_px`, and rotation.
+
+The snapshot's `pattern.txt` is corrected with that same transform, through
+`apply_rigid_correction_to_pattern()` and the shared
+`write_corrected_pattern_table()` that `echelle-align --save` also writes its
+pattern with, and the manifest records `pattern_correction_applied` and
+`pattern_max_shift_px` beside the wavelength pair. **The bench's own live view
+and the snapshot it saves disagree by design: the bench measures the raw frames
+against the *reference* pattern and table, which is what makes a shift
+measurable at all, while the snapshot describes the *data* — both files moved
+onto the detector the bench just measured.** A transform that moves no trace by
+a measurable row copies the base pattern's bytes instead, byte for byte.
 
 The snapshot folder also gains an `alignment.toml` in the established alignment
 settings shape, so `load_alignment_settings()` reads the transform back from the

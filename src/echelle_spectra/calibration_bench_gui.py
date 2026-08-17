@@ -3499,6 +3499,9 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         elif hasattr(result, "snapshot_id"):
             correction = getattr(self.campaign, "wavelength_correction", None)
             detail = "" if correction is None else f" Saved wavelength.txt: {correction.reason}."
+            pattern_correction = getattr(self.campaign, "pattern_correction", None)
+            if pattern_correction is not None:
+                detail += f" Saved pattern.txt: {pattern_correction.reason}."
             # The one place the operator learns where the campaign went.  It
             # says the whole path, because "calibrations" said nothing about
             # which machine's calibrations folder it meant.

@@ -46,6 +46,9 @@ from echelle_spectra.calibration_registry import (
 from echelle_spectra.snapshot import SnapshotError, load_snapshot
 from echelle_spectra.tools.calibration_alignment import (
     CalibrationTableLine,
+    RigidTransform,
+    detector_points_from_lines,
+    fit_rigid_transform,
     load_alignment_settings,
     load_wavelength_table,
 )
@@ -2204,3 +2207,339 @@ def test_a_refused_save_leaves_no_folders_standing(tmp_path):
     assert not root.exists()
     assert not root.parent.exists()
     assert campaign.toml_state is TomlState.FAILED
+
+
+# ---------------------------------------------------------------------------
+# The saved pattern must speak the same detector as the saved wavelength table.
+#
+# A snapshot whose ``wavelength.txt`` carries the solved rigid transform while
+# its ``pattern.txt`` is still the reference one extracts every order off the
+# band its own table points into: the traces ride the edges of the bright
+# bands, the spectra weaken, and the line centres drift with them.  The
+# synthetic detector below reproduces that end to end, through the real save
+# and load path, and pins the cure.
+# ---------------------------------------------------------------------------
+
+_SYNTH_COLUMNS = 400
+_SYNTH_ROWS = 128
+#: Intercept and slope, in detector rows, of each synthetic order trace.  The
+#: slopes differ so the two anchors cannot be reconciled by a translation
+#: alone, which is what gives the solved transform a rotation to carry.
+_SYNTH_TRACES = ((22.0, 0.14), (105.0, 0.0))
+_SYNTH_ANCHOR_X = (80.0, 150.0)
+#: How far along dispersion the light of this frame sits from the table's.
+_SYNTH_DISPERSION_SHIFT_PX = 22.0
+_SYNTH_HALF_WIDTH_PX = 6
+#: Rows below this belong to order 0, above it to order 1, in every frame here.
+_SYNTH_ROW_SPLIT = 88
+
+#: Two rows carry the lamp lines this frame actually shows and are clicked as
+#: anchors; the other two are curated rows far from them, which the correction
+#: has to move just as truthfully even though nothing was fitted there.
+_SYNTH_TABLE = """\
+# Synthetic curated wavelength lookup table
+# order from to center wavelength band
+0\t0070.000\t0090.000\t00080.0000\t00600.00000\tThI  # OK
+0\t0290.000\t0310.000\t00300.0000\t00620.00000\tThI  # OK
+1\t0140.000\t0160.000\t00150.0000\t00610.00000\tArI  # OK
+1\t0240.000\t0260.000\t00250.0000\t00630.00000\tArI  # OK
+"""
+
+
+def _synth_trace(order_idx: int, x) -> np.ndarray:
+    intercept, slope = _SYNTH_TRACES[order_idx]
+    return intercept + slope * np.asarray(x, dtype=float)
+
+
+def _synth_base_pattern() -> np.ndarray:
+    columns = np.arange(_SYNTH_COLUMNS, dtype=float)
+    traces = [_synth_trace(order_idx, columns) for order_idx in range(len(_SYNTH_TRACES))]
+    return np.rint(np.column_stack(traces)).astype(int)
+
+
+def _synth_transform() -> RigidTransform:
+    """The detector motion this frame is built from, in the bench's own terms.
+
+    A bench anchor is a *dispersion* measurement: the centroid supplies the
+    column, and the detector row that goes with it is read out of the
+    reference pattern, never off the frame.  So the transforms this instrument
+    can solve at all are exactly the ones a dispersion shift implies through
+    its own pattern — and that is the one used here to move the synthetic
+    detector, so the frame and the solve describe the same event.
+
+    It is not a translation.  The two orders run at different slopes, so one
+    dispersion shift moves their rows by different amounts and the fit answers
+    with a rotation, which carries the traces several rows off the reference
+    ones across the detector.  That is the mismatch the saved pattern has to
+    absorb.
+    """
+
+    pattern = _synth_base_pattern()
+    lines = _synth_anchor_lines()
+    expected = detector_points_from_lines(lines, pattern)
+    centers = [line.center_pixel + _SYNTH_DISPERSION_SHIFT_PX for line in lines]
+    # A few rounds settle the shift on the transform that reproduces itself:
+    # the frame moved by it shows its lines in the columns whose pattern rows
+    # solve back to it.  Without that the fixture would be a frame the bench
+    # cannot quite solve, and every later number would carry the difference.
+    transform = None
+    for _ in range(12):
+        measured = detector_points_from_lines(lines, pattern, centers)
+        transform, _rms_px = fit_rigid_transform(expected, measured)
+        moved = [float(point[0]) for point in transform.apply(expected)]
+        if np.allclose(moved, centers, atol=1e-9):
+            break
+        centers = moved
+    assert transform is not None
+    return transform
+
+
+def _synth_reference_image() -> np.ndarray:
+    """Two order bands with one bright emission line each."""
+
+    x = np.arange(_SYNTH_COLUMNS, dtype=float)
+    y = np.arange(_SYNTH_ROWS, dtype=float)[:, None]
+    image = np.full((_SYNTH_ROWS, _SYNTH_COLUMNS), 5.0)
+    for order_idx, anchor_x in enumerate(_SYNTH_ANCHOR_X):
+        along = 40.0 + 900.0 * np.exp(-0.5 * ((x - anchor_x) / 2.5) ** 2)
+        image = image + along * np.exp(
+            -0.5 * ((y - _synth_trace(order_idx, x)) / 1.6) ** 2
+        )
+    return image
+
+
+def _synth_frame_image(transform: RigidTransform) -> np.ndarray:
+    """The reference detector, physically moved by *transform*.
+
+    The frame is warped rather than redrawn from the moved traces, so nothing
+    the correction computes is used to build the truth it is measured against.
+    """
+
+    from scipy.ndimage import map_coordinates
+
+    reference = _synth_reference_image()
+    grid_y, grid_x = np.mgrid[0:_SYNTH_ROWS, 0:_SYNTH_COLUMNS]
+    points = np.column_stack(
+        [grid_x.ravel().astype(float), grid_y.ravel().astype(float)]
+    )
+    source = (points - np.array([transform.dx_px, transform.dy_px])) @ transform.matrix
+    values = map_coordinates(
+        reference, [source[:, 1], source[:, 0]], order=1, mode="nearest"
+    )
+    return values.reshape(_SYNTH_ROWS, _SYNTH_COLUMNS)
+
+
+def _synth_order_spectra(image: np.ndarray, pattern: np.ndarray) -> tuple[np.ndarray, ...]:
+    """Extract every order the way the real cutting masks do."""
+
+    columns = np.arange(pattern.shape[0])
+    spectra = []
+    for order_idx in range(pattern.shape[1]):
+        rows = np.asarray(pattern[:, order_idx], dtype=int)
+        band = np.zeros(pattern.shape[0], dtype=float)
+        for offset in range(-_SYNTH_HALF_WIDTH_PX, _SYNTH_HALF_WIDTH_PX + 1):
+            band += image[np.clip(rows + offset, 0, image.shape[0] - 1), columns]
+        spectra.append(band)
+    return tuple(spectra)
+
+
+def _parabolic_peak(values: np.ndarray, offset: float = 0.0) -> float:
+    """Sub-sample peak position of a sampled profile."""
+
+    peak = int(np.argmax(values))
+    if peak <= 0 or peak >= len(values) - 1:
+        return float(peak) + offset
+    left, middle, right = (float(values[peak + step]) for step in (-1, 0, 1))
+    denominator = left - 2.0 * middle + right
+    shift = 0.0 if denominator == 0 else 0.5 * (left - right) / denominator
+    return float(peak) + shift + offset
+
+
+def _synth_band_center(image: np.ndarray, order_idx: int, column: int) -> float:
+    """Where the bright band really is in this frame, read off the frame."""
+
+    if order_idx == 0:
+        slab = image[:_SYNTH_ROW_SPLIT, column]
+        return _parabolic_peak(slab)
+    slab = image[_SYNTH_ROW_SPLIT:, column]
+    return _parabolic_peak(slab, offset=float(_SYNTH_ROW_SPLIT))
+
+
+def _synth_sources(tmp_path: Path) -> dict[str, Path]:
+    sources = _sources(tmp_path)
+    np.savetxt(sources["pattern.txt"], _synth_base_pattern(), fmt="%d")
+    sources["wavelength.txt"].write_text(_SYNTH_TABLE, encoding="utf-8")
+    return sources
+
+
+def _synth_bench(tmp_path: Path) -> tuple[CalibrationBenchSession, np.ndarray, RigidTransform]:
+    """Solve the synthetic frame on the bench exactly as an operator would."""
+
+    transform = _synth_transform()
+    pattern = _synth_base_pattern()
+    frame_image = _synth_frame_image(transform)
+    images = frame_image[np.newaxis, :, :]
+    spectra = _synth_order_spectra(frame_image, pattern)
+    session = CalibrationBenchSession(pattern, _synth_lines(), minimum_snr=3.0)
+    session.accept_frame(
+        BenchFrame(
+            tmp_path / "thar.sif",
+            images,
+            frame_image,
+            spectra,
+            {"ExposureTime": 0.1},
+        )
+    )
+    for line in _synth_anchor_lines():
+        order_idx = line.order_idx
+        anchor_x = line.center_pixel
+        anchor_y = float(_synth_trace(order_idx, anchor_x))
+        moved = transform.apply(np.array([[anchor_x, anchor_y]]))[0]
+        result = session.fit_anchor_at(order_idx, float(moved[0]))
+        assert result.accepted, result.reason
+    assert session.transform is not None
+    return session, frame_image, transform
+
+
+def _synth_lines() -> tuple[CalibrationTableLine, ...]:
+    """Every curated row of the synthetic table, in the file's own order."""
+
+    return (
+        CalibrationTableLine(0, 70.0, 90.0, 80.0, 600.0, "ThI", "OK"),
+        CalibrationTableLine(0, 290.0, 310.0, 300.0, 620.0, "ThI", "OK"),
+        CalibrationTableLine(1, 140.0, 160.0, 150.0, 610.0, "ArI", "OK"),
+        CalibrationTableLine(1, 240.0, 260.0, 250.0, 630.0, "ArI", "OK"),
+    )
+
+
+def _synth_anchor_lines() -> tuple[CalibrationTableLine, ...]:
+    """The two rows this frame carries light for, one per order."""
+
+    return tuple(
+        line for line in _synth_lines() if line.center_pixel in _SYNTH_ANCHOR_X
+    )
+
+
+def test_bench_solves_the_transform_that_moved_the_synthetic_detector(tmp_path):
+    """The fixture is only worth trusting if the bench really solves it."""
+
+    session, _frame_image, transform = _synth_bench(tmp_path)
+
+    assert session.transform is not None
+    assert session.transform.dx_px == pytest.approx(transform.dx_px, abs=0.1)
+    assert session.transform.dy_px == pytest.approx(transform.dy_px, abs=0.1)
+    assert session.transform.theta_rad == pytest.approx(transform.theta_rad, abs=1e-3)
+    assert session.rms_px == pytest.approx(0.0, abs=0.1)
+
+
+def test_saved_pattern_lands_on_the_order_bands_of_the_frame_it_was_solved_on(tmp_path):
+    """The 2024-on-2025 defect, reproduced and cured through the real save.
+
+    Before the pattern was corrected, the saved snapshot described the orders
+    where the *reference* detector had them, so re-opening the very frame the
+    snapshot was solved on drew every trace along the edge of its own bright
+    band — which is exactly what the owner's sphere screenshot showed.
+    """
+
+    sources = _synth_sources(tmp_path)
+    session, frame_image, _transform = _synth_bench(tmp_path)
+    base_pattern = np.loadtxt(sources["pattern.txt"], dtype=int)
+
+    campaign, snapshot = _saved_snapshot(tmp_path, sources, session)
+
+    saved_pattern = np.loadtxt(snapshot.source_path("pattern"), dtype=int)
+    assert saved_pattern.shape == base_pattern.shape
+    columns = range(10, _SYNTH_COLUMNS - 5, 25)
+    base_offsets = []
+    saved_offsets = []
+    for order_idx in range(base_pattern.shape[1]):
+        for column in columns:
+            truth = _synth_band_center(frame_image, order_idx, column)
+            base_offsets.append(abs(float(base_pattern[column, order_idx]) - truth))
+            saved_offsets.append(abs(float(saved_pattern[column, order_idx]) - truth))
+
+    # The uncorrected pattern misses the band by more than the extraction's own
+    # half width, so the trace is drawn outside the light it is meant to sum.
+    assert max(base_offsets) > _SYNTH_HALF_WIDTH_PX
+    assert np.mean(base_offsets) > 2.0
+    # The corrected one stays on the band centre everywhere, within the integer
+    # row the pattern file is written in.
+    assert max(saved_offsets) <= 1.0
+    assert campaign.pattern_correction is not None
+    assert campaign.pattern_correction.applied
+    assert snapshot.manifest["alignment"]["pattern_correction_applied"] is True
+    assert snapshot.manifest["alignment"]["pattern_max_shift_px"] > _SYNTH_HALF_WIDTH_PX
+
+
+def test_saved_snapshot_puts_its_sticks_on_the_peaks_of_that_frame(tmp_path):
+    """Re-extract the solved frame through the saved snapshot and measure."""
+
+    sources = _synth_sources(tmp_path)
+    session, frame_image, _transform = _synth_bench(tmp_path)
+    base_pattern = np.loadtxt(sources["pattern.txt"], dtype=int)
+
+    _campaign, snapshot = _saved_snapshot(tmp_path, sources, session)
+
+    saved_pattern = np.loadtxt(snapshot.source_path("pattern"), dtype=int)
+    saved_rows = load_wavelength_table(snapshot.source_path("wavelength"))
+    saved_spectra = _synth_order_spectra(frame_image, saved_pattern)
+    base_spectra = _synth_order_spectra(frame_image, base_pattern)
+    lit = {line.wavelength_nm for line in _synth_anchor_lines()}
+    measured_rows = [row for row in saved_rows if row.wavelength_nm in lit]
+    assert len(measured_rows) == 2
+    for row in measured_rows:
+        peak_px = _parabolic_peak(saved_spectra[row.order_idx])
+        assert row.center_pixel == pytest.approx(peak_px, abs=0.5)
+    # Every order is summed over its own light again, not over the wing of it.
+    saved_flux = sum(float(spectrum.sum()) for spectrum in saved_spectra)
+    base_flux = sum(float(spectrum.sum()) for spectrum in base_spectra)
+    assert saved_flux > 1.1 * base_flux
+
+
+def test_saved_pattern_and_table_place_every_row_on_the_same_detector(tmp_path):
+    """The invariant the two files exist to keep, read back off the snapshot."""
+
+    sources = _synth_sources(tmp_path)
+    session, _frame_image, _transform = _synth_bench(tmp_path)
+    base_pattern = np.loadtxt(sources["pattern.txt"], dtype=int)
+    base_rows = load_wavelength_table(sources["wavelength.txt"])
+
+    _campaign, snapshot = _saved_snapshot(tmp_path, sources, session)
+
+    saved_pattern = np.loadtxt(snapshot.source_path("pattern"), dtype=int)
+    saved_rows = load_wavelength_table(snapshot.source_path("wavelength"))
+    expected = session.transform.apply(
+        detector_points_from_lines(base_rows, base_pattern)
+    )
+    measured = detector_points_from_lines(saved_rows, saved_pattern)
+    np.testing.assert_allclose(measured, expected, atol=1.0)
+
+
+def test_transform_that_moves_nothing_copies_the_base_pattern_byte_for_byte(tmp_path):
+    sources = _synth_sources(tmp_path)
+    base = sources["pattern.txt"]
+    base_digest = hashlib.sha256(base.read_bytes()).hexdigest()
+    session = CalibrationBenchSession(
+        _synth_base_pattern(), _synth_lines(), minimum_snr=3.0
+    )
+    frame_image = _synth_frame_image(RigidTransform(0.0, 0.0, 0.0))
+    session.accept_frame(
+        BenchFrame(
+            tmp_path / "thar.sif",
+            frame_image[np.newaxis, :, :],
+            frame_image,
+            _synth_order_spectra(frame_image, _synth_base_pattern()),
+            {"ExposureTime": 0.1},
+        )
+    )
+    for line in _synth_anchor_lines():
+        assert session.fit_anchor_at(line.order_idx, line.center_pixel).accepted
+
+    campaign, snapshot = _saved_snapshot(tmp_path, sources, session)
+
+    saved = snapshot.source_path("pattern")
+    assert saved.read_bytes() == base.read_bytes()
+    assert not campaign.pattern_correction.applied
+    assert "moves no trace" in campaign.pattern_correction.reason
+    assert snapshot.manifest["alignment"]["pattern_correction_applied"] is False
+    assert hashlib.sha256(base.read_bytes()).hexdigest() == base_digest

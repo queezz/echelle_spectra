@@ -19,6 +19,16 @@ registries, catalogs, and run receipts:
 The ID format is `YYYYMMDD_<detector>[-rev]`. A refinement derived later from
 science lines can use a revision suffix such as `20260901_cmos-r1`.
 
+**A snapshot's `pattern.txt` and `wavelength.txt` always describe the same
+detector frame**: when a bench save applies a solved rigid transform to the
+table, it applies the same transform to the pattern, so the order traces stay on
+the bands the table's own lines sit in. A snapshot carrying a corrected table
+beside an uncorrected pattern extracts every order off-centre — see
+[The saved snapshot carries the measured calibration](calibration-bench.md#the-saved-snapshot-carries-the-measured-calibration).
+A drift refinement (`-rN`) re-solves the wavelength table only and carries its
+base snapshot's pattern across unchanged, because its accepted shift was
+measured through that very pattern.
+
 ## The folder holds the light; the snapshot holds what was computed
 
 A snapshot records two kinds of artifact, and `snapshot.toml` says plainly which

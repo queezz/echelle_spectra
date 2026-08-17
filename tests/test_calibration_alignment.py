@@ -9,6 +9,7 @@ from echelle_spectra.tools.calibration_alignment import (
     CalibrationTableLine,
     RigidTransform,
     apply_rigid_correction_to_lines,
+    apply_rigid_correction_to_pattern,
     detector_points_from_lines,
     fit_rigid_transform,
     fit_single_gaussian_centroid,
@@ -20,6 +21,8 @@ from echelle_spectra.tools.calibration_alignment import (
     rank_candidate_lines,
     save_alignment_settings,
     select_candidate_lines,
+    write_corrected_pattern_table,
+    write_pattern_table,
     write_wavelength_table,
 )
 
@@ -174,6 +177,103 @@ def test_apply_correction_moves_lookup_center_pixels():
     assert adjusted[0].wavelength_nm == rows[0].wavelength_nm
 
 
+def test_pattern_correction_moves_every_trace_by_dy():
+    pattern = np.zeros((100, 2), dtype=int)
+    pattern[:, 0] = 20
+    pattern[:, 1] = 40
+    moved = apply_rigid_correction_to_pattern(
+        pattern, RigidTransform(dx_px=0.0, dy_px=3.0, theta_rad=0.0)
+    )
+    assert moved.dtype == pattern.dtype
+    np.testing.assert_array_equal(moved[:, 0], np.full(100, 23))
+    np.testing.assert_array_equal(moved[:, 1], np.full(100, 43))
+
+
+def test_pattern_correction_of_a_flat_trace_ignores_the_dispersion_shift():
+    """A flat trace slid along itself is the same trace, dy apart."""
+
+    pattern = np.full((100, 1), 30, dtype=int)
+    moved = apply_rigid_correction_to_pattern(
+        pattern, RigidTransform(dx_px=7.0, dy_px=-2.0, theta_rad=0.0)
+    )
+    np.testing.assert_array_equal(moved[:, 0], np.full(100, 28))
+
+
+def test_pattern_correction_reads_a_sloped_trace_at_its_moved_column():
+    """The corrected row at column x is the trace's row, not the column's."""
+
+    columns = np.arange(50, dtype=float)
+    pattern = np.column_stack([10.0 + 0.5 * columns])
+    moved = apply_rigid_correction_to_pattern(
+        pattern, RigidTransform(dx_px=4.0, dy_px=0.0, theta_rad=0.0)
+    )
+    # Away from the edges the trace slid four columns to the right, which for a
+    # 0.5 px/column slope is two rows down where it is read.
+    np.testing.assert_allclose(moved[10:, 0], pattern[10:, 0] - 2.0)
+    # The four columns the transform slid in from beyond the left edge hold the
+    # first corrected row rather than extrapolating the slope off the detector.
+    np.testing.assert_allclose(moved[:4, 0], moved[4, 0])
+
+
+def test_pattern_correction_keeps_rows_that_leave_the_detector():
+    """A trace pushed past the top edge is still described where it went."""
+
+    pattern = np.full((20, 1), 5, dtype=int)
+    moved = apply_rigid_correction_to_pattern(
+        pattern, RigidTransform(dx_px=0.0, dy_px=-9.0, theta_rad=0.0)
+    )
+    np.testing.assert_array_equal(moved[:, 0], np.full(20, -4))
+
+
+def test_zero_transform_copies_the_base_pattern_byte_for_byte(tmp_path):
+    base = tmp_path / "pattern.txt"
+    base.write_text("10 40\r\n11 41\r\n", encoding="utf-8")
+    target = tmp_path / "corrected.txt"
+
+    correction = write_corrected_pattern_table(
+        base, target, transform=RigidTransform(0.0, 0.0, 0.0)
+    )
+
+    assert not correction.applied
+    assert "moves no trace" in correction.reason
+    assert target.read_bytes() == base.read_bytes()
+
+
+def test_unreadable_pattern_is_copied_and_says_so(tmp_path):
+    base = tmp_path / "pattern.txt"
+    base.write_text("pattern\n", encoding="utf-8")
+    target = tmp_path / "corrected.txt"
+
+    correction = write_corrected_pattern_table(
+        base, target, transform=RigidTransform(0.0, 3.0, 0.0)
+    )
+
+    assert not correction.applied
+    assert "no order columns" in correction.reason
+    assert target.read_bytes() == base.read_bytes()
+
+
+def test_corrected_pattern_is_written_as_integers_readers_can_load(tmp_path):
+    base = tmp_path / "pattern.txt"
+    write_pattern_table(np.column_stack([np.full(6, 10), np.full(6, 40)]), base)
+    target = tmp_path / "corrected.txt"
+
+    correction = write_corrected_pattern_table(
+        base,
+        target,
+        transform=RigidTransform(0.0, 2.4, 0.0),
+        metadata=[("Alignment dataset", "20250926")],
+    )
+
+    assert correction.applied
+    assert correction.order_count == 2
+    assert correction.max_shift_px == 2.0
+    assert "# Alignment dataset: 20250926" in target.read_text(encoding="utf-8")
+    loaded = np.loadtxt(target, dtype=int)
+    np.testing.assert_array_equal(loaded[:, 0], np.full(6, 12))
+    np.testing.assert_array_equal(loaded[:, 1], np.full(6, 42))
+
+
 def test_detector_points_from_pattern():
     pattern = np.zeros((100, 2))
     pattern[:, 1] = np.arange(100)
@@ -196,6 +296,7 @@ def test_settings_round_trip(tmp_path):
         sphere_file="sphere-0.1s-x3.sif",
         sphere_background_file="sphere-0.1s-x3-bg.sif",
         output_wavelength_file="Th_wavelength_CMOS_20240305_aligned_to_20250926.txt",
+        output_pattern_file="pattern_CMOS_20240305_aligned_to_20250926.txt",
         n_lines=12,
         rms_px=0.3,
         notes="unit test",

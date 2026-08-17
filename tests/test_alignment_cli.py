@@ -49,6 +49,7 @@ def _fake_result():
         sphere_file="sphere.sif",
         sphere_background_file="sphere_bg.sif",
         output_wavelength_file="adjusted.txt",
+        output_pattern_file="adjusted_pattern.txt",
         transform=RigidTransform(-14.0, 0.3, 0.001),
         n_lines=2,
         rms_px=0.5,
@@ -173,6 +174,107 @@ def test_save_refuses_existing_outputs_without_overwrite(tmp_path):
                 str(settings),
                 "--table-out",
                 str(table),
+                "--save",
+            ]
+        )
+
+    assert exc.value.code == 1
+    run_alignment.assert_not_called()
+
+
+def _write_pattern(path, columns=40, orders=2):
+    rows = np.arange(columns, dtype=float)
+    pattern = np.rint(
+        np.column_stack([20.0 + 0.2 * rows, 60.0 + 0.05 * rows])[:, :orders]
+    ).astype(int)
+    np.savetxt(path, pattern, fmt="%d")
+    return pattern
+
+
+def test_save_writes_a_corrected_pattern_beside_the_corrected_table(tmp_path):
+    """The CLI and the bench must not disagree about which detector they mean."""
+
+    paths = _touch_inputs(tmp_path)
+    base_pattern = _write_pattern(paths["pattern"])
+    settings = tmp_path / "settings.toml"
+    table = tmp_path / "adjusted.txt"
+    pattern_out = tmp_path / "adjusted_pattern.txt"
+
+    with patch(
+        "echelle_spectra.alignment_cli.run_calibration_alignment",
+        return_value=_fake_result(),
+    ), \
+        pytest.raises(SystemExit) as exc:
+        main(
+            [
+                str(paths["signal"]),
+                str(paths["background"]),
+                str(paths["sphere"]),
+                str(paths["sphere_background"]),
+                "--calibration-dir",
+                str(tmp_path),
+                "--settings-out",
+                str(settings),
+                "--table-out",
+                str(table),
+                "--pattern-out",
+                str(pattern_out),
+                "--save",
+            ]
+        )
+
+    assert exc.value.code == 0
+    saved = np.loadtxt(pattern_out, dtype=int)
+    assert saved.shape == base_pattern.shape
+    # dx -14 px against a sloping trace, so the pattern really moved.
+    assert not np.array_equal(saved, base_pattern)
+    assert "# Base pattern file: pattern_CMOS_20250926.txt" in pattern_out.read_text()
+    assert 'output_pattern_file = "adjusted_pattern.txt"' in settings.read_text()
+
+
+def test_save_names_the_pattern_after_the_dataset_by_default(tmp_path):
+    paths = _touch_inputs(tmp_path)
+    _write_pattern(paths["pattern"])
+
+    with patch(
+        "echelle_spectra.alignment_cli.run_calibration_alignment",
+        return_value=_fake_result(),
+    ), \
+        pytest.raises(SystemExit):
+        main(
+            [
+                str(paths["signal"]),
+                str(paths["background"]),
+                str(paths["sphere"]),
+                str(paths["sphere_background"]),
+                "--calibration-dir",
+                str(tmp_path),
+                "--save",
+            ]
+        )
+
+    expected = tmp_path / "alignments" / "pattern_CMOS_20250926_aligned_to_20250926.txt"
+    assert expected.is_file()
+
+
+def test_save_refuses_an_existing_pattern_without_overwrite(tmp_path):
+    paths = _touch_inputs(tmp_path)
+    _write_pattern(paths["pattern"])
+    pattern_out = tmp_path / "adjusted_pattern.txt"
+    pattern_out.touch()
+
+    with patch("echelle_spectra.alignment_cli.run_calibration_alignment") as run_alignment, \
+        pytest.raises(SystemExit) as exc:
+        main(
+            [
+                str(paths["signal"]),
+                str(paths["background"]),
+                str(paths["sphere"]),
+                str(paths["sphere_background"]),
+                "--calibration-dir",
+                str(tmp_path),
+                "--pattern-out",
+                str(pattern_out),
                 "--save",
             ]
         )

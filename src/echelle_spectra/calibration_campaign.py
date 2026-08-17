@@ -44,11 +44,13 @@ from .snapshot import (
 from .tools.calibration_alignment import (
     AlignmentSettings,
     CalibrationTableLine,
+    PatternCorrection,
     RigidTransform,
     apply_rigid_correction_to_lines,
     load_wavelength_table,
     save_alignment_settings,
     table_vetting,
+    write_corrected_pattern_table,
     write_wavelength_table,
 )
 from .tools.line_catalog import LINE_FAMILY_LABELS, SpectralLine, load_line_table
@@ -74,6 +76,7 @@ __all__ = [
     "LoadedFrameRecord",
     "MeasurementRecord",
     "MeasurementRole",
+    "PatternCorrection",
     "ReferenceState",
     "RoleTriageVerdict",
     "SaturationClusters",
@@ -94,6 +97,7 @@ __all__ = [
     "suggest_file_roles",
     "triage_exposure",
     "triage_for_role",
+    "write_corrected_pattern_table",
     "write_corrected_wavelength_table",
 ]
 
@@ -1496,6 +1500,7 @@ class CalibrationCampaignSession:
         self.save_state = SaveState.NOT_READY
         self.saved_snapshot: Snapshot | None = None
         self.wavelength_correction: WavelengthCorrection | None = None
+        self.pattern_correction: PatternCorrection | None = None
         self.last_error = ""
 
     def observe_file(self, path: str | Path) -> FileRoleSuggestion:
@@ -1865,6 +1870,7 @@ class CalibrationCampaignSession:
         self.save_state = SaveState.NOT_READY
         self.saved_snapshot = None
         self.wavelength_correction = None
+        self.pattern_correction = None
         self.last_error = ""
 
     def _records(self, role: MeasurementRole, family: str = "") -> tuple[MeasurementRecord, ...]:
@@ -2307,9 +2313,17 @@ class CalibrationCampaignSession:
     def _saved_snapshot_detail(self) -> str:
         if self.saved_snapshot is None:
             return self.last_error or "save only after every prerequisite is explicit"
-        if self.wavelength_correction is None:
+        # Both halves of the calibration are reported, because a snapshot whose
+        # table moved and whose pattern did not is the one failure this line
+        # would otherwise hide.
+        reasons = [
+            correction.reason
+            for correction in (self.wavelength_correction, self.pattern_correction)
+            if correction is not None
+        ]
+        if not reasons:
             return self.saved_snapshot.snapshot_id
-        return f"{self.saved_snapshot.snapshot_id} — {self.wavelength_correction.reason}"
+        return f"{self.saved_snapshot.snapshot_id} — " + "; ".join(reasons)
 
     def _complete_lamps(self) -> tuple[str, ...]:
         """Lamps that carry both a signal and a background this session."""
@@ -2787,7 +2801,11 @@ class CalibrationCampaignSession:
 
         The saved ``wavelength.txt`` is the base table with the solved rigid
         transform applied, so the snapshot carries the calibration the bench
-        actually measured rather than the table it started from.
+        actually measured rather than the table it started from.  The saved
+        ``pattern.txt`` is the base pattern with *the same* transform applied,
+        because a snapshot whose table speaks the measured detector and whose
+        pattern still speaks the reference one would extract every order off
+        the band its own table points into.
         """
 
         self._update_save_state(alignment)
@@ -2808,7 +2826,7 @@ class CalibrationCampaignSession:
             if record.role in LAMP_ROLES
         ]
         self.save_state = SaveState.SAVING
-        staging = Path(tempfile.mkdtemp(prefix=f".{snapshot_id}.wavelength-"))
+        staging = Path(tempfile.mkdtemp(prefix=f".{snapshot_id}.calibration-"))
         try:
             epoch = dict(validity) if validity else default_validity(snapshot_id)
             settings = self.alignment_settings(
@@ -2818,7 +2836,7 @@ class CalibrationCampaignSession:
                 notes=notes,
                 created_at=str(epoch.get("date_from", "")),
             )
-            corrected = staging / self.wavelength_source.name
+            corrected = staging / f"wavelength-{self.wavelength_source.name}"
             correction = write_corrected_wavelength_table(
                 self.wavelength_source,
                 corrected,
@@ -2826,12 +2844,20 @@ class CalibrationCampaignSession:
                 transform=alignment.transform,
                 metadata=self._table_provenance(settings),
             )
+            corrected_pattern = staging / f"pattern-{self.pattern_source.name}"
+            pattern_correction = write_corrected_pattern_table(
+                self.pattern_source,
+                corrected_pattern,
+                transform=alignment.transform,
+                metadata=self._table_provenance(settings),
+                identity_shift_px=IDENTITY_SHIFT_PX,
+            )
             snapshot = create_snapshot(
                 destination_root,
                 snapshot_id=snapshot_id,
                 detector=detector,
                 files={
-                    "pattern": self.pattern_source,
+                    "pattern": corrected_pattern,
                     "wavelength": corrected,
                     "sphere": sphere.path,
                     "sphere_background": sphere_background.path,
@@ -2853,6 +2879,8 @@ class CalibrationCampaignSession:
                     "rms_px": alignment.rms_px,
                     "wavelength_correction_applied": correction.applied,
                     "wavelength_max_shift_px": correction.max_shift_px,
+                    "pattern_correction_applied": pattern_correction.applied,
+                    "pattern_max_shift_px": pattern_correction.max_shift_px,
                     **self._vetting_record(),
                     **self._validation_record(alignment),
                 },
@@ -2874,6 +2902,7 @@ class CalibrationCampaignSession:
             shutil.rmtree(staging, ignore_errors=True)
         self.saved_snapshot = validated
         self.wavelength_correction = correction
+        self.pattern_correction = pattern_correction
         self.save_state = SaveState.VALIDATED
         self.last_error = ""
         return validated
