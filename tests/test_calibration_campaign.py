@@ -1183,9 +1183,14 @@ def test_expected_lines_are_the_lamps_own_rows_not_a_second_catalog():
     the expected-lines table did not carry it, and labelled three NeI lines in
     order 6 under a panel reading "0 expected Ne lines in this order". The
     cause was two sources: sticks from the curated wavelength table, rows from
-    the packaged NIST Ne cache interpolated onto the order. That cache stops at
-    638.3 nm and starts at 580.4 nm, so it can neither see 640.225 nor reach
-    order 6 at all.
+    the packaged NIST Ne cache interpolated onto the order.
+
+    The cache has since been widened from the 580.4--638.3 nm Fulcher window to
+    the whole 380--810 nm instrument range, so it now reaches both. That closes
+    the gap that made the two sources visibly disagree and leaves the real
+    point standing on its own: the panel lists the lamp's curated rows, and the
+    catalog having plenty to say about an order changes nothing about which
+    rows are listed.
     """
 
     rows = _packaged_wavelength_rows()
@@ -1199,11 +1204,13 @@ def test_expected_lines_are_the_lamps_own_rows_not_a_second_catalog():
         for line in order_seven
     ), [line.label for line in order_seven]
 
-    # Order 6 carries neon and now says so; the packaged cache holds none of it.
+    # Order 6 carries neon and says so. The widened cache now has plenty of
+    # neon to offer this order — and the panel still lists three rows, because
+    # the curated table is what it lists and the catalog only annotates.
     order_six = expected_lines_for_order(reference, 6)
     assert len(order_six) == 3
     assert {line.species for line in order_six} == {"NeI"}
-    assert catalog_lines_for_order(rows, 6, "Ne") == ()
+    assert len(catalog_lines_for_order(rows, 6, "Ne")) > len(order_six)
 
     # Every listed line is an anchorable curated row, in detector order.
     for line in (*order_six, *order_seven):

@@ -136,11 +136,33 @@ ignore = ["E203", "E266", "E501"]
 # The pre-0.3.0 numerical core predates the Fleet lint contract. Keep its
 # behavior stable while making import/error hygiene part of the gate; new
 # campaign modules receive the complete science-package rules above.
+#
+# The `tools/` relaxation is spelled out file by file rather than as a
+# `tools/*.py` glob. Ruff unions every matching pattern's ignores, so a glob
+# there cannot be narrowed for one file — it would silently hand the legacy
+# exemption to every new module that lands beside the old ones, which is the
+# opposite of what the paragraph above asks for. Listing the pre-0.3.0 files
+# keeps their behavior identical and leaves new arrivals on the full rule set.
 [tool.ruff.lint.per-file-ignores]
 "src/echelle_spectra/echelle_spectra_gui.py" = ["UP"]
 "src/echelle_spectra/resources/window_layout.py" = ["UP", "B"]
 "src/echelle_spectra/spectrocube_cli.py" = ["C90"]
-"src/echelle_spectra/tools/*.py" = ["UP", "B", "C90", "E722", "E731", "E741"]
+"src/echelle_spectra/tools/__init__.py" = ["UP", "B", "C90", "E722", "E731", "E741"]
+"src/echelle_spectra/tools/calibration_alignment.py" = ["UP", "B", "C90", "E722", "E731", "E741"]
+"src/echelle_spectra/tools/config_loader.py" = ["UP", "B", "C90", "E722", "E731", "E741"]
+"src/echelle_spectra/tools/echelle.py" = ["UP", "B", "C90", "E722", "E731", "E741"]
+"src/echelle_spectra/tools/emissionbands.py" = ["UP", "B", "C90", "E722", "E731", "E741"]
+"src/echelle_spectra/tools/emissiondata.py" = ["UP", "B", "C90", "E722", "E731", "E741"]
+"src/echelle_spectra/tools/image_line_overlay.py" = ["UP", "B", "C90", "E722", "E731", "E741"]
+"src/echelle_spectra/tools/line_catalog.py" = ["UP", "B", "C90", "E722", "E731", "E741"]
+"src/echelle_spectra/tools/line_overlay.py" = ["UP", "B", "C90", "E722", "E731", "E741"]
+"src/echelle_spectra/tools/line_validation.py" = ["UP", "B", "C90", "E722", "E731", "E741"]
+"src/echelle_spectra/tools/loader.py" = ["UP", "B", "C90", "E722", "E731", "E741"]
+"src/echelle_spectra/tools/nist_lamp_calibration.py" = ["UP", "B", "C90", "E722", "E731", "E741"]
+"src/echelle_spectra/tools/nist_synthetic_overlay.py" = ["UP", "B", "C90", "E722", "E731", "E741"]
+"src/echelle_spectra/tools/pattern_extraction.py" = ["UP", "B", "C90", "E722", "E731", "E741"]
+"src/echelle_spectra/tools/spectrocube_export.py" = ["UP", "B", "C90", "E722", "E731", "E741"]
+"src/echelle_spectra/tools/wavelength_calibration_qc.py" = ["UP", "B", "C90", "E722", "E731", "E741"]
 
 [tool.setuptools]
 include-package-data = true

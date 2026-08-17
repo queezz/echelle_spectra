@@ -11,10 +11,24 @@ from .line_catalog import LINE_FAMILIES, SpectralLine, load_line_table
 
 __all__ = [
     "LINE_OVERLAY_STYLES",
+    "SPECTRUM_CURVE_COLORS",
     "LineOverlayManager",
     "OverlayStyle",
     "select_overlay_lines",
 ]
+
+
+#: The two spectrum curves an overlay is drawn on top of, by plot name.
+#:
+#: The raw counts trace is yellow-green and the calibrated trace is pure red,
+#: and a marker is useless when it is the colour of the curve it annotates —
+#: the Ne family shipped green sticks over the green counts curve and vanished
+#: into it.  The palette below is answerable to these two values, so they live
+#: here beside it rather than only in the GUI that sets the pens.
+SPECTRUM_CURVE_COLORS: Mapping[str, str] = {
+    "counts": "#6ac600",
+    "calibrated": "#ff0000",
+}
 
 
 @dataclass(frozen=True)
@@ -25,23 +39,56 @@ class OverlayStyle:
     dash: tuple[int, int]
 
 
+#: One hue per family, used by the 1-D sticks and labels and, lifted toward
+#: white, by the 2-D detector boxes — so a family is the same colour in both
+#: views and the operator learns five colours rather than ten.
+#:
+#: Every hue sits in the cool arc.  The two curve hues are red at 0 deg and
+#: yellow-green at 88 deg, and they *bracket* the warm colours: orange, amber,
+#: and yellow all fall between the two curves and read as a dim version of one
+#: of them on the dark plot background.  So the palette starts past green at
+#: 157 deg and runs to magenta at 314 deg, which leaves every family at least
+#: 45 deg from either curve.
+#:
+#: Within that arc the three lamp families are placed as far apart as it
+#: allows — 157 / 228 / 314 deg — because they are the ones an operator turns
+#: on together while identifying a lamp.  The hydrogen families fill the gaps,
+#: and no two families are closer than 33 deg.  Dash patterns stay distinct as
+#: a second channel, but colour does the work.
 LINE_OVERLAY_STYLES: Mapping[str, OverlayStyle] = {
-    "balmer": OverlayStyle("#f778ba", (6, 3)),
-    "fulcher": OverlayStyle("#36c9d0", (3, 2)),
-    "thar": OverlayStyle("#ff9f43", (5, 2)),
-    "ne": OverlayStyle("#70d66b", (4, 2)),
-    "hg": OverlayStyle("#ffd166", (2, 2)),
+    "balmer": OverlayStyle("#b377f8", (6, 3)),  # violet, 268 deg
+    "fulcher": OverlayStyle("#2bcdee", (3, 2)),  # cyan, 190 deg
+    "thar": OverlayStyle("#30e8a2", (5, 2)),  # mint, 157 deg
+    "ne": OverlayStyle("#5677fb", (4, 2)),  # blue, 228 deg
+    "hg": OverlayStyle("#f368d2", (2, 2)),  # magenta, 314 deg
 }
 
 
 def _atomic_strength_threshold(width_nm: float) -> float:
+    """How strong a cached lamp row must be to earn room in a view this wide.
+
+    These are floors on
+    :attr:`~.line_catalog.SpectralLine.relative_intensity`, which is a
+    lamp-context strength spanning five decades across the packaged caches, so
+    they are not evenly spaced.  They were set against the owner's bright Ne
+    frame ``local/20250926_calib/Ne-0.02s-x3-bright-lines.sif``: over the whole
+    401--802 nm detector the widest floor keeps 36 Ne rows of which 21 sit on a
+    measurable blob and exactly one is an ion, where a floor of 0.02 would keep
+    253 rows, 228 of them on dark detector and 170 of those Ne II.  0.08 rather
+    than 0.10 because it costs Ne nothing — the same 36 rows — and buys Hg its
+    576.96 nm line back.
+
+    The narrowest view keeps everything.  Zooming that far in *is* the request
+    to see the weak rows, ionized stages included.
+    """
+
     if width_nm <= 1.0:
         return 0.0
     if width_nm <= 5.0:
-        return 0.05
+        return 0.002
     if width_nm <= 20.0:
-        return 0.12
-    return 0.25
+        return 0.02
+    return 0.08
 
 
 def _evenly_spaced(lines: list[SpectralLine], count: int) -> list[SpectralLine]:

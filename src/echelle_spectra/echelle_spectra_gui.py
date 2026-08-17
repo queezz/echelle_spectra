@@ -15,7 +15,7 @@ from .tools import echelle as ech
 from .tools import emissionbands as eb
 from .tools import emissiondata as ebd
 from .tools.image_line_overlay import DetectorLineOverlay, OrderTraceOverlay
-from .tools.line_overlay import LineOverlayManager
+from .tools.line_overlay import SPECTRUM_CURVE_COLORS, LineOverlayManager
 
 # What one camera's attempt at one file ended up seeing.  A single "it did not
 # work" sentinel used to stand for all of these, so a file the reader could not
@@ -91,8 +91,10 @@ class EchelleSpectraGUI(QMainWindow, window_layout.Ui_MainWindow):
         # set widget statuses
         self.CameraCCD.setChecked(False)
         self.CameraCMOS.setChecked(True)
-        self.spec_counts = self.p2.plot(pen="#6ac600")
-        self.spec_wm = self.p3.plot(pen="r")
+        # The overlay palette is chosen to contrast with these two, so they are
+        # named once and read from there rather than written twice.
+        self.spec_counts = self.p2.plot(pen=SPECTRUM_CURVE_COLORS["counts"])
+        self.spec_wm = self.p3.plot(pen=SPECTRUM_CURVE_COLORS["calibrated"])
         self.line_overlays = LineOverlayManager(max_labels=14)
         self.line_overlays.register_plot("counts", self.p2, labels=False)
         self.line_overlays.register_plot("calibrated", self.p3, labels=True)

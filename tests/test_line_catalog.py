@@ -64,11 +64,60 @@ def test_filter_line_table_keeps_full_records():
         load_line_table("ne"),
         minimum_nm=600.0,
         maximum_nm=610.0,
-        minimum_relative_intensity=0.25,
+        minimum_relative_intensity=0.02,
     )
     assert selected
     assert all(600.0 <= line.wavelength_nm <= 610.0 for line in selected)
-    assert all(line.relative_intensity >= 0.25 for line in selected)
+    assert all(line.relative_intensity >= 0.02 for line in selected)
+
+
+def test_every_lamp_row_across_the_instrument_carries_a_strength():
+    """The annotation has to reach every row, not only the ones in one window.
+
+    Selection filters on ``relative_intensity``, so a row without one is a row
+    that cannot be drawn — which is how Ne I 640.2248, the brightest line on
+    the owner's frame, went unmarked while sitting two nanometres outside the
+    packaged cache.
+    """
+
+    for family in ("ne", "hg", "thar"):
+        lines = load_line_table(family)
+        assert all(line.relative_intensity is not None for line in lines), family
+        assert all(0.0 < line.relative_intensity <= 1.0 for line in lines), family
+        assert lines[0].wavelength_nm <= 401.0, family
+        assert lines[-1].wavelength_nm >= 802.0, family
+
+
+def test_a_lamp_prefers_its_neutral_lines_to_its_ions():
+    """One footing across a lamp's species, so strength ranks the way light does.
+
+    Cached Ne II rows were normalized on their own scale and so reported the
+    same 1.0 as the brightest Ne I line, and a selection sorted on strength
+    duly preferred ions a neon lamp barely excites.  On the owner's frame that
+    put 29 of the Ne boxes on dark detector.
+    """
+
+    for family, neutral, ion in (("ne", "Ne I", "Ne II"), ("hg", "Hg I", "Hg II")):
+        lines = load_line_table(family)
+        strongest = {
+            species: max(
+                line.relative_intensity
+                for line in lines
+                if line.species == species
+            )
+            for species in (neutral, ion)
+        }
+        assert strongest[neutral] > strongest[ion], (family, strongest)
+
+    # An ion is ranked below the neutral stage, not deleted: the curated
+    # 20240305 table anchors on Hg II 794.4555 and marks it OK.
+    hg_ii = [
+        line
+        for line in load_line_table("hg")
+        if line.species == "Hg II" and abs(line.wavelength_nm - 794.4555) < 0.01
+    ]
+    assert len(hg_ii) == 1
+    assert hg_ii[0].relative_intensity > 0.0
 
 
 def test_unknown_line_family_is_rejected():

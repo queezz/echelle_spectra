@@ -20,11 +20,13 @@ __all__ = [
     "NistLampPreset",
     "COMMON_NIST_SPECIES",
     "COMMON_LAMP_PRESETS",
+    "LAMP_STAGE_WEIGHTS",
     "default_nist_cache_dir",
     "lamp_species",
     "load_nist_asd_exports",
     "normalize_species_key",
     "resolve_cached_line_lists",
+    "stage_weight_for_species",
 ]
 
 
@@ -34,6 +36,39 @@ _ROMAN_TO_STAGE = {
     "III": 3,
     "IV": 4,
 }
+
+
+#: How much of a low-pressure lamp's light each ionization stage carries.
+#:
+#: NIST's ``Rel. Int.`` column is **not comparable across ionization stages**,
+#: and the caches say so plainly.  Ne I and Ne II are transcribed from
+#: different line references (``L3469``/``L4498``/``L3451`` against ``L1406``)
+#: and their scales top out at 100000 and 400.  Hg is worse and in the opposite
+#: direction: Hg II is printed against a 25,000,000 maximum while Hg I's
+#: strongest line in the same range is 12,000 — three decades saying the ion
+#: outshines the neutral, which no mercury lamp has ever done.  So neither
+#: normalizing per spectrum (which makes every stage's strongest line 1.0, the
+#: defect that put Ne II boxes on dark detector) nor pooling the raw numbers
+#: across stages (which would hand a Hg lamp over to Hg II) can be read off
+#: NIST alone.
+#:
+#: What *is* known belongs to the lamp rather than to the database: a
+#: low-pressure discharge of element X radiates overwhelmingly in the neutral
+#: X I spectrum, and its ionized stages appear roughly one to two decades
+#: down — weakly, but really, which is why the curated 20240305 table anchors
+#: on Hg II 794.4555 nm and marks it OK.  These weights are that prior, stated
+#: once and applied where lamp context is what the caller means.  The
+#: conservative decade is used, so an ion is placed below the neutral stage
+#: without being placed out of sight.
+LAMP_STAGE_WEIGHTS: Mapping[int, float] = {1: 1.0, 2: 0.1, 3: 0.01, 4: 0.001}
+
+
+def stage_weight_for_species(species_key: str) -> float:
+    """Return the lamp-context weight of one species' ionization stage."""
+
+    key = normalize_species_key(species_key)
+    stage = _ROMAN_TO_STAGE[COMMON_NIST_SPECIES[key].ion]
+    return LAMP_STAGE_WEIGHTS[stage]
 
 
 @dataclass(frozen=True)
@@ -190,7 +225,23 @@ def load_nist_asd_exports(
     min_wavelength_nm: float,
     max_wavelength_nm: float,
 ) -> pd.DataFrame:
-    """Load cached NIST ASD exports into normalized wavelength/weight rows."""
+    """Load cached NIST ASD exports into normalized wavelength/weight rows.
+
+    Three weight columns come back, and they mean different things:
+
+    ``weight_raw``
+        The number NIST printed, on whatever scale that one spectrum's source
+        reference used.  Comparable only against other rows of the same
+        spectrum.
+    ``spectrum_weight``
+        ``weight_raw`` as a fraction of that spectrum's strongest cached line.
+        Still a per-spectrum reading: every species' brightest line is 1.0.
+    ``weight``
+        ``spectrum_weight`` scaled by :data:`LAMP_STAGE_WEIGHTS`, which is the
+        column to rank by when the question is "what does this lamp put on the
+        detector".  Without it a Ne II line the lamp barely excites reports the
+        same 1.0 as the brightest Ne I line in the frame.
+    """
     frames = []
     for raw_species, raw_path in nist_exports.items():
         species = normalize_species_key(raw_species)
@@ -234,6 +285,8 @@ def load_nist_asd_exports(
                 "aki",
                 "weight_raw",
                 "source_path",
+                "spectrum_weight",
+                "stage_weight",
                 "weight",
             ]
         )
@@ -245,7 +298,11 @@ def load_nist_asd_exports(
         & (lines["wavelength_nm"] <= max_wavelength_nm)
     ].copy()
     lines["weight_raw"] = lines["weight_raw"].fillna(1.0).clip(lower=0.1)
-    lines["weight"] = lines.groupby("species")["weight_raw"].transform(lambda x: x / x.max())
+    lines["spectrum_weight"] = lines.groupby("species")["weight_raw"].transform(
+        lambda x: x / x.max()
+    )
+    lines["stage_weight"] = lines["species"].map(stage_weight_for_species)
+    lines["weight"] = lines["spectrum_weight"] * lines["stage_weight"]
     return lines.sort_values(["wavelength_nm", "species"]).reset_index(drop=True)
 
 

@@ -78,6 +78,22 @@ class SpectralLine:
     source_reference: str
     source_resource: str
     relative_intensity: float | None = None
+    """Lamp-context strength in ``(0, 1]``, or ``None`` for a table without one.
+
+    For the NIST-backed lamp families this is the cached relative intensity as
+    a fraction of that spectrum's strongest cached line, scaled by the
+    ionization stage's
+    :data:`~echelle_spectra.tools.nist_lamp_calibration.LAMP_STAGE_WEIGHTS`.
+    The stage scaling is what makes the number comparable **between** species
+    of one lamp: NIST prints each spectrum on its own source's scale, so
+    without it the strongest Ne II line and the strongest Ne I line both read
+    1.0 and a selection ranked on strength prefers ions a neon lamp barely
+    excites.
+
+    It is a selection aid, not a photometric quantity: do not read a line ratio
+    off two of these.
+    """
+
     notes: str = ""
     blended: bool = False
     """True when another catalog line falls inside the instrumental width.

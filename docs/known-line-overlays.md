@@ -22,7 +22,31 @@ without losing those provenance fields.
 | --- | --- | --- |
 | Balmer | H-alpha through H-delta | Established Echelle air-wavelength validation values, shared with `emissiondata` and `echelle-validate-lines`. |
 | Fulcher H2 | 42 Q-branch lines in 0-0 through 3-3 | Numerically copied from the Fulcher Extractor resource archived at [Zenodo](https://doi.org/10.5281/zenodo.21372039). That resource traces the values to its early manual-extraction table but does not identify a primary publication. Echelle interprets them as air wavelengths to preserve its accepted validation convention. |
-| ThAr, Ne, Hg | Atomic and ionic lamp lines | Package-cached exports from the [NIST Atomic Spectra Database](https://physics.nist.gov/asd). Observed air wavelengths are preferred, with Ritz air values used when no observation is present. Relative intensity is normalized within each spectrum in the existing loader. |
+| ThAr, Ne, Hg | Atomic and ionic lamp lines | Package-cached exports from the [NIST Atomic Spectra Database](https://physics.nist.gov/asd), covering 380–810 nm. Observed air wavelengths are preferred, with Ritz air values used when no observation is present. Relative intensity is normalized within each spectrum and then scaled by ionization stage, so a lamp's species can be ranked against one another — see below. |
+
+### Why relative intensity is not NIST's number verbatim
+
+NIST prints each spectrum's `Rel. Int.` on the scale its own source reference
+used, and those scales do not line up between ionization stages. Ne I and Ne II
+come from different line references and top out at 100000 and 400; Hg is worse
+and inverted, with Hg II printed against a 25,000,000 maximum while Hg I's
+strongest line in the same range is 12,000.
+
+So neither reading works on its own. Normalizing per spectrum makes every
+stage's brightest line 1.0, which is how Ne II rows a neon lamp barely excites
+came to outrank Ne I lines and put marks on dark detector. Pooling the raw
+numbers across stages would hand a mercury lamp over to Hg II.
+
+`relative_intensity` is therefore the per-spectrum fraction scaled by
+`LAMP_STAGE_WEIGHTS` — 1.0 for the neutral stage, 0.1 for singly ionized — a
+stated lamp-physics prior rather than a claim about the database. A
+low-pressure discharge radiates overwhelmingly in its neutral spectrum, and its
+ions appear roughly a decade or two down: weakly, but really, which is why the
+curated 20240305 table anchors on Hg II 794.4555 nm and marks it OK. Read the
+field as a selection aid; do not take a line ratio off two of them.
+
+Regenerate the caches with `python -m echelle_spectra.tools.nist_cache_refresh`, which writes
+down the exact ASD query that produced them.
 
 The Fulcher table is deliberately a position/identification aid. Molecular
 deblending, intensity extraction, and population analysis remain in the Fulcher
@@ -60,9 +84,13 @@ Zooming exposes the local line structure:
 
 ![NIST Ne I and Ne II labels after zooming to 580–610 nm](assets/known-line-overlays/ne-zoom.png)
 
-The NIST caches currently cover roughly `578–640 nm`; their lamp overlays are
-therefore empty outside that packaged interval. Balmer and Fulcher tables cover
-their own listed wavelengths.
+The NIST caches cover `380–810 nm`, which brackets the ~401–802 nm the CMOS
+wavelength solution reaches, so a lamp overlay has something to say anywhere on
+the detector. They covered only `578–640 nm` — the Fulcher window — through
+v0.10, which left every lamp overlay empty outside that interval and, less
+visibly, left strong lines just past the edge with no strength annotation and
+therefore filtered out of both views. Balmer and Fulcher tables cover their own
+listed wavelengths.
 
 ## Relationship to line validation
 

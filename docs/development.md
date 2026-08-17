@@ -61,6 +61,34 @@ assemble kits into a separate external destination with `scripts.nifs_kit`.
 
 ---
 
+## Refreshing the packaged NIST caches
+
+The lamp overlays and the bench's expected-line annotations read cached NIST ASD
+exports from `src/echelle_spectra/resources/nist_asd_cache/`. A calibration run
+never queries NIST; refreshing the cache is a separate, deliberate act:
+
+```bash
+python -m echelle_spectra.tools.nist_cache_refresh                 # every packaged lamp
+python -m echelle_spectra.tools.nist_cache_refresh --species NeI NeII --dry-run
+```
+
+Run it **before travel**, so an offline instrument carries current line data,
+and **when the instrument's range moves** — the packaged spans are 380–810 nm
+against a detector reaching ~401–802 nm, and a re-alignment that walks curated
+rows past a cache edge leaves those lines with no strength annotation, which
+silently removes them from both overlay views.
+
+The module carries the exact ASD query as its parameter block, recovered by
+replaying the web form until the response reproduced the packaged files byte for
+byte. It refuses to write anything that is not a tab-delimited export, so a
+malformed query cannot cache an HTML error page over packaged data. Widening a
+span writes new `nist_<element>_<ion>_<low>_<high>.csv` files and removes the
+narrower ones they supersede. It has no `echelle-*` console script on purpose:
+it reaches the network and rewrites packaged resources, which is maintenance,
+not an operator command.
+
+---
+
 ## Historical HTML docs
 
 The `html-docs` branch contains the original static HTML documentation pages (`index.html` and `band_data.html`). That branch is **historical** — do not delete it during or after this migration. The new MkDocs site supersedes it but the old pages remain available for reference.

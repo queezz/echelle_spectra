@@ -66,9 +66,11 @@ echelle-nist-overlay \
 
 Common lamp presets can also be resolved from cached NIST ASD exports. Presets
 include `thar`, `hg`, `ne`, `he`, `ar`, `th`, `h`, and `h2`; ion stages I and II
-are included where useful. The package bundles small curated ThAr, Hg, and Ne
-caches covering 578-640 nm for Fulcher-alpha calibration review, so those presets
-can be used without an explicit cache directory in that window:
+are included where useful. The package bundles ThAr, Hg, and Ne caches covering
+380-810 nm — the whole range the instrument reaches, with margin — so those
+presets can be used without an explicit cache directory anywhere on the
+detector. Regenerate them with `python -m echelle_spectra.tools.nist_cache_refresh`, which
+carries the exact NIST ASD query:
 
 ```bash
 echelle-nist-overlay \
@@ -82,7 +84,8 @@ echelle-nist-overlay \
 
 Use `--line-list-dir` for lamps or wavelength ranges not present in the bundled
 cache. The CLI still requires cached NIST ASD exports; it does not query NIST
-during a calibration run. Use `echelle-nist-overlay --list-lamps` to inspect the
+during a calibration run — refreshing the cache is a deliberate act performed by
+`echelle_spectra.tools.nist_cache_refresh`, not a side effect of calibrating. Use `echelle-nist-overlay --list-lamps` to inspect the
 built-in presets.
 
 The overlay writes:
