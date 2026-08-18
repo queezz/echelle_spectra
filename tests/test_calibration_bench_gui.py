@@ -22,6 +22,7 @@ from echelle_spectra.calibration_bench import (
     BenchFrame,
     CalibrationBenchSession,
     Residual,
+    StableSifWatcher,
 )
 from echelle_spectra.calibration_bench_gui import (
     _PACKAGE_DIR,
@@ -72,6 +73,7 @@ from echelle_spectra.calibration_campaign import (
     triage_exposure,
     triage_for_role,
 )
+from echelle_spectra.snapshot import Snapshot
 from echelle_spectra.tools.calibration_alignment import CalibrationTableLine
 
 _COLUMNS = 80
@@ -414,13 +416,26 @@ def test_bench_views_lead_with_triage_and_manual_input(qt_app, tmp_path):
     window.close()
 
 
-def test_with_no_files_the_drop_target_is_the_primary_surface(qt_app, tmp_path):
+def test_an_empty_bench_offers_its_two_verbs_and_teaches_nothing(qt_app, tmp_path):
+    """Owner, 2026-08-18: "I don't need reminding."
+
+    The dashed "DROP SIF FILES HERE / any names, any order, as many as you
+    like" panel taught a gesture to the person who wrote the drop handler, and
+    charged the shortest column on screen a hundred pixels for the lesson. It
+    is gone, along with the stylesheet rule that painted it; the empty table is
+    its own invitation, and dropping still works everywhere it worked before
+    (pinned by the drop tests below, which drive the real Qt events).
+    """
+
     window = _manual_window(tmp_path)
     window.show()
     qt_app.processEvents()
 
-    assert window.drop_hint.isVisible()
-    assert "DROP SIF FILES HERE" in window.drop_hint.text()
+    assert not hasattr(window, "drop_hint")
+    assert "dropTarget" not in window.styleSheet()
+    for widget in window.findChildren(QtWidgets.QLabel):
+        assert "DROP SIF FILES HERE" not in widget.text()
+    assert window.open_folder_button.isEnabled()
     assert window.add_files_button.isEnabled()
     assert window.file_table.rowCount() == 0
     items = {
@@ -451,7 +466,6 @@ def test_dropped_files_are_triaged_before_any_role(qt_app, tmp_path):
     _wait_for_loads(window, qt_app)
 
     assert window.file_table.rowCount() == 2
-    assert not window.drop_hint.isVisible()
     assert set(window.campaign.loaded) == set(paths)
     # Triage happened; roles did not.
     assert not window.campaign.measurements
@@ -4693,6 +4707,367 @@ def test_the_bench_says_which_tables_it_resolved(qt_app, tmp_path: Path, capsys)
     assert "pattern_CMOS_20240305.txt" in printed
     assert str(_PACKAGE_DIR) in printed
     assert started["campaign"].pattern_source.is_absolute()
+
+
+# ----------------------------------------------------------------------
+# Open calibration folder: the whole session moves, and no restart
+# ----------------------------------------------------------------------
+
+
+def _calibration_folder(tmp_path: Path, name: str) -> Path:
+    """A folder that reads like one of the owner's own: dated, and unambiguous."""
+
+    folder = tmp_path / name
+    folder.mkdir()
+    for entry in _REAL_2025_NAMES:
+        (folder / entry).write_bytes(b"sif\n")
+    return folder
+
+
+def _bench_at(tmp_path: Path, folder: Path, **options) -> CalibrationBenchWindow:
+    """A bench launched at *folder* and holding nothing yet, as ``main`` leaves it."""
+
+    window = _manual_window(tmp_path, window_options={"folder": folder, **options})
+    window.output_root, window.config_root = bench_gui.default_bench_roots(folder)
+    window._describe_output_roots()
+    # The shared fixture hands every window a frame; a freshly launched bench
+    # has none, and an empty bench is the one that must never be questioned.
+    window.session.forget_frame()
+    window.refresh()
+    return window
+
+
+def _answer_folder_dialog(monkeypatch, folder: Path) -> list:
+    """Answer the folder picker through the module seam, not a real modal."""
+
+    asked: list = []
+    monkeypatch.setattr(
+        bench_gui,
+        "choose_calibration_folder",
+        lambda parent, start: (asked.append(Path(start)) or str(folder)),
+    )
+    return asked
+
+
+def _answer_question(monkeypatch, reply) -> list:
+    asked: list[str] = []
+    monkeypatch.setattr(
+        QtWidgets.QMessageBox,
+        "question",
+        lambda *args, **values: (asked.append(args[2]) or reply),
+    )
+    return asked
+
+
+def test_opening_a_calibration_folder_rebases_the_whole_session(
+    qt_app, tmp_path, monkeypatch
+):
+    """Owner, 2026-08-18: "So I can start GUI, and go through many calibration
+    folders. I probably would have to do that at NIFS."
+
+    Picking a folder is the launch argument, minus the process: both roots are
+    derived inside it, the identity is re-dated from its name, its SIFs come in
+    through the ordinary drop path so triage runs and the unambiguous roles
+    apply themselves, the dialogs and the watch follow it — and nothing the
+    previous folder produced comes along.
+    """
+
+    first = _calibration_folder(tmp_path, "20250926_calib")
+    second = _calibration_folder(tmp_path, "20261101_calib")
+    watcher = StableSifWatcher(first, required_unchanged_polls=3, minimum_age_s=2.0)
+    window = _bench_at(tmp_path, first, watcher=watcher)
+    window.show()
+
+    _answer_folder_dialog(monkeypatch, first)
+    window.open_folder_button.click()
+    _wait_for_loads(window, qt_app)
+
+    assert len(window.campaign.measurements) == len(_REAL_2025_NAMES)
+    assert window.campaign.assigned_lamps == ("Ne",)
+    first_files = set(window.campaign.loaded)
+    # Work in progress the operator would lose: an anchor, and a comparison.
+    window.session.anchors[(0, 1.0, 2.0)] = object()
+    window.campaign.comparison = campaign_module.SphereComparison(
+        ComparisonState.READY, "measured against the first folder"
+    )
+
+    _answer_folder_dialog(monkeypatch, second)
+    offered = _answer_question(monkeypatch, QtWidgets.QMessageBox.Yes)
+    window.open_folder_button.click()
+    _wait_for_loads(window, qt_app)
+
+    assert len(offered) == 1
+    # Both roots hang off the folder that was opened, through the one function
+    # the launch argument uses.
+    assert (window.output_root, window.config_root) == bench_gui.default_bench_roots(
+        second
+    )
+    assert str(second) in window.snapshot_root_value.text()
+    assert str(second) in window.config_root_value.text()
+    # The identity is re-dated by the folder's own name, and is the bench's
+    # guess again — the SIF headers may still fill it in.
+    assert window.snapshot_id_edit.text() == "20261101_cmos"
+    assert window.snapshot_date == date(2026, 11, 1)
+    assert window._snapshot_id_decided is False
+    # The new folder's files arrived as an arrival, so triage ran and the
+    # unambiguous names assigned themselves exactly as a drop's would.
+    assert {path.parent for path in window.campaign.loaded} == {second}
+    assert len(window.campaign.measurements) == len(_REAL_2025_NAMES)
+    assert {path.parent for path in window.campaign.measurements} == {second}
+    assert window.campaign.assigned_lamps == ("Ne",)
+    assert not first_files & set(window.campaign.loaded)
+    assert len(window._file_rows) == len(_REAL_2025_NAMES)
+    assert window.file_table.rowCount() == len(_REAL_2025_NAMES)
+    # And nothing measured on the old folder survived.
+    assert not window.session.anchors
+    assert window.campaign.comparison.state is ComparisonState.NOT_RUN
+    assert window.campaign.toml_state is TomlState.NOT_GENERATED
+    assert window.campaign.saved_snapshot is None
+    # The dialogs and the watch are aimed at the folder now on the bench.
+    assert window.last_folder == second
+    assert window.watcher.folder == second
+    assert window.watcher.required_unchanged_polls == 3
+    assert window.watcher.minimum_age_ns == 2_000_000_000
+    # And the Bench state strip finally names the calibration it is about.
+    assert str(second) in window.watch_value.text()
+    window.close()
+
+
+def test_unsaved_work_is_confirmed_once_and_cancel_leaves_the_session_alone(
+    qt_app, tmp_path, monkeypatch
+):
+    """One honest sentence, and only when there is something to lose."""
+
+    first = _calibration_folder(tmp_path, "20250926_calib")
+    second = _calibration_folder(tmp_path, "20261101_calib")
+    window = _bench_at(tmp_path, first)
+    window.show()
+
+    # An empty bench has nothing to lose, so it is asked nothing at all.
+    _answer_folder_dialog(monkeypatch, first)
+    never = _answer_question(monkeypatch, QtWidgets.QMessageBox.No)
+    window.open_folder_button.click()
+    _wait_for_loads(window, qt_app)
+
+    assert never == []
+    assert len(window.campaign.measurements) == len(_REAL_2025_NAMES)
+
+    before_files = set(window.campaign.loaded)
+    before_rows = list(window._file_rows)
+    before_identity = window.snapshot_id_edit.text()
+    before_roots = (window.output_root, window.config_root)
+
+    _answer_folder_dialog(monkeypatch, second)
+    offered = _answer_question(monkeypatch, QtWidgets.QMessageBox.No)
+    window.open_folder_button.click()
+    _wait_for_loads(window, qt_app)
+
+    assert len(offered) == 1
+    assert offered[0] == (
+        "Opening a new folder clears the current session — the alignment "
+        f"for {before_identity} was not saved."
+    )
+    # Cancelled means untouched: the same files, rows, identity and roots.
+    assert set(window.campaign.loaded) == before_files
+    assert window._file_rows == before_rows
+    assert window.snapshot_id_edit.text() == before_identity
+    assert (window.output_root, window.config_root) == before_roots
+    assert window.calibration_folder == first
+    assert "was not opened" in window.save_message_value.text()
+    window.close()
+
+
+def test_a_saved_folder_is_swapped_without_a_question(qt_app, tmp_path, monkeypatch):
+    """A validated snapshot is the answer to "was this saved?", so it is not asked.
+
+    The campaign's own ``saved_snapshot`` is the fact consulted, and it is
+    cleared by ``_invalidate_outputs`` the moment anything it was built from
+    changes — so this is a promise about a session that really is finished, not
+    about one that merely once pressed Save.
+    """
+
+    first = _calibration_folder(tmp_path, "20250926_calib")
+    second = _calibration_folder(tmp_path, "20261101_calib")
+    window = _bench_at(tmp_path, first)
+    window.show()
+    _answer_folder_dialog(monkeypatch, first)
+    window.open_folder_button.click()
+    _wait_for_loads(window, qt_app)
+
+    window.campaign.saved_snapshot = Snapshot(
+        window.output_root / "20250926_cmos",
+        {"id": "20250926_cmos", "detector": "cmos"},
+        (),
+    )
+    assert window._unsaved_session_warning() == ""
+
+    _answer_folder_dialog(monkeypatch, second)
+    never = _answer_question(monkeypatch, QtWidgets.QMessageBox.No)
+    window.open_folder_button.click()
+    _wait_for_loads(window, qt_app)
+
+    assert never == []
+    assert window.calibration_folder == second
+    # The swap went through the ordinary invalidation, so the saved snapshot of
+    # the folder that was left behind is not still claimed by the new one.
+    assert window.campaign.saved_snapshot is None
+    window.close()
+
+
+def test_the_chosen_pattern_and_wavelength_survive_the_folder_switch(
+    qt_app, tmp_path, monkeypatch
+):
+    """The operator picked those tables; a folder does not overrule the pick.
+
+    The band guard is what judges a carried-over pattern against the new
+    sphere, and it goes on reading the same file — which is exactly how a stale
+    choice announces itself rather than being silently swapped underneath.
+    """
+
+    first = _calibration_folder(tmp_path, "20250926_calib")
+    second = _calibration_folder(tmp_path, "20261101_calib")
+    window = _bench_at(tmp_path, first)
+    window.show()
+    chosen = (
+        window.campaign.pattern_source,
+        window.campaign.wavelength_source,
+        window.campaign.integral_source,
+    )
+    window.campaign.previous_sphere = tmp_path / "previous_sphere.sif"
+    window.campaign.previous_sphere_background = tmp_path / "previous_sphere_bg.sif"
+    lamps = window.campaign.suggested_lamps
+
+    _answer_folder_dialog(monkeypatch, second)
+    _answer_question(monkeypatch, QtWidgets.QMessageBox.Yes)
+    window.open_folder_button.click()
+    _wait_for_loads(window, qt_app)
+
+    assert (
+        window.campaign.pattern_source,
+        window.campaign.wavelength_source,
+        window.campaign.integral_source,
+    ) == chosen
+    assert window.campaign.previous_sphere == tmp_path / "previous_sphere.sif"
+    assert (
+        window.campaign.previous_sphere_background == tmp_path / "previous_sphere_bg.sif"
+    )
+    assert window.campaign.suggested_lamps == lamps
+    assert str(chosen[0]) in window.pattern_source_value.text()
+    window.close()
+
+
+def test_dropping_still_works_on_a_bench_that_was_handed_a_folder(
+    qt_app, tmp_path, monkeypatch
+):
+    """The teaching box went; the gesture it taught did not.
+
+    A file dropped from outside the opened folder is queued, read and triaged
+    through the very path the removed panel used to advertise.
+    """
+
+    folder = _calibration_folder(tmp_path, "20250926_calib")
+    window = _bench_at(tmp_path, folder)
+    window.show()
+    _answer_folder_dialog(monkeypatch, folder)
+    window.open_folder_button.click()
+    _wait_for_loads(window, qt_app)
+    stray = tmp_path / "IMG_0042.sif"
+    stray.write_bytes(b"sif\n")
+
+    _drop(window, [stray])
+    _wait_for_loads(window, qt_app)
+
+    assert stray in window.campaign.loaded
+    assert stray in window._file_rows
+    assert window.file_table.rowCount() == len(_REAL_2025_NAMES) + 1
+    window.close()
+
+
+def test_the_folder_picker_shows_the_files_it_will_not_let_you_pick(
+    qt_app, tmp_path, monkeypatch
+):
+    """Owner, 2026-08-18: "we should show contents, but make them gray.
+    Otherwise I have to open the same folder twice."
+
+    Windows' native folder picker hides files: his real folder of SIFs read
+    "No items match your search", so telling 20190115 from 20250926 meant
+    opening one, closing it, and opening the other. Qt's own dialog in
+    Directory mode with ShowDirsOnly off lists them greyed — evidence, never an
+    answer. Driven through the real function with only ``exec_`` answered, so
+    what is asserted is the dialog the operator would actually get.
+    """
+
+    folder = _calibration_folder(tmp_path, "20250926_calib")
+    opened: list[QtWidgets.QFileDialog] = []
+
+    def refuse(dialog):
+        opened.append(dialog)
+        return 0  # QDialog.Rejected — nothing is picked, nothing is shown
+
+    monkeypatch.setattr(QtWidgets.QFileDialog, "exec_", refuse)
+
+    assert bench_gui.choose_calibration_folder(None, folder) == ""
+
+    assert len(opened) == 1
+    dialog = opened[0]
+    assert dialog.fileMode() == QtWidgets.QFileDialog.Directory
+    # Files visible, and Qt's own dialog: the native one cannot be told either.
+    assert not dialog.testOption(QtWidgets.QFileDialog.ShowDirsOnly)
+    assert dialog.testOption(QtWidgets.QFileDialog.DontUseNativeDialog)
+    assert dialog.acceptMode() == QtWidgets.QFileDialog.AcceptOpen
+    assert Path(dialog.directory().absolutePath()) == folder
+    # A folder full of SIFs is what the operator is trying to recognise, and
+    # this dialog's own model lists them rather than hiding them.
+    listed = {
+        Path(entry).name
+        for entry in dialog.directory().entryList(QtCore.QDir.Files)
+    }
+    assert set(_REAL_2025_NAMES) <= listed
+
+
+def test_a_folder_is_not_opened_while_the_bench_is_still_reading(
+    qt_app, tmp_path, monkeypatch
+):
+    """A read in flight belongs to the folder being left.
+
+    It would land in the fresh campaign a moment after that campaign was
+    emptied — the one file of the old folder that followed the bench to the new
+    one. The press is refused in words while anything is still queued, and the
+    dialog is never even opened.
+    """
+
+    folder = _calibration_folder(tmp_path, "20250926_calib")
+    other = _calibration_folder(tmp_path, "20261101_calib")
+    window = _bench_at(tmp_path, folder)
+    window.show()
+    asked = _answer_folder_dialog(monkeypatch, other)
+    window._queue.append(folder / _REAL_2025_NAMES[0])
+
+    window._pick_calibration_folder()
+
+    assert asked == []
+    assert window.calibration_folder == folder
+    assert "still reading" in window.save_message_value.text()
+    window._queue.clear()
+    window.close()
+
+
+def test_the_input_line_names_the_launched_folder(qt_app, tmp_path):
+    """It read "manual — drag and drop or Add files", which nobody needed told."""
+
+    folder = _calibration_folder(tmp_path, "20250926_calib")
+    window = _bench_at(tmp_path, folder)
+    window.show()
+    qt_app.processEvents()
+
+    assert window.watch_value.text() == str(folder)
+    assert window.calibration_folder == folder
+    # A bench nobody has pointed anywhere says that, rather than naming a folder
+    # it does not have.
+    bare = _manual_window(tmp_path)
+    assert "no folder open" in bare.watch_value.text()
+    bare.close()
+    window.close()
 
 
 #: The owner's own 2025 folder, when this checkout carries it: the matched era,

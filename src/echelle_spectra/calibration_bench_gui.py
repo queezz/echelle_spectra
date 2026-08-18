@@ -189,6 +189,46 @@ def default_bench_roots(folder: str | PurePath | None = None) -> tuple[Path, Pat
     return snapshots, snapshots / CONFIG_ROOT_NAME
 
 
+def configure_folder_dialog(dialog: QtWidgets.QFileDialog) -> None:
+    """Make a folder picker show the files it is not offering to pick.
+
+    Windows' native folder picker hides files outright: a calibration folder
+    holding six SIFs reads "No items match your search", so the only way to
+    tell one dated folder from another was to open it, look, close it, and open
+    the right one — owner, 2026-08-18: "we should show contents, but make them
+    gray. Otherwise I have to open the same folder twice."
+
+    Qt's own dialog does exactly the right thing in ``Directory`` mode with
+    ``ShowDirsOnly`` switched *off*: the files are listed and greyed, so the
+    folder's contents are evidence without ever becoming the answer.  The
+    native dialog cannot be told this, which is why this one asks for Qt's by
+    name.  Only folder pickers have the defect — a dialog that picks files
+    shows files already — so the pattern and previous-pair pickers keep the
+    native ``getOpenFileName`` they have always used.
+    """
+
+    dialog.setFileMode(QtWidgets.QFileDialog.Directory)
+    dialog.setOption(QtWidgets.QFileDialog.ShowDirsOnly, False)
+    dialog.setOption(QtWidgets.QFileDialog.DontUseNativeDialog, True)
+    dialog.setAcceptMode(QtWidgets.QFileDialog.AcceptOpen)
+
+
+def choose_calibration_folder(parent, start_dir: str | PurePath) -> str:
+    """Ask which calibration folder to open, through one patchable seam.
+
+    A module-level function rather than an inline dialog, for the same reason
+    the main GUI's ``choose_snapshot_folder`` is one: a test can answer this
+    without a real modal appearing off-screen and hanging the run.
+    """
+
+    dialog = QtWidgets.QFileDialog(parent, "Open calibration folder", str(start_dir))
+    configure_folder_dialog(dialog)
+    if not dialog.exec_():
+        return ""
+    chosen = dialog.selectedFiles()
+    return chosen[0] if chosen else ""
+
+
 #: A calibration folder's name begins with the day its frames were taken —
 #: ``20250926_calib``.  Anchored, and refusing a ninth digit, so a shot number
 #: that merely starts with eight digits is never mistaken for a date.
@@ -899,6 +939,7 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         campaign: CalibrationCampaignSession | None = None,
         watcher: StableSifWatcher | None = None,
         loader: FrameLoader | None = None,
+        folder: str | Path | None = None,
         output_root: str | Path = SNAPSHOT_ROOT_NAME,
         config_root: str | Path | None = None,
         snapshot_id: str = "",
@@ -915,6 +956,11 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         self.campaign = campaign
         self.watcher = watcher
         self.loader = loader
+        #: The calibration folder this session is about: what the roots hang
+        #: off, what the identity is dated by, where the file dialogs open, and
+        #: the one fact the Bench state strip could not previously state.
+        #: ``None`` is a bench nobody has pointed at a folder yet.
+        self.calibration_folder = None if folder is None else absolute_root(folder)
         # Absolute from here on, whatever the caller passed.  A bare name is a
         # promise about the working directory, and a display that repeats the
         # bare name keeps that promise secret — which is exactly how a campaign
@@ -1016,7 +1062,11 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         #: outside an ask is the operator's own drag and is remembered as one.
         self._details_dock_height = 0
         self._sizing_details = False
-        self.last_folder = Path(watcher.folder) if watcher is not None else Path.cwd()
+        self.last_folder = (
+            self.calibration_folder
+            if self.calibration_folder is not None
+            else (Path(watcher.folder) if watcher is not None else Path.cwd())
+        )
         self._build_ui()
         self._connect_ui()
         self.setAcceptDrops(True)
@@ -1170,9 +1220,6 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
                         left: 10px; padding: 0 4px; color: #8fd9ff; }}
             #benchTitle {{ color: #80ddff; font-weight: 700; letter-spacing: 2px; }}
             #benchSubtitle, #benchHelp, #mutedText {{ color: #93a8b8; }}
-            #dropTarget {{ border: 2px dashed #49b5df; border-radius: 9px;
-                          color: #8fd9ff; font-weight: 700; letter-spacing: 1px;
-                          padding: 12px; }}
             #triageHeadline {{ font-weight: 700; padding: 6px; }}
             #stateBadge {{ color: #7ee2b8; font-weight: 700; }}
             #warningPanel {{ background: #2a1e13; border-left: 3px solid #ffb86b;
@@ -1204,7 +1251,6 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         # and it is the verdict the next action is read from.  Everything else
         # — including this window's own title — is body text.
         _emphasise(title, body)
-        _emphasise(self.drop_hint, body)
         for widget in (
             self.rms_value,
             self.anchor_count_value,
@@ -2122,14 +2168,29 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         layout = QtWidgets.QVBoxLayout(tab)
         layout.setContentsMargins(10, 12, 10, 10)
 
-        self.drop_hint = QtWidgets.QLabel(
-            "DROP SIF FILES HERE\nany names, any order, as many as you like"
+        # No dashed "DROP SIF FILES HERE" panel.  It taught a gesture to the one
+        # person who does not need teaching — owner, 2026-08-18: "I don't need
+        # reminding. I built and am building GUI that accepts drops. And
+        # others.. No others to teach. And that's intuitive in any case." — and
+        # it spent a hundred pixels of the shortest column doing it.  The empty
+        # table is its own invitation; the drop path is unchanged and still
+        # takes files anywhere on the window.
+        self.open_folder_button = QtWidgets.QPushButton("Open calibration folder…")
+        self._explainable(
+            self.open_folder_button,
+            "Opening another calibration folder without restarting",
+            "Picks up the whole bench and puts it down at another folder, "
+            "exactly as launching echelle-calib there would: the snapshot and "
+            "settings roots are derived inside it, the snapshot identity is "
+            "re-dated from its name, and every SIF in it is loaded and triaged "
+            "through the ordinary path so the roles suggest themselves as they "
+            "always do. The current session is cleared — files, roles, anchors, "
+            "factors, generated settings — and the bench asks first when any of "
+            "that was not saved. The pattern and wavelength tables you chose "
+            "stay chosen: they are your decision, not the folder's, and the "
+            "band guard judges them against the new sphere as it does now.",
         )
-        self.drop_hint.setAlignment(QtCore.Qt.AlignCenter)
-        self.drop_hint.setWordWrap(True)
-        self.drop_hint.setObjectName("dropTarget")
-        self.drop_hint.setMinimumHeight(92)
-        layout.addWidget(self.drop_hint)
+        layout.addWidget(self.open_folder_button)
 
         button_row = QtWidgets.QHBoxLayout()
         self.add_files_button = QtWidgets.QPushButton("Add SIF files…")
@@ -2219,7 +2280,7 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         # wrapped lines and push the plots down the window.  They shorten in
         # the middle, where a SIF name is least informative, and the whole name
         # stays one hover away.
-        self.watch_value = _ElidingLabel("manual — drag and drop or Add files")
+        self.watch_value = _ElidingLabel("no folder open — drag and drop or Add files")
         self.file_value = _ElidingLabel("no file open")
         self.file_state_value = QtWidgets.QLabel("WAITING")
         self.file_state_value.setObjectName("stateBadge")
@@ -2633,36 +2694,16 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         # the launcher started in.  The whole path is shown, shortened in the
         # middle only when it will not fit, and is one hover — or one click
         # into the Why dock — away from being read exactly.
-        self.snapshot_root_value = _ElidingLabel(f"Snapshots: {self.output_root}")
+        self.snapshot_root_value = _ElidingLabel("")
         self.snapshot_root_value.setObjectName("mutedText")
-        self._explainable(
-            self.snapshot_root_value,
-            "Where saved snapshots are written",
-            "Every snapshot this bench saves is created inside this folder, "
-            "one subfolder per snapshot identity. Unless you passed "
-            "--output-root, it is the calibrations folder inside the "
-            "calibration folder the bench was launched at — the computed "
-            "calibration sits beside the lamp frames it was computed from, and "
-            "that folder holds it all. Everything the bench generates lives "
-            "under this one folder, the settings bundles included, in a "
-            f"configs subfolder. In full: {self.output_root}",
-            hint=str(self.output_root),
-        )
         layout.addWidget(self.snapshot_root_value)
-        self.config_root_value = _ElidingLabel(f"Configs: {self.config_root}")
+        self.config_root_value = _ElidingLabel("")
         self.config_root_value.setObjectName("mutedText")
-        self._explainable(
-            self.config_root_value,
-            "Where the generated settings files are written",
-            "The commented campaign, alignment and export files are written "
-            "inside this folder, one subfolder per snapshot identity. Unless "
-            "you passed --config-root, it is the configs folder inside the "
-            "calibrations folder above — one tidy folder holds everything the "
-            "bench generates, beside the lamp frames it was derived from. In "
-            f"full: {self.config_root}",
-            hint=str(self.config_root),
-        )
         layout.addWidget(self.config_root_value)
+        # Both readings, and both explanations, are written in one place: the
+        # roots move when another calibration folder is opened, and a label
+        # filled in at build time only would have gone on naming the first one.
+        self._describe_output_roots()
         # "TOML" names the file format, which is not what the operator is
         # deciding to do (F21 item 6).  What this step saves is the alignment
         # and the campaign around it; that the files happen to be commented
@@ -3279,6 +3320,7 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         self.equal_aspect_check.toggled.connect(self.detector_plot.setAspectLocked)
         self.remove_button.clicked.connect(self._remove_selected_anchor)
         self.clear_button.clicked.connect(self._clear_anchors)
+        self.open_folder_button.clicked.connect(self._pick_calibration_folder)
         self.add_files_button.clicked.connect(self._pick_files)
         self.remove_file_button.clicked.connect(self._remove_selected_file)
         self.confirm_roles_button.clicked.connect(self._confirm_suggested_roles)
@@ -3540,6 +3582,222 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         if warning:
             text = f"{text}\nWARNING — {warning}"
         self.reference_value.setText(text)
+
+    # ------------------------------------------------------------------
+    # One folder at a time: opening the next campaign without a restart
+    # ------------------------------------------------------------------
+
+    def _pick_calibration_folder(self) -> None:
+        """Ask for the next calibration folder, and confirm what it would cost.
+
+        Owner, 2026-08-18: "opening a folder for a calibration would be nice.
+        So I can start GUI, and go through many calibration folders. I probably
+        would have to do that at NIFS."  A trip is a folder after a folder after
+        a folder, and closing the whole bench between them was the restart this
+        removes.
+        """
+
+        if self._campaign_thread is not None:
+            self._save_says("A campaign task is running; open a folder when it finishes.")
+            return
+        # A read already in flight belongs to the folder being left, and it
+        # would land in the fresh campaign a moment after it was emptied — the
+        # one file of the old folder that followed the bench to the new one.
+        # Checked here rather than by greying the button, because the button's
+        # enabled state is only as fresh as the last refresh and a queue that
+        # applies no roles ends without one.
+        if self._load_thread is not None or self._queue:
+            self._save_says(
+                "The bench is still reading this folder; open the next one when "
+                "it finishes."
+            )
+            return
+        start = self.calibration_folder or self.last_folder
+        chosen = choose_calibration_folder(self, start)
+        if not chosen:
+            return
+        folder = Path(chosen)
+        if not folder.is_dir():
+            self._save_says(f"That is not a folder: {folder}")
+            return
+        warning = self._unsaved_session_warning()
+        if warning:
+            answer = QtWidgets.QMessageBox.question(
+                self,
+                "Open another calibration folder",
+                warning,
+                QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+                QtWidgets.QMessageBox.No,
+            )
+            if answer != QtWidgets.QMessageBox.Yes:
+                self._save_says(f"{folder.name} was not opened; the session is untouched.")
+                return
+        self.open_calibration_folder(folder)
+
+    def _unsaved_session_warning(self) -> str:
+        """The one sentence a session with unsaved work is owed, else ``""``.
+
+        Unsaved means what the operator would mind losing: an alignment solved,
+        or files loaded and roles assigned, with no snapshot saved to show for
+        it.  The campaign's own ``saved_snapshot`` answers the second half and
+        answers it honestly — it is cleared by ``_invalidate_outputs`` the
+        moment anything the snapshot was built from changes, so a save followed
+        by more work asks again, and a save followed by nothing does not ask at
+        all.  An empty bench is never asked anything.
+        """
+
+        loaded = bool(self._file_rows) or bool(self._queue)
+        solved = bool(self.session.anchors) or self.session.frame is not None
+        if not (loaded or solved):
+            return ""
+        if self.campaign is not None and self.campaign.saved_snapshot is not None:
+            return ""
+        identity = (
+            self.snapshot_id_edit.text().strip()
+            or self.initial_snapshot_id
+            or "this session"
+        )
+        return (
+            "Opening a new folder clears the current session — the alignment "
+            f"for {identity} was not saved."
+        )
+
+    def open_calibration_folder(self, folder: str | Path) -> list[Path]:
+        """Stand the whole bench at *folder*, as launching there would have.
+
+        This is the launch, minus the process: everything ``main`` derives from
+        its folder argument is derived again here from this one — both output
+        roots through :func:`default_bench_roots`, the acquisition-dated
+        identity through :func:`acquisition_date_from_name`, the file dialogs'
+        starting point, and the watch folder if one is running.  The folder's
+        SIFs are then handed to :meth:`add_paths`, the same door a drop comes
+        through, so triage runs and the roles suggest and auto-apply exactly as
+        they do for a drop.
+
+        What the old session held is dropped through the machinery that already
+        knows how — :meth:`CalibrationCampaignSession.forget_all_files` and its
+        ``_invalidate_outputs``, :meth:`CalibrationBenchSession.forget_frame`
+        and its ``clear_anchors`` — rather than through a second reset here that
+        would drift from them.
+
+        The chosen pattern and wavelength tables are deliberately *not* reset.
+        The operator picked those, in this window, against their own judgement
+        of the detector; a folder does not overrule that.  The band guard reads
+        the new folder's sphere against the chosen pattern and says so when the
+        two disagree, which is the honest way for a stale choice to surface.
+        """
+
+        target = absolute_root(Path(folder))
+        self.calibration_folder = target
+        self.last_folder = target
+        self.output_root, self.config_root = default_bench_roots(target)
+        self._describe_output_roots()
+        self._rewatch(target)
+        self._forget_session()
+        self._rename_snapshot_identity(target)
+        found = self.add_paths([target])
+        self.refresh()
+        tail = (
+            f"{len(found)} SIF file(s) queued for triage."
+            if found
+            else "It holds no SIF files yet — drop them in and they will load."
+        )
+        self._save_says(
+            f"Opened {target}. {tail} Snapshots and settings will be written "
+            f"under {self.output_root}."
+        )
+        return found
+
+    def _rewatch(self, folder: Path) -> None:
+        """Re-aim a running folder watch at the folder now being calibrated."""
+
+        if self.watcher is None:
+            return
+        self.watcher = StableSifWatcher(
+            folder,
+            required_unchanged_polls=self.watcher.required_unchanged_polls,
+            minimum_age_s=self.watcher.minimum_age_ns / 1_000_000_000,
+        )
+
+    def _forget_session(self) -> None:
+        """Empty the bench of one folder's work before the next one lands."""
+
+        self._queue.clear()
+        self._file_rows.clear()
+        self.file_table.setRowCount(0)
+        self._declined_suggestions.clear()
+        self._explicitly_opened.clear()
+        self._arrivals_pending = False
+        self._landed_on = None
+        self._auto_following = False
+        self._family_override = False
+        self._role_notice = ""
+        self._refused_identity = ""
+        self.regenerate_tomls_button.setVisible(False)
+        self._saved_snapshot_root = None
+        # Drawn from the old frames and the old solve; a new folder redraws it.
+        self._catalog_cache.clear()
+        self._catalog_rows = ()
+        self._drawn_correction = None
+        if self.campaign is not None:
+            self.campaign.forget_all_files()
+        self.session.forget_frame()
+
+    def _rename_snapshot_identity(self, folder: Path) -> None:
+        """Re-date the prefilled identity from the folder just opened.
+
+        The same rule the launch argument obeys, applied to the same kind of
+        fact: a calibration is dated by the day its frames were taken, the
+        folder's own name is the first thing that says so, and the frames' SIF
+        headers are the second — which still fill this in through
+        ``_adopt_acquisition_date`` when the name says nothing, because opening
+        a folder puts the identity back to being the bench's guess rather than
+        anybody's decision.
+        """
+
+        self.snapshot_date = acquisition_date_from_name(folder)
+        self._snapshot_id_decided = False
+        self._snapshot_date_source = (
+            "the name of the folder you opened" if self.snapshot_date else ""
+        )
+        self.initial_snapshot_id = snapshot_identity(
+            self.snapshot_date or date.today(),
+            self.detector_edit.text().strip() or self.initial_detector,
+        )
+        # ``textEdited`` does not fire for a programmatic change, so writing the
+        # derived identity here cannot mark it as somebody's decision.
+        self.snapshot_id_edit.setText(self.initial_snapshot_id)
+        self._describe_snapshot_identity()
+
+    def _describe_output_roots(self) -> None:
+        """Say where this folder's snapshots and settings bundles will land."""
+
+        self.snapshot_root_value.setText(f"Snapshots: {self.output_root}")
+        self._explainable(
+            self.snapshot_root_value,
+            "Where saved snapshots are written",
+            "Every snapshot this bench saves is created inside this folder, "
+            "one subfolder per snapshot identity. Unless you passed "
+            "--output-root, it is the calibrations folder inside the "
+            "calibration folder the bench is open at — the computed "
+            "calibration sits beside the lamp frames it was computed from, and "
+            "that folder holds it all. Everything the bench generates lives "
+            "under this one folder, the settings bundles included, in a "
+            f"configs subfolder. In full: {self.output_root}",
+            hint=str(self.output_root),
+        )
+        self.config_root_value.setText(f"Configs: {self.config_root}")
+        self._explainable(
+            self.config_root_value,
+            "Where the generated settings files are written",
+            "The commented campaign, alignment and export files are written "
+            "inside this folder, one subfolder per snapshot identity. Unless "
+            "you passed --config-root, it is the configs folder inside the "
+            "calibrations folder above — one tidy folder holds everything the "
+            "bench generates, beside the lamp frames it was derived from. In "
+            f"full: {self.config_root}",
+            hint=str(self.config_root),
+        )
 
     # ------------------------------------------------------------------
     # Manual input: drag and drop, and a plain file dialog
@@ -4778,13 +5036,28 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         self.top_histogram_widget.setVisible(True)
         self._draw_histogram(self.top_histogram_plot, triage, triage.top_histogram)
 
+    def _describe_input_source(self) -> None:
+        """Name WHICH calibration is on the bench, on the Bench state strip.
+
+        This line used to describe the gesture — "manual — drag and drop or Add
+        files" — which is the one thing the operator already knew, while the
+        folder that every root, every dialog and the identity's own date are
+        derived from went unnamed on a strip called Bench state.  The folder
+        leads; the watch, being the unusual mode, says so after it.
+        """
+
+        if self.calibration_folder is not None:
+            watched = " · watching for new SIFs" if self.watcher is not None else ""
+            self.watch_value.setText(f"{self.calibration_folder}{watched}")
+        elif self.watcher is not None:
+            self.watch_value.setText(f"watching {self.watcher.folder}")
+        else:
+            self.watch_value.setText("no folder open — drag and drop or Add files")
+
     def refresh(self) -> None:
         """Render the current domain state without changing it."""
 
-        if self.watcher is not None:
-            self.watch_value.setText(
-                f"drag and drop, Add files, or watching {self.watcher.folder.name or '.'}"
-            )
+        self._describe_input_source()
         if self.session.frame is not None:
             self.file_value.setText(self.session.frame.path.name)
         elif self.session.loading_path is not None:
@@ -4866,8 +5139,10 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         enabled = self.campaign is not None
         busy = self._campaign_thread is not None
         self.add_files_button.setEnabled(self.loader is not None)
+        self.open_folder_button.setEnabled(self.loader is not None and not busy)
+        # And a press while a read is in flight is refused in the handler, where
+        # the answer is always current — see ``_pick_calibration_folder``.
         self._refresh_file_buttons()
-        self.drop_hint.setVisible(not self._file_rows)
         self.generate_tomls_button.setEnabled(enabled and not busy)
         # These run their handlers on the GUI thread, on the very campaign and
         # session a running task is reading.  They belong in the same gate as
@@ -6221,6 +6496,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         campaign=campaign,
         watcher=watcher,
         loader=loader,
+        folder=args.folder,
         output_root=output_root,
         config_root=config_root,
         snapshot_id=snapshot_id,
@@ -6235,7 +6511,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         valid_from=args.valid_from,
         poll_interval_ms=args.poll_ms,
     )
-    window.last_folder = args.folder
     window.show()
     if args.file:
         QtCore.QTimer.singleShot(0, lambda: window.add_paths(args.file))

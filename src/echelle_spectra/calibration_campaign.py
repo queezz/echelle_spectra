@@ -2275,6 +2275,26 @@ class CalibrationCampaignSession:
             self._invalidate_outputs()
         return existed
 
+    def forget_all_files(self) -> None:
+        """Drop every observed, loaded and classified file, keeping the tables.
+
+        Opening another calibration folder is a new campaign measured with the
+        same instruments: the pattern, wavelength and integral tables, and the
+        previous campaign's sphere pair the comparison runs against, are
+        decisions the operator made deliberately and they outlive one folder.
+        The files are the folder, and none of them may follow it out.
+
+        Everything derived from those files goes through the same
+        ``_invalidate_outputs`` that a single role change uses, so the
+        comparison, the settings bundle and the save state are cleared by the
+        one routine that knows what "derived" means here.
+        """
+
+        self.observed.clear()
+        self.loaded.clear()
+        self.measurements.clear()
+        self._invalidate_outputs()
+
     def _invalidate_outputs(self) -> None:
         self.comparison = SphereComparison(ComparisonState.NOT_RUN, "inputs changed")
         self.toml_state = TomlState.NOT_GENERATED

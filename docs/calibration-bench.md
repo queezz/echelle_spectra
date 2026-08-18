@@ -24,6 +24,23 @@ derived from (see [Where the bench writes](#where-the-bench-writes)).
 echelle-calib path/to/todays-calibration-folder
 ```
 
+**Open calibration folder…** on the **Files** tab does the same thing without a
+restart, which is what a trip actually looks like: one bench, folder after
+folder. Picking a folder derives both output roots inside it, re-dates the
+snapshot identity from its name, loads and triages every SIF in it through the
+ordinary drop path, and re-aims the file dialogs and the optional watch. The
+current session — files, roles, anchors, factors, generated settings — is
+cleared, and the bench asks first when any of it was not saved. The pattern and
+wavelength tables you chose stay chosen: they are your decision, not the
+folder's, and the band guard judges them against the new sphere. The **Bench
+state** strip names the folder the bench is open at.
+
+The folder picker is Qt's own rather than the Windows one, deliberately: the
+native folder dialog hides files, so a folder full of SIFs reads "No items match
+your search" and the only way to recognise it is to open it twice. This one
+lists the files greyed out — you can see what is in a folder before choosing it,
+and still only choose the folder.
+
 The accepted 2025 CMOS pattern and aligned wavelength table, packaged
 integrating-sphere reference, and historical 2024 sphere pair are defaults.
 Override them explicitly when rehearsing another detector or campaign:
@@ -177,7 +194,11 @@ Primary input is manual, because at acquisition time files are misnamed,
 renamed later, appear after the fact, and get retried:
 
 - **drag and drop** one or many SIFs onto the window — the same drop machinery
-  the main GUI uses; dropping a folder queues the SIFs inside it;
+  the main GUI uses; dropping a folder queues the SIFs inside it. There is no
+  dashed drop panel telling you so: the empty table is the invitation, and the
+  space it used to spend belongs to the file list;
+- **Open calibration folder…** loads a whole folder and moves the session to
+  it, as launching there would (see [Start a campaign](#start-a-campaign));
 - **Add SIF files…** opens an ordinary file dialog in the current folder;
 - `--watch` additionally polls a folder and loads each newly stable SIF. This is
   a convenience, never a requirement.
@@ -294,7 +315,8 @@ bench is a future refinement, and one calibration is enough to ship.
 Every row that is not yet possible names what would unblock it, so no surface is
 ever dead: the sphere factors need only the sphere pair, the lamp rows need only
 any one classified lamp, and triage needs only a file. With nothing loaded, the
-drop target and the **Add SIF files…** button are the primary surface.
+**Open calibration folder…** and **Add SIF files…** buttons are the primary
+surface — as is dropping files anywhere on the window.
 
 A checked item always names its supporting filename or numerical result.
 Changing any classification invalidates comparison/configuration/save readiness

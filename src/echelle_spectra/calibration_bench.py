@@ -778,13 +778,44 @@ class CalibrationBenchSession:
         if self.frame is not None and len(self.frame.order_spectra) != array.shape[1]:
             # A pattern with a different order count describes a frame this one
             # is not: it is re-extracted before it can be fitted again.
-            self.frame = None
-            self.background_path = None
-            self._background_spectra = ()
-            self.file_state = FileLoadState.WAITING
+            self._release_frame()
         self.selected_order = min(self.selected_order, array.shape[1] - 1)
         self.clear_anchors()
         return cleared
+
+    def _release_frame(self) -> None:
+        """Let go of the open acquisition and the background paired with it.
+
+        Two paths need exactly this and nothing less: a pattern whose order
+        count no longer describes the open frame, and a session that is over
+        because another calibration folder was opened.  It is written once so
+        the second cannot quietly keep half of what the first drops.
+        """
+
+        self.frame = None
+        self.background_path = None
+        self._background_spectra = ()
+        self.file_state = FileLoadState.WAITING
+
+    def forget_frame(self) -> None:
+        """Put the fit back to what a bench holds before any file has arrived.
+
+        Everything here was measured on one acquisition — the frame, the
+        background subtracted from it, the lamp its rows were scoped to, and
+        every anchor fitted on it — so when that acquisition stops being the
+        one under the bench, none of it may be carried forward.  The anchors go
+        through :meth:`clear_anchors`, the same door a pattern swap uses, so the
+        alignment state is recomputed rather than assigned by hand here.
+        """
+
+        self._release_frame()
+        self.loading_path = None
+        self.selected_frame = None
+        # ``selected_order`` deliberately stays: it is a view on the pattern,
+        # which has not changed, and the order control on screen is showing it.
+        self.reference = None
+        self.last_error = ""
+        self.clear_anchors()
 
     def set_selected_order(self, order_idx: int) -> None:
         if order_idx < 0 or order_idx >= self.pattern.shape[1]:
