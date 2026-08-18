@@ -191,6 +191,68 @@ def test_a_malformed_registry_names_the_toml_parse_error(tmp_path: Path, capsys)
     assert str(registry.resolve()) in shown
 
 
+def test_a_campaign_home_that_is_not_there_is_answered_by_name(
+    tmp_path: Path, capsys
+) -> None:
+    """The home is one file, so a wrong --home has to name the file it wanted."""
+
+    empty = tmp_path / "campaign"
+    empty.mkdir()
+
+    assert cli.main(["web", "--home", str(empty)]) == 1
+
+    shown = _shown(capsys)
+    assert "Traceback" not in shown
+    assert "campaign home not found" in shown
+    assert str((empty / "campaign.toml").resolve()) in shown
+    assert "--home" in shown
+    assert len([line for line in shown.splitlines() if line.strip()]) == 1
+
+
+def test_a_malformed_campaign_home_names_the_toml_parse_error(
+    tmp_path: Path, capsys
+) -> None:
+    home = tmp_path / "campaign.toml"
+    home.write_text('catalog = "all-years.json\noutput =', encoding="utf-8")
+
+    assert cli.main(["web", "--home", str(home)]) == 1
+
+    shown = _shown(capsys)
+    assert "Traceback" not in shown
+    assert "not valid TOML" in shown
+    assert str(home.resolve()) in shown
+    assert "--home" in shown
+
+
+def test_a_campaign_home_whose_keys_are_the_wrong_shape_says_what_was_expected(
+    tmp_path: Path, capsys
+) -> None:
+    home = tmp_path / "campaign.toml"
+    home.write_text('catalog = "all-years.json"\ndrift = "epoch-drift.json"\n', encoding="utf-8")
+
+    assert cli.main(["web", "--home", str(home), "--output", str(tmp_path / "page")]) == 1
+
+    shown = _shown(capsys)
+    assert "Traceback" not in shown
+    assert "drift" in shown and "list of paths" in shown
+    assert str(home.resolve()) in shown
+
+
+def test_a_campaign_home_pointing_at_a_missing_catalog_still_names_the_path(
+    tmp_path: Path, capsys
+) -> None:
+    home = tmp_path / "campaign.toml"
+    home.write_text('catalog = "all-years.json"\noutput = "page"\n', encoding="utf-8")
+
+    assert cli.main(["web", "--home", str(home)]) == 1
+
+    shown = _shown(capsys)
+    assert "Traceback" not in shown
+    assert "catalog file not found" in shown
+    assert str((tmp_path / "all-years.json").resolve()) in shown
+    assert "echelle catalog build" in shown
+
+
 def test_the_pasted_field_command_leaves_a_real_process_without_a_traceback(
     tmp_path: Path,
 ) -> None:

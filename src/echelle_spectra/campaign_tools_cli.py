@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import sys
+import webbrowser
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -332,7 +334,15 @@ def drift_main(argv: list[str] | None = None, *, prog: str = "echelle drift") ->
         metavar="CUBE_OR_DIR",
         help="Saved .nc cubes, or a directory whose .nc cubes are all audited.",
     )
-    audit.add_argument("--every", type=int, default=1, help="Audit every Nth selected cube.")
+    audit.add_argument(
+        "--every",
+        type=int,
+        default=None,
+        help=(
+            "Audit every Nth selected cube. Default: derived so about 20 cubes are "
+            "measured, max(1, cubes // 20)."
+        ),
+    )
     audit.add_argument(
         "--shot",
         action="append",
@@ -364,7 +374,16 @@ def drift_main(argv: list[str] | None = None, *, prog: str = "echelle drift") ->
         metavar="DIR",
         help="Snapshot root named by the composed repair commands (default: calibrations).",
     )
-    audit.add_argument("-o", "--output", required=True)
+    audit.add_argument(
+        "-o",
+        "--output",
+        default=None,
+        metavar="JSON",
+        help=(
+            "Evidence file to write. Default: the next free drift-evidence-NNN.json "
+            "in the folder the audited cubes share."
+        ),
+    )
     refine = commands.add_parser(
         "refine", help="Accept a shifted verdict and emit an immutable -rN snapshot."
     )
@@ -399,6 +418,59 @@ def _immutable_evidence(output: Path) -> CommandError:
     )
 
 
+EVIDENCE_STEM = "drift-evidence"
+AUDIT_TARGET_CUBES = 20
+
+
+def _evidence_home(cubes: list[Path]) -> Path:
+    """Return the folder an unnamed evidence file belongs beside.
+
+    The evidence describes the cubes, so it is written where the cubes are: the
+    deepest folder all of them share.  Cubes spread across two drives share
+    nothing on Windows, and then the first one's folder is the honest answer.
+    """
+
+    folders = [path if path.is_dir() else path.parent for path in cubes]
+    if not folders:  # pragma: no cover - the audit always has at least one cube
+        return _resolved(Path.cwd())
+    try:
+        return Path(os.path.commonpath([str(folder) for folder in folders]))
+    except ValueError:
+        return folders[0]
+
+
+def _derived_evidence_path(cubes: list[Path]) -> Path:
+    """Name the next free ``drift-evidence-NNN.json`` beside the audited cubes.
+
+    Numbered from 001 upward, so a second audit of the same cubes never has to
+    argue with the immutable first one: it simply takes the next name.
+    """
+
+    home = _evidence_home(cubes)
+    for index in range(1, 1000):
+        candidate = home / f"{EVIDENCE_STEM}-{index:03d}.json"
+        if not candidate.exists():
+            return candidate
+    raise CommandError(  # pragma: no cover - 999 audits of one folder
+        f"every derived evidence name from {EVIDENCE_STEM}-001.json to "
+        f"{EVIDENCE_STEM}-999.json is taken in {home} -- name this one with --output"
+    )
+
+
+def _derived_every(cubes: list[Path]) -> int:
+    """Derive the sampling interval that measures about twenty of these cubes."""
+
+    from .drift import DriftError, resolve_cube_paths
+
+    try:
+        count = len(resolve_cube_paths(list(cubes)))
+    except (DriftError, OSError):
+        # The audit itself answers an empty or unreadable selection; deriving an
+        # interval is not the place to refuse it.
+        return 1
+    return max(1, count // AUDIT_TARGET_CUBES)
+
+
 def _drift_audit_inputs(args: argparse.Namespace) -> dict[str, Any]:
     """Resolve every path the audit reads or writes before any measuring starts."""
 
@@ -416,18 +488,24 @@ def _drift_audit_inputs(args: argparse.Namespace) -> dict[str, Any]:
             what="calibration snapshot root",
             remedy=CALIBRATIONS_REMEDY,
         )
-    output = _require_parent(args.output, flag="--output", what="drift evidence")
-    # The audit is minutes of work and its evidence file is immutable by
-    # design, so an already-taken name is answered before the measuring starts
-    # -- and answered with the name the second audit should use, since an
-    # insufficient-data first audit makes a second audit the normal path.
-    if output.exists():
-        raise _immutable_evidence(output)
+    output = None
+    if args.output:
+        output = _require_parent(args.output, flag="--output", what="drift evidence")
+        # The audit is minutes of work and its evidence file is immutable by
+        # design, so an already-taken name is answered before the measuring
+        # starts -- and answered with the name the second audit should use,
+        # since an insufficient-data first audit makes a second audit normal.
+        if output.exists():
+            raise _immutable_evidence(output)
+    cubes = [
+        _require_input(raw, flag="the CUBE_OR_DIR argument", what="cube", remedy=CUBE_REMEDY)
+        for raw in args.cubes
+    ]
+    if output is None:
+        output = _derived_evidence_path(cubes)
+        print(f"evidence: {output} (derived; name one with --output)")
     return {
-        "cubes": [
-            _require_input(raw, flag="the CUBE_OR_DIR argument", what="cube", remedy=CUBE_REMEDY)
-            for raw in args.cubes
-        ],
+        "cubes": cubes,
         "catalog": catalog,
         "calibrations": calibrations,
         "output": output,
@@ -458,10 +536,15 @@ def _drift_audit(args: argparse.Namespace) -> int:
     catalog = resolved["catalog"]
     calibrations = resolved["calibrations"]
     output = resolved["output"]
+    every = args.every
+    if every is None:
+        every = _derived_every(cubes)
+        if every > 1:
+            print(f"every: {every} (derived; about {AUDIT_TARGET_CUBES} cubes are measured)")
     try:
         payload = audit_cubes(
             cubes,
-            every=args.every,
+            every=every,
             shots=set(args.shot),
             date_from=args.date_from,
             date_to=args.date_to,
@@ -508,8 +591,154 @@ def _drift_refine(args: argparse.Namespace) -> int:
     return 0
 
 
-def web_main(argv: list[str] | None = None, *, prog: str = "echelle web") -> int:
+CAMPAIGN_HOME_NAME = "campaign.toml"
+CAMPAIGN_HOME_KEYS = ("catalog", "output", "registry", "calibrations")
+CAMPAIGN_HOME_REMEDY = (
+    "a campaign home is a TOML file naming catalog, output, registry, calibrations "
+    "and drift; write one by hand beside the campaign"
+)
+
+
+def _home_path(base: Path, value: str) -> str:
+    """Resolve one path written inside a campaign home against the home's folder.
+
+    The file is meant to be copied beside a campaign and read from anywhere, so
+    what it says is relative to *itself*, never to whatever folder the operator
+    happened to be standing in.
+    """
+
+    candidate = Path(value).expanduser()
+    return str(candidate if candidate.is_absolute() else base / candidate)
+
+
+def _campaign_home(value: str | Path, *, flag: str) -> tuple[Path, dict[str, Any]]:
+    """Read one campaign home and return it with the defaults it supplies."""
+
+    candidate = _resolved(value)
+    if candidate.is_dir():
+        candidate = candidate / CAMPAIGN_HOME_NAME
+    path = _require_file(
+        candidate, flag=flag, what="campaign home", remedy=CAMPAIGN_HOME_REMEDY
+    )
+    data = _parse_toml(path, flag=flag, what="campaign home")
+    if not isinstance(data, dict):  # pragma: no cover - tomllib always returns a table
+        raise CommandError(f"campaign home is not a table of keys: {path} {_from(flag)}")
+    base = path.parent
+    values: dict[str, Any] = {}
+    for key in CAMPAIGN_HOME_KEYS:
+        if key not in data:
+            continue
+        raw = data[key]
+        if not isinstance(raw, str) or not raw.strip():
+            raise CommandError(
+                f"campaign home key '{key}' must be one path written as a string: "
+                f'{path} {_from(flag)} -- for example {key} = "all-years.json"'
+            )
+        values[key] = _home_path(base, raw)
+    if "drift" in data:
+        raw = data["drift"]
+        if not isinstance(raw, list) or not all(isinstance(item, str) for item in raw):
+            raise CommandError(
+                f"campaign home key 'drift' must be a list of paths: {path} {_from(flag)} "
+                '-- for example drift = ["epoch-drift.json"]'
+            )
+        values["drift"] = [_home_path(base, item) for item in raw]
+    # Keys this page does not read are left alone rather than refused: the home
+    # is hand-edited, and an operator's own notes are not an error.
+    return path, values
+
+
+def _web_home(args: argparse.Namespace) -> tuple[dict[str, Any], str]:
+    """Read the campaign home this build stands in, and say what it supplied.
+
+    Two answers are asked of the operator -- which catalog, and where to write
+    -- and a home file beside the campaign answers both, so the second build of
+    the day is ``echelle web --open``.  A home is read without --home only when
+    something is actually missing, so a fully typed command is never quietly
+    steered by a file in the current folder.
+    """
+
+    flag = "--home"
+    if args.home:
+        source, home = _campaign_home(args.home, flag=flag)
+    elif not (args.catalog and args.output) and (Path.cwd() / CAMPAIGN_HOME_NAME).is_file():
+        flag = f"the {CAMPAIGN_HOME_NAME} in this folder"
+        source, home = _campaign_home(Path.cwd() / CAMPAIGN_HOME_NAME, flag=flag)
+    else:
+        return {}, flag
+    print(f"campaign home: {source} (supplies {', '.join(sorted(home)) or 'nothing'})")
+    return home, flag
+
+
+def _web_inputs(args: argparse.Namespace, parser: argparse.ArgumentParser) -> dict[str, Any]:
+    """Resolve every path the page is built from, whoever supplied it."""
+
     from .catalog import load_catalog
+
+    home, home_flag = _web_home(args)
+
+    def chosen(key: str, flag: str) -> tuple[Any, str]:
+        typed = getattr(args, key)
+        return (typed, flag) if typed else (home.get(key), home_flag)
+
+    catalog_value, catalog_flag = chosen("catalog", "--catalog")
+    output_value, output_flag = chosen("output", "--output")
+    missing = [
+        flag
+        for flag, value in (("--catalog", catalog_value), ("--output", output_value))
+        if not value
+    ]
+    if missing:
+        parser.error("the following arguments are required: " + ", ".join(missing))
+
+    catalog = _require_file(
+        catalog_value, flag=catalog_flag, what="catalog file", remedy=CATALOG_REMEDY
+    )
+    _parse_json(catalog, flag=catalog_flag, what="catalog file")
+    try:
+        load_catalog(catalog)
+    except ValueError as exc:
+        raise CommandError(f"{exc} (from {catalog_flag})") from None
+
+    registry = None
+    registry_value, registry_flag = chosen("registry", "--registry")
+    if registry_value:
+        registry = _require_file(
+            registry_value, flag=registry_flag, what="epoch registry", remedy=REGISTRY_REMEDY
+        )
+        _parse_toml(registry, flag=registry_flag, what="epoch registry")
+
+    calibrations = None
+    calibrations_value, calibrations_flag = chosen("calibrations", "--calibrations")
+    if calibrations_value:
+        calibrations = _require_dir(
+            calibrations_value,
+            flag=calibrations_flag,
+            what="calibration snapshot root",
+            remedy=CALIBRATIONS_REMEDY,
+        )
+
+    drift = []
+    drift_values, drift_flag = chosen("drift", "--drift")
+    for raw in drift_values or []:
+        evidence = _require_file(raw, flag=drift_flag, what="drift evidence", remedy=DRIFT_REMEDY)
+        _parse_json(evidence, flag=drift_flag, what="drift evidence")
+        drift.append(evidence)
+
+    return {
+        "catalog": catalog,
+        "output": _require_parent(output_value, flag=output_flag, what="campaign page folder"),
+        "registry": registry,
+        "calibrations": calibrations,
+        "drift": drift,
+        "documents": [
+            _require_file(raw, flag="--document", what="Markdown document")
+            for raw in args.document
+        ],
+    }
+
+
+def web_main(argv: list[str] | None = None, *, prog: str = "echelle web") -> int:
     from .reading_room import build_reading_room
 
     parser = argparse.ArgumentParser(
@@ -519,8 +748,32 @@ def web_main(argv: list[str] | None = None, *, prog: str = "echelle web") -> int
             "calibration evidence, and the packaged reading room."
         ),
     )
-    parser.add_argument("--catalog", required=True)
-    parser.add_argument("--output", required=True)
+    parser.add_argument(
+        "--catalog",
+        default=None,
+        help="Merged catalog the page is built from (default: the campaign home's catalog).",
+    )
+    parser.add_argument(
+        "--output",
+        default=None,
+        help="Folder the page is written into (default: the campaign home's output).",
+    )
+    parser.add_argument(
+        "--home",
+        metavar="DIR",
+        help=(
+            "Campaign home supplying defaults for --catalog, --output, --registry, "
+            "--calibrations and --drift: a folder holding campaign.toml, or the TOML "
+            "file itself. Explicit flags win; paths inside it are relative to it. "
+            "Without --home, a campaign.toml in the current folder is read when "
+            "--catalog or --output is missing."
+        ),
+    )
+    parser.add_argument(
+        "--open",
+        action="store_true",
+        help="Open the built page in the default browser. The page stays a static file.",
+    )
     parser.add_argument("--drift", action="append", default=[])
     parser.add_argument(
         "--document",
@@ -545,52 +798,27 @@ def web_main(argv: list[str] | None = None, *, prog: str = "echelle web") -> int
     args = parser.parse_args(argv)
 
     def run() -> int:
-        catalog = _require_file(
-            args.catalog, flag="--catalog", what="catalog file", remedy=CATALOG_REMEDY
-        )
-        _parse_json(catalog, flag="--catalog", what="catalog file")
-        try:
-            load_catalog(catalog)
-        except ValueError as exc:
-            raise CommandError(f"{exc} (from --catalog)") from None
-        registry = None
-        if args.registry:
-            registry = _require_file(
-                args.registry, flag="--registry", what="epoch registry", remedy=REGISTRY_REMEDY
-            )
-            _parse_toml(registry, flag="--registry", what="epoch registry")
-        calibrations = None
-        if args.calibrations:
-            calibrations = _require_dir(
-                args.calibrations,
-                flag="--calibrations",
-                what="calibration snapshot root",
-                remedy=CALIBRATIONS_REMEDY,
-            )
-        drift = []
-        for raw in args.drift:
-            evidence = _require_file(
-                raw, flag="--drift", what="drift evidence", remedy=DRIFT_REMEDY
-            )
-            _parse_json(evidence, flag="--drift", what="drift evidence")
-            drift.append(evidence)
-        documents = [
-            _require_file(raw, flag="--document", what="Markdown document")
-            for raw in args.document
-        ]
-        output = _require_parent(args.output, flag="--output", what="campaign page folder")
+        resolved = _web_inputs(args, parser)
         try:
             path = build_reading_room(
-                catalog,
-                output,
-                drift_paths=drift,
-                document_paths=documents,
-                registry_path=registry,
-                calibrations_root=calibrations,
+                resolved["catalog"],
+                resolved["output"],
+                drift_paths=resolved["drift"],
+                document_paths=resolved["documents"],
+                registry_path=resolved["registry"],
+                calibrations_root=resolved["calibrations"],
             )
         except OSError as exc:
             raise CommandError(str(exc)) from None
-        print(path)
+        # The absolute path is the whole delivery: the page is a file, and the
+        # operator has to be able to find it, mail it, or open it by hand.
+        page = _resolved(path)
+        print(page)
+        if args.open and not webbrowser.open(page.as_uri()):
+            print(
+                f"WARNING: no default browser answered; open {page} by hand",
+                file=sys.stderr,
+            )
         return 0
 
     return _bounded(run)

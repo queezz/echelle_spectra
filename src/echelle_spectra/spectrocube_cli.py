@@ -71,11 +71,53 @@ _PRINT_LOCK = threading.Lock()
 DRIFT_SAMPLE_ATTR = "drift_sample"
 DRIFT_SAMPLE_TRUE = 1
 
+# --sample auto: the operator says "take a first look", and the size is derived
+# from what the drive turns out to hold rather than guessed before opening it.
+SAMPLE_AUTO = "auto"
+SAMPLE_AUTO_MIN = 5
+SAMPLE_AUTO_MAX = 30
+SAMPLE_AUTO_DIVISOR = 25
+
+# A campaign drive is a tree of date-named day folders, and its own lamp frames
+# live beside them: a folder called `calibrations`, or any folder holding the
+# `snapshot.toml` of a saved calibration snapshot. Those are never science
+# shots, so discovery prunes them whole rather than exporting cubes from them.
+CALIBRATION_DIR_NAME = "calibrations"
+SNAPSHOT_MARKER = "snapshot.toml"
+
 
 @dataclass(frozen=True)
 class ExportResult:
     status: _ExportStatus
     reason: str = ""
+
+
+def _sample_size(value: str) -> int | str:
+    """Parse ``--sample``: a positive count, or the derived-size word ``auto``."""
+
+    text = str(value).strip()
+    if text.lower() == SAMPLE_AUTO:
+        return SAMPLE_AUTO
+    try:
+        return int(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError(
+            f"invalid sample size: {value!r} -- pass a whole number of files, or 'auto'"
+        ) from None
+
+
+def _auto_sample_count(n_files: int) -> int:
+    """Derive how many files a first look at ``n_files`` should export.
+
+    Small folders are sampled whole -- there is nothing to sample from -- and
+    everything larger gets one file per 25, held between 5 and 30 so the first
+    run stays minutes rather than hours whatever the drive turns out to hold.
+    """
+
+    if n_files < SAMPLE_AUTO_MIN:
+        return n_files
+    derived = -(-n_files // SAMPLE_AUTO_DIVISOR)  # ceil without importing math
+    return max(SAMPLE_AUTO_MIN, min(SAMPLE_AUTO_MAX, derived))
 
 
 # ---------------------------------------------------------------------------
@@ -239,7 +281,11 @@ def _build_parser(*, prog: str = "echelle-spectrocube") -> argparse.ArgumentPars
         "--pattern",
         default="*.SIF",
         metavar="GLOB",
-        help="Glob pattern for batch SIF discovery (default: *.SIF).",
+        help=(
+            "Glob pattern for batch SIF discovery (default: *.SIF). A plain filename "
+            "pattern searches the whole source tree, skipping calibration folders; a "
+            "pattern containing / or ** is used exactly as typed."
+        ),
     )
     p.add_argument(
         "--overwrite",
@@ -326,13 +372,16 @@ def _build_parser(*, prog: str = "echelle-spectrocube") -> argparse.ArgumentPars
     )
     p.add_argument(
         "--sample",
-        type=int,
+        type=_sample_size,
         default=None,
         metavar="N",
         help=(
             "Legal first registry run: process the first N resolved files without a "
             "verdict. The receipt and every produced cube are marked as an unverified "
-            "sample, which 'echelle drift audit' then turns into --drift-verdict evidence."
+            "sample, which 'echelle drift audit' then turns into --drift-verdict evidence. "
+            "'auto' derives N from the files this drive actually holds: "
+            "max(5, min(30, ceil(files / 25))), or every file when the drive holds "
+            "fewer than 5."
         ),
     )
     return p
@@ -341,6 +390,83 @@ def _build_parser(*, prog: str = "echelle-spectrocube") -> argparse.ArgumentPars
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+def _is_calibration_dir(path: Path) -> bool:
+    """Say whether a folder holds calibration frames rather than science shots."""
+
+    if path.name.lower() == CALIBRATION_DIR_NAME:
+        return True
+    try:
+        return (path / SNAPSHOT_MARKER).is_file()
+    except OSError:  # pragma: no cover - unreadable mount points
+        return False
+
+
+def _science_directories(root: Path) -> list[Path]:
+    """List ``root`` and every folder under it that is not a calibration folder.
+
+    A matched folder prunes its whole subtree: a snapshot's sources sit inside
+    it, and none of them are shots.  The named root itself is always searched --
+    an operator who points the command at a folder has already said what it is.
+    """
+
+    found = [root]
+    for current, dirnames, _ in os.walk(root):
+        here = Path(current)
+        dirnames[:] = sorted(
+            name for name in dirnames if not _is_calibration_dir(here / name)
+        )
+        found.extend(here / name for name in dirnames)
+    return found
+
+
+def _pattern_is_recursive(pattern: str) -> bool:
+    """Say whether a pattern is a plain filename pattern this command may walk."""
+
+    return "/" not in pattern and "**" not in pattern
+
+
+def _discover_input_files(input_path: Path, pattern: str) -> list[Path]:
+    """Find the science files one batch target offers, in a deterministic order.
+
+    Campaign drives are trees of date-named day folders, so a plain filename
+    pattern searches the whole tree; a pattern the operator wrote with `/` or
+    `**` is theirs and is used exactly as typed.
+    """
+
+    if not _pattern_is_recursive(pattern):
+        return sorted(input_path.glob(pattern))
+
+    directories = _science_directories(input_path)
+    # The lowercase retry is the same fallback the flat search always had: it
+    # runs only when the typed case found nothing, so a case-insensitive
+    # filesystem -- where `*.SIF` already matched `a.sif` -- never sees a file
+    # twice.  Normcase keys keep that promise even if it ever did.
+    attempts = [pattern] + (["*.sif"] if pattern == "*.SIF" else [])
+    for attempt in attempts:
+        found: dict[str, Path] = {}
+        for directory in directories:
+            for path in directory.glob(attempt):
+                if path.is_file():
+                    found.setdefault(os.path.normcase(str(path)), path)
+        if found:
+            return sorted(found.values())
+    return []
+
+
+def _no_files_message(input_path: Path, pattern: str) -> str:
+    """Explain an empty discovery, including what it deliberately skipped."""
+
+    if not _pattern_is_recursive(pattern):
+        return f"No files matching '{pattern}' found in {input_path}"
+    return (
+        f"No files matching '{pattern}' found in {input_path} or anywhere below it. "
+        "The search was recursive and excluded calibration folders: any folder named "
+        "'calibrations', and any folder holding a snapshot.toml. Lamp frames are not "
+        "science shots; point --pattern at a path pattern (one containing / or **) to "
+        "search exactly where you mean instead."
+    )
 
 
 def _output_path_for(sif_path: Path, output_dir: Path) -> Path:
@@ -600,7 +726,14 @@ def _authorize_run(
     from .drift import DriftError, require_sampled_verdict
 
     if args.sample is not None:
-        selected = tuple(sif_files[: args.sample])
+        size = args.sample
+        if size == SAMPLE_AUTO:
+            size = _auto_sample_count(len(sif_files))
+            _emit_target(
+                f"sample auto: {size} of {len(sif_files)} files",
+                target_label=target_label,
+            )
+        selected = tuple(sif_files[:size])
         _emit_target(
             f"Gate:        sample of {len(selected)}/{len(sif_files)} file(s) with no "
             "verdict; every cube is marked drift_sample",
@@ -801,12 +934,10 @@ def _run_batch_target(
 ) -> int:
     """Process one source sequentially and return its independent exit code."""
     registry: CalibrationEpochRegistry | None = settings.get("epoch_registry")
-    sif_files = sorted(input_path.glob(args.pattern))
-    if not sif_files and args.pattern == "*.SIF":
-        sif_files = sorted(input_path.glob("*.sif"))
+    sif_files = _discover_input_files(input_path, args.pattern)
     if not sif_files:
         _emit_target(
-            f"No files matching '{args.pattern}' found in {input_path}",
+            _no_files_message(input_path, args.pattern),
             target_label=target_label,
             stream=sys.stderr,
         )
@@ -1376,7 +1507,7 @@ def main(argv: list[str] | None = None, *, prog: str = "echelle-spectrocube") ->
                 "verified run; they cannot be combined. Sample first, audit the sample with "
                 "'echelle drift audit', then rerun with --drift-verdict alone."
             )
-        if args.sample < 1:
+        if args.sample != SAMPLE_AUTO and args.sample < 1:
             parser.error("--sample must select at least one file.")
         if settings.get("epoch_registry") is None:
             parser.error(
