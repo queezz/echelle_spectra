@@ -383,6 +383,13 @@ The page is a snapshot of the moment it was built. After processing more shots,
 rebuild the catalog and rerun `echelle web` over the same `--output` folder to
 refresh it. The page never controls a worker and never writes campaign data.
 
+Prefer clicking to pasting? `echelle serve` (from the campaign folder, or
+`--home` pointing at one) serves the same page at a local address it prints,
+with a Browse… folder picker on the data-folder field; a cold start with no
+campaign home lets you pick the campaign folder in the page, which then
+writes `campaign.toml` for you. Loopback only; the page composes and checks,
+the terminal runs the work.
+
 Learn the page with nothing: `echelle web --practice --open` — an invented campaign
 built to a temp folder, labels say PRACTICE.
 

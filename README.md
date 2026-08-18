@@ -184,6 +184,12 @@ under an "Advanced" fold; see the
 Learn the page with nothing: `echelle web --practice --open` — an invented
 campaign built to a temp folder, labels say PRACTICE.
 
+Prefer clicking to pasting? `echelle serve` serves the same page from this
+machine (loopback only) and adds a real folder picker: Browse… beside the
+data-folder field opens your drives, and a cold start with no campaign home
+lets you pick the campaign folder and writes the `campaign.toml` for you.
+The page still never executes commands — the terminal runs the work.
+
 The current checkout also contains an **unreleased Packets 9–13 implementation
 candidate** for drive catalogs, cube-derived LHD text, post-hoc cube
 recalibration, sampled drift/refinement evidence, a read-only reading room, and
