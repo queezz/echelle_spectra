@@ -16,6 +16,38 @@ that walk so lamp frames are never eaten as science shots: any folder named
 insensitive `*.sif` fallback still runs when the primary pattern finds
 nothing, so lowercase acquisition filenames are not a separate step.
 
+Junctions and symbolic links among the day folders are matched where they sit
+but are never descended into, so a linked day contributes nothing below itself.
+
+### What the walk skipped is always said
+
+Pruning is correct and it is also invisible, and the bench can put the two in
+the same folder: `echelle-calib <folder>` takes any folder, so a day folder
+that also holds science SIFs can legitimately end up with a `snapshot.toml`
+written into it — and then the whole day drops out of the next run. So every
+run that pruned anything names it. The batch header prints the count and the
+folders, relative to the source root, bounded to the first five plus a count
+of the rest:
+
+```text
+SpectroCube batch
+Source:      D:\NIFS\shots
+Destination: D:\NIFS\spectrocubes
+Pattern:     *.SIF
+Files:       412 (export)
+Skipped:     2 calibration folder(s) not searched (named 'calibrations', or holding a snapshot.toml):
+               20190207
+               calibrations
+```
+
+The run receipt carries the same list in full, under `pruned_dirs` in
+`run.toml`, so an auditor reading the receipt months later sees the skip the
+console announced. A run that pruned nothing prints no extra line and writes no
+`pruned_dirs` key: the key's presence means a real skip. If a named folder was
+not supposed to be a calibration folder, move or rename the `snapshot.toml`
+that marked it, or point `--pattern` at a path pattern to search exactly where
+you mean.
+
 A registry-backed drive takes three commands: sample the epoch, audit the
 sample, then process the drive under the verdict the audit wrote.
 

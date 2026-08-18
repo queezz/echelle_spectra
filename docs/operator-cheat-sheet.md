@@ -119,7 +119,7 @@ developer tools cannot be assumed.
 | `echelle snapshot validate DIR` | Rechecks snapshot schema, paths, sizes, and SHA-256 digests | Yes |
 | `echelle snapshot show DIR` | Prints a compact snapshot summary | Yes |
 | `echelle snapshot import-historical ID --calibrations DIR` | Converts a bundled 2019/2024/2025 binder into a registrable snapshot; `--artifact-root` supplies campaign folders too large to package | Once per historical epoch |
-| `echelle process INPUT -o OUTPUT` | Converts one SIF, a folder, or several drives to SpectroCube NetCDF and records resumable receipts; a plain filename pattern (default `*.SIF`) walks the whole source tree, pruning `calibrations/` folders and any folder holding `snapshot.toml` | Yes; a registry run needs `--sample N`/`--sample auto` or `--drift-verdict` |
+| `echelle process INPUT -o OUTPUT` | Converts one SIF, a folder, or several drives to SpectroCube NetCDF and records resumable receipts; a plain filename pattern (default `*.SIF`) walks the whole source tree, pruning `calibrations/` folders and any folder holding `snapshot.toml` and naming every pruned folder in the header and the receipt | Yes; a registry run needs `--sample N`/`--sample auto` or `--drift-verdict` |
 | `echelle catalog build/merge` | Writes per-drive catalogs keyed on stable drive ids and merges them by recency into an all-years index | Candidate; audit/catalog work |
 | `echelle txt CUBE OUTPUT` / `echelle-cube2txt` | Writes LHD text at the frozen legacy header; refuses a cube missing `trigger_delay_s`, `frame_interval_s` or `exposure_s` | Candidate; no raw SIF needed |
 | `echelle recal-cube CUBE --new-snapshot DIR` | Applies safe wavelength/factor snapshot deltas and refuses geometry changes | Candidate; reviewed repair only |
@@ -489,9 +489,20 @@ pattern rather than one written with `/` or `**`, walks the whole source tree
 under the folder you named — real campaign drives are date-named day folders,
 so shots several levels down are still found. It prunes any folder named
 `calibrations` and any folder holding `snapshot.toml`, so lamp frames are
-never swept up as science shots. For lowercase acquisition filenames, add
-`--pattern "*.sif"` (also tried automatically as a fallback). Start with
+never swept up as science shots; junctions and symbolic links are matched
+where they sit but never descended into. For lowercase acquisition filenames,
+add `--pattern "*.sif"` (also tried automatically as a fallback). Start with
 `--dry-run` and inspect the listed sources before allowing writes.
+
+### Fewer files than the drive holds
+
+Read the `Skipped:` line in the batch header. Every run that pruned a folder
+names it there — count first, then the folders relative to the source root,
+bounded to five plus a count of the rest — and records the whole list under
+`pruned_dirs` in the run receipt's `run.toml`. The usual cause is a bench
+launched at a day folder that also holds shots: the `snapshot.toml` it saved
+there marks the whole day as calibration. Move or rename that file, or name a
+path pattern with `--pattern`, and rerun.
 
 ### The kit installer refuses to continue
 

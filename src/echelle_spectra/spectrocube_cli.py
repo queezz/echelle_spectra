@@ -1,4 +1,4 @@
-"""CLI for exporting Echelle SIF files to the SpectroCube NetCDF format.
+r"""CLI for exporting Echelle SIF files to the SpectroCube NetCDF format.
 
 Entry point installed as ``echelle-spectrocube`` (see pyproject.toml).
 
@@ -10,11 +10,14 @@ Single file::
 
 Batch folder (all .SIF files)::
 
-    echelle-spectrocube /data/shots/ --units wm -o /data/nc/
+    echelle-spectrocube D:\NIFS\shots --units wm -o D:\NIFS\cubes
 
 Dry run to preview what would happen::
 
-    echelle-spectrocube /data/shots/ --dry-run --verbose
+    echelle-spectrocube D:\NIFS\shots --dry-run --verbose
+
+The examples name a campaign drive the way the guides do: ``D:\NIFS`` on
+Windows, ``/Volumes/NIFS`` on macOS with forward slashes.
 
 Calibration authority
 ---------------------
@@ -85,6 +88,20 @@ SAMPLE_AUTO_DIVISOR = 25
 CALIBRATION_DIR_NAME = "calibrations"
 SNAPSHOT_MARKER = "snapshot.toml"
 
+# Pruning is a silent decision unless it is stated, so every run that prunes
+# anything names it. A long drive can prune dozens of folders, and a header
+# nobody reads to the end is another way of saying nothing: the console lists
+# this many and counts the rest, while the receipt keeps the complete list.
+PRUNED_LISTING_LIMIT = 5
+
+# Documented example paths follow the convention the guides use for a campaign
+# drive. Invented Unix roots (`/data/...`) are the copy-paste trap this repo
+# already swept out of the docs: pasted into PowerShell they are legal paths on
+# whatever drive the operator happens to be sitting on.
+EXAMPLE_SHOTS = r"D:\NIFS\shots"
+EXAMPLE_CUBES = r"D:\NIFS\cubes"
+EXAMPLE_SECOND_SHOTS = r"E:\NIFS-B\shots"
+
 
 @dataclass(frozen=True)
 class ExportResult:
@@ -130,9 +147,11 @@ def _build_parser(*, prog: str = "echelle-spectrocube") -> argparse.ArgumentPars
         prog=prog,
         description=(
             "Export Echelle .sif files to SpectroCube NetCDF (.nc) format.\n\n"
-            f"Single file:  {prog} shot.sif -o shot.nc\n"
-            f"Batch folder: {prog} /data/shots/ --units wm -o /out/\n"
-            f"Several drives: {prog} /drive-a/shots /drive-b/shots -o /cubes/"
+            f"Single file:    {prog} shot.sif -o shot.nc\n"
+            f"Batch folder:   {prog} {EXAMPLE_SHOTS} --units wm -o {EXAMPLE_CUBES}\n"
+            f"Several drives: {prog} {EXAMPLE_SHOTS} {EXAMPLE_SECOND_SHOTS} "
+            f"-o {EXAMPLE_CUBES}\n\n"
+            "On macOS the same drives are /Volumes/NIFS/shots and /Volumes/NIFS-B/shots."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -283,8 +302,12 @@ def _build_parser(*, prog: str = "echelle-spectrocube") -> argparse.ArgumentPars
         metavar="GLOB",
         help=(
             "Glob pattern for batch SIF discovery (default: *.SIF). A plain filename "
-            "pattern searches the whole source tree, skipping calibration folders; a "
-            "pattern containing / or ** is used exactly as typed."
+            "pattern searches the whole source tree, skipping calibration folders; "
+            "every skipped folder is named in the batch header and recorded in the "
+            "run receipt. A junction or symbolic link sitting among the day folders "
+            "is matched at its own level but is never descended into, so a linked "
+            "day contributes nothing below itself. A pattern containing / or ** is "
+            "used exactly as typed."
         ),
     )
     p.add_argument(
@@ -403,22 +426,38 @@ def _is_calibration_dir(path: Path) -> bool:
         return False
 
 
-def _science_directories(root: Path) -> list[Path]:
-    """List ``root`` and every folder under it that is not a calibration folder.
+def _science_tree(root: Path) -> tuple[list[Path], list[Path]]:
+    """Split ``root``'s tree into the folders discovery searches and the ones it prunes.
 
     A matched folder prunes its whole subtree: a snapshot's sources sit inside
     it, and none of them are shots.  The named root itself is always searched --
     an operator who points the command at a folder has already said what it is.
+
+    Only the topmost pruned folder of each subtree is returned, which is what a
+    reader wants named: everything below it went with it.  ``os.walk`` does not
+    follow links, so a junction or symbolic link among the day folders is
+    matched where it sits but is never descended into.
     """
 
-    found = [root]
+    searched = [root]
+    pruned: list[Path] = []
     for current, dirnames, _ in os.walk(root):
         here = Path(current)
-        dirnames[:] = sorted(
-            name for name in dirnames if not _is_calibration_dir(here / name)
-        )
-        found.extend(here / name for name in dirnames)
-    return found
+        keep: list[str] = []
+        for name in sorted(dirnames):
+            if _is_calibration_dir(here / name):
+                pruned.append(here / name)
+            else:
+                keep.append(name)
+        dirnames[:] = keep
+        searched.extend(here / name for name in keep)
+    return searched, pruned
+
+
+def _science_directories(root: Path) -> list[Path]:
+    """List ``root`` and every folder under it that is not a calibration folder."""
+
+    return _science_tree(root)[0]
 
 
 def _pattern_is_recursive(pattern: str) -> bool:
@@ -427,18 +466,28 @@ def _pattern_is_recursive(pattern: str) -> bool:
     return "/" not in pattern and "**" not in pattern
 
 
-def _discover_input_files(input_path: Path, pattern: str) -> list[Path]:
+@dataclass(frozen=True)
+class Discovery:
+    """What one batch target's search found, and what it deliberately skipped."""
+
+    files: tuple[Path, ...] = ()
+    pruned: tuple[Path, ...] = ()
+
+
+def _discover_science_files(input_path: Path, pattern: str) -> Discovery:
     """Find the science files one batch target offers, in a deterministic order.
 
     Campaign drives are trees of date-named day folders, so a plain filename
     pattern searches the whole tree; a pattern the operator wrote with `/` or
-    `**` is theirs and is used exactly as typed.
+    `**` is theirs and is used exactly as typed.  The pruned folders come back
+    with the files because a skip nobody is told about is indistinguishable
+    from a drive that never held those shots.
     """
 
     if not _pattern_is_recursive(pattern):
-        return sorted(input_path.glob(pattern))
+        return Discovery(files=tuple(sorted(input_path.glob(pattern))))
 
-    directories = _science_directories(input_path)
+    directories, pruned = _science_tree(input_path)
     # The lowercase retry is the same fallback the flat search always had: it
     # runs only when the typed case found nothing, so a case-insensitive
     # filesystem -- where `*.SIF` already matched `a.sif` -- never sees a file
@@ -451,8 +500,46 @@ def _discover_input_files(input_path: Path, pattern: str) -> list[Path]:
                 if path.is_file():
                     found.setdefault(os.path.normcase(str(path)), path)
         if found:
-            return sorted(found.values())
-    return []
+            return Discovery(files=tuple(sorted(found.values())), pruned=tuple(pruned))
+    return Discovery(pruned=tuple(pruned))
+
+
+def _discover_input_files(input_path: Path, pattern: str) -> list[Path]:
+    """Return only the files one batch target offers."""
+
+    return list(_discover_science_files(input_path, pattern).files)
+
+
+def _display_path(path: Path, root: Path) -> str:
+    """Name a folder against the source root the header printed one line above."""
+
+    try:
+        return path.relative_to(root).as_posix()
+    except ValueError:
+        return str(path)
+
+
+def _pruned_lines(pruned: tuple[Path, ...], root: Path) -> list[str]:
+    """Say what discovery removed, whenever it removed anything.
+
+    The bench writes a snapshot into whichever folder it was launched at, and
+    that can legitimately be a day folder that also holds science SIFs.  The
+    whole day then disappears from the walk, and until this said so the console
+    header, the receipt, and the campaign page all read as a complete run.
+    """
+
+    if not pruned:
+        return []
+    shown = [_display_path(path, root) for path in pruned[:PRUNED_LISTING_LIMIT]]
+    lines = [
+        f"Skipped:     {len(pruned)} calibration folder(s) not searched "
+        "(named 'calibrations', or holding a snapshot.toml):",
+        *(f"               {name}" for name in shown),
+    ]
+    remaining = len(pruned) - len(shown)
+    if remaining:
+        lines.append(f"             ... and {remaining} more")
+    return lines
 
 
 def _no_files_message(input_path: Path, pattern: str) -> str:
@@ -465,7 +552,8 @@ def _no_files_message(input_path: Path, pattern: str) -> str:
         "The search was recursive and excluded calibration folders: any folder named "
         "'calibrations', and any folder holding a snapshot.toml. Lamp frames are not "
         "science shots; point --pattern at a path pattern (one containing / or **) to "
-        "search exactly where you mean instead."
+        "search exactly where you mean instead. A junction or symbolic link among the "
+        "day folders is matched where it sits but is never descended into."
     )
 
 
@@ -500,6 +588,7 @@ def _batch_header(
     n_files: int,
     pattern: str,
     dry_run: bool,
+    pruned: tuple[Path, ...] = (),
     target_label: str | None = None,
 ) -> None:
     mode = "DRY RUN" if dry_run else "export"
@@ -511,6 +600,7 @@ def _batch_header(
                 f"Destination: {output_dir}",
                 f"Pattern:     {pattern}",
                 f"Files:       {n_files} ({mode})",
+                *_pruned_lines(pruned, input_path),
             ]
         ),
         target_label=target_label,
@@ -934,7 +1024,8 @@ def _run_batch_target(
 ) -> int:
     """Process one source sequentially and return its independent exit code."""
     registry: CalibrationEpochRegistry | None = settings.get("epoch_registry")
-    sif_files = _discover_input_files(input_path, args.pattern)
+    discovery = _discover_science_files(input_path, args.pattern)
+    sif_files = list(discovery.files)
     if not sif_files:
         _emit_target(
             _no_files_message(input_path, args.pattern),
@@ -963,6 +1054,7 @@ def _run_batch_target(
         n_files=len(sif_files),
         pattern=args.pattern,
         dry_run=args.dry_run,
+        pruned=discovery.pruned,
         target_label=target_label,
     )
 
@@ -1057,6 +1149,12 @@ def _run_batch_target(
             receipt.drive_warning = identity.warning
             receipt.write_manifest()
             _emit_target(f"Resuming:    {receipt.directory}", target_label=target_label)
+        # The receipt is what an auditor and the campaign page read long after
+        # the console has scrolled away, so it carries the same skip the header
+        # announced -- in full, not the bounded listing.
+        receipt.record_discovery(
+            _display_path(path, input_path) for path in discovery.pruned
+        )
         # A resumed receipt records how the run in front of it was authorized,
         # not how an earlier one was.
         receipt.record_authorization(

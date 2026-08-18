@@ -1,0 +1,207 @@
+"""A skipped folder is announced, not merely skipped.
+
+Recursive discovery prunes any folder named ``calibrations`` and any folder
+holding a ``snapshot.toml``.  That is right -- lamp frames are not science
+shots -- but the pruning was only ever described when discovery found nothing
+at all.  The bench, however, writes its snapshot into whichever folder it was
+launched at, and ``echelle-calib <folder>`` accepts any folder: a day folder
+that also holds science SIFs is a legal target.  The next ``echelle process``
+over that drive then dropped the whole day, and the console header, the run
+receipt, and the campaign page built from it all read as a complete run.
+
+These tests pin the fix: whenever pruning removed a folder that exists, the
+batch header names it and the receipt carries it -- and when nothing was
+pruned, nothing extra is said.
+"""
+
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+from unittest.mock import MagicMock, patch
+
+import pytest
+import tomllib
+
+from echelle_spectra.spectrocube_cli import (
+    PRUNED_LISTING_LIMIT,
+    ExportResult,
+    _discover_science_files,
+    main,
+)
+
+
+@pytest.fixture()
+def fake_spectrocube():
+    with patch.dict(sys.modules, {"spectrocube": MagicMock()}):
+        yield
+
+
+def _shots(folder: Path, *names: str) -> Path:
+    folder.mkdir(parents=True, exist_ok=True)
+    for name in names:
+        (folder / f"{name}_Echelle.SIF").write_text(f"raw {name}", encoding="utf-8")
+    return folder
+
+
+def _snapshot_marker(folder: Path) -> Path:
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "snapshot.toml").write_text('id = "20250101_cmos"\n', encoding="utf-8")
+    return folder
+
+
+def _process(argv: list[str]) -> int:
+    """Run the shipped entry point with only the exporter replaced."""
+
+    def export(sif: Path, nc_out: Path, **_: object) -> ExportResult:
+        nc_out.write_text(f"cube for {sif.name}", encoding="utf-8")
+        return ExportResult("exported")
+
+    with (
+        patch("echelle_spectra.tools.loader.build_calibration", return_value=object()),
+        patch("echelle_spectra.spectrocube_cli._export_one", side_effect=export),
+        pytest.raises(SystemExit) as result,
+    ):
+        main(argv)
+    return int(result.value.code)
+
+
+def _run_manifest(runs_root: Path) -> dict:
+    manifests = sorted(runs_root.rglob("run.toml"))
+    assert len(manifests) == 1, f"expected exactly one receipt, found {manifests}"
+    with manifests[0].open("rb") as stream:
+        return tomllib.load(stream)["run"]
+
+
+def _batch_argv(tmp_path: Path, source: Path) -> list[str]:
+    return [
+        str(source),
+        "-o",
+        str(tmp_path / "cubes"),
+        "--runs-dir",
+        str(tmp_path / "runs"),
+    ]
+
+
+# ---------------------------------------------------------------------------
+# A day folder the bench wrote a snapshot into
+# ---------------------------------------------------------------------------
+
+
+def test_a_day_folder_holding_a_snapshot_is_skipped_and_said_so(
+    tmp_path: Path, fake_spectrocube, capsys
+) -> None:
+    source = tmp_path / "drive"
+    _shots(source / "20190206", "193778")
+    # The trap exactly as the bench produces it: real shots, and a snapshot.toml
+    # written beside them because `echelle-calib` was launched at this folder.
+    _shots(_snapshot_marker(source / "20190207"), "193780", "193781")
+
+    discovery = _discover_science_files(source, "*.SIF")
+
+    assert [path.name for path in discovery.files] == ["193778_Echelle.SIF"]
+    assert [path.name for path in discovery.pruned] == ["20190207"]
+
+    assert _process(_batch_argv(tmp_path, source)) == 0
+
+    header = capsys.readouterr().out
+    assert (
+        "Skipped:     1 calibration folder(s) not searched "
+        "(named 'calibrations', or holding a snapshot.toml):" in header
+    )
+    assert "               20190207" in header
+    assert _run_manifest(tmp_path / "runs")["pruned_dirs"] == ["20190207"]
+
+
+def test_a_plain_calibrations_folder_is_skipped_and_said_so(
+    tmp_path: Path, fake_spectrocube, capsys
+) -> None:
+    source = tmp_path / "drive"
+    _shots(source / "20190206", "193778")
+    _shots(source / "calibrations", "Ne_lamp")
+
+    assert _process(_batch_argv(tmp_path, source)) == 0
+
+    header = capsys.readouterr().out
+    assert "Skipped:     1 calibration folder(s) not searched" in header
+    assert "               calibrations" in header
+    assert _run_manifest(tmp_path / "runs")["pruned_dirs"] == ["calibrations"]
+
+
+def test_a_drive_with_nothing_pruned_says_nothing_extra(
+    tmp_path: Path, fake_spectrocube, capsys
+) -> None:
+    source = tmp_path / "drive"
+    _shots(source / "20190206", "193778")
+    _shots(source / "20190207", "193780")
+
+    assert _process(_batch_argv(tmp_path, source)) == 0
+
+    assert "Skipped:" not in capsys.readouterr().out
+    # An untouched manifest is the point: a run that pruned nothing carries no
+    # pruning key at all, so an auditor reading one is reading a real skip.
+    assert "pruned_dirs" not in _run_manifest(tmp_path / "runs")
+
+
+# ---------------------------------------------------------------------------
+# Bounded on the console, complete in the receipt
+# ---------------------------------------------------------------------------
+
+
+def test_a_long_skip_list_is_bounded_on_screen_and_whole_in_the_receipt(
+    tmp_path: Path, fake_spectrocube, capsys
+) -> None:
+    source = tmp_path / "drive"
+    _shots(source / "20190206", "193778")
+    pruned = [f"2019030{index}" for index in range(1, PRUNED_LISTING_LIMIT + 3)]
+    for name in pruned:
+        _shots(_snapshot_marker(source / name), f"shot_{name}")
+
+    assert _process(_batch_argv(tmp_path, source)) == 0
+
+    header = capsys.readouterr().out
+    assert f"Skipped:     {len(pruned)} calibration folder(s) not searched" in header
+    for name in pruned[:PRUNED_LISTING_LIMIT]:
+        assert f"               {name}" in header
+    for name in pruned[PRUNED_LISTING_LIMIT:]:
+        assert f"               {name}" not in header
+    assert f"             ... and {len(pruned) - PRUNED_LISTING_LIMIT} more" in header
+
+    assert _run_manifest(tmp_path / "runs")["pruned_dirs"] == pruned
+
+
+def test_a_nested_skip_is_reported_at_the_folder_that_was_actually_dropped(
+    tmp_path: Path, fake_spectrocube, capsys
+) -> None:
+    source = tmp_path / "drive"
+    _shots(source / "20190206", "193778")
+    # Everything under a pruned folder went with it; naming the children too
+    # would bury the one fact the operator needs.
+    snapshot = _snapshot_marker(source / "20190207")
+    _shots(snapshot / "sources", "193780")
+    _shots(snapshot / "sources" / "deeper", "193781")
+
+    assert _process(_batch_argv(tmp_path, source)) == 0
+
+    header = capsys.readouterr().out
+    assert "Skipped:     1 calibration folder(s) not searched" in header
+    assert "sources" not in header
+    assert _run_manifest(tmp_path / "runs")["pruned_dirs"] == ["20190207"]
+
+
+def test_an_operators_own_path_pattern_prunes_nothing_and_reports_nothing(
+    tmp_path: Path, fake_spectrocube, capsys
+) -> None:
+    source = tmp_path / "drive"
+    _shots(source / "calibrations", "Ne_lamp")
+    _shots(source / "20190206", "193778")
+
+    assert (
+        _process([*_batch_argv(tmp_path, source), "--pattern", "**/*.SIF"]) == 0
+    )
+
+    out = capsys.readouterr().out
+    assert "Skipped:" not in out
+    manifest = _run_manifest(tmp_path / "runs")
+    assert "pruned_dirs" not in manifest
+    assert manifest["expected_files"] == 2

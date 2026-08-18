@@ -160,16 +160,32 @@ Point `--home DIR-or-campaign.toml` at one kept elsewhere. The fully-flagged
 form remains the explicit alternative — useful before a `campaign.toml`
 exists, or to override every path from the command line:
 
-```bash
-echelle web \
-  --catalog /data/all-years.json \
-  --output /data/campaign-page \
-  --registry /data/calibration_registry.toml \
-  --calibrations /data/calibrations \
-  --drift /data/epoch-drift.json
+```powershell
+$Data = "D:\NIFS"
+
+echelle web `
+  --catalog "$Data\all-years.json" `
+  --output "$Data\campaign-page" `
+  --registry "$Data\calibration_registry.toml" `
+  --calibrations "$Data\calibrations" `
+  --drift "$Data\epoch-drift.json"
 ```
 
-It writes `/data/campaign-page/index.html`. **Double-click that file to open
+On macOS or Linux the same drive is `data="/Volumes/NIFS"`, with `\` line
+continuations and forward slashes:
+
+```bash
+data="/Volumes/NIFS"
+
+echelle web \
+  --catalog "$data/all-years.json" \
+  --output "$data/campaign-page" \
+  --registry "$data/calibration_registry.toml" \
+  --calibrations "$data/calibrations" \
+  --drift "$data/epoch-drift.json"
+```
+
+It writes `D:\NIFS\campaign-page\index.html`. **Double-click that file to open
 it**, or pass `--open` above to have the command do that for you — either way
 there is no server and nothing is fetched. It is a snapshot of the moment it
 was built, so rebuild the catalog and rerun `echelle web` after further

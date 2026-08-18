@@ -453,11 +453,22 @@ INVENTED_ROOTS = ("data", "lab")
 _FENCE = re.compile(r"```[a-z]*\n(.*?)```", flags=re.S)
 
 
+def _documented_pages() -> list[Path]:
+    """Every page that hands the reader a command to copy.
+
+    README.md is the first page anyone reads and the last one anybody thinks to
+    check, which is exactly how `/data/all-years.json` survived in its
+    fully-flagged `echelle web` block after the docs were swept.
+    """
+
+    repository = Path(__file__).resolve().parents[1]
+    return [repository / "README.md", *sorted((repository / "docs").rglob("*.md"))]
+
+
 def _doc_code_blocks() -> list[tuple[str, str]]:
-    docs = Path(__file__).resolve().parents[1] / "docs"
     return [
         (page.name, block)
-        for page in sorted(docs.rglob("*.md"))
+        for page in _documented_pages()
         for block in _FENCE.findall(page.read_text(encoding="utf-8"))
     ]
 
@@ -475,10 +486,9 @@ def test_no_documented_example_offers_an_invented_unix_root_to_copy() -> None:
 
 
 def test_no_powershell_block_hands_the_reader_a_posix_absolute_path() -> None:
-    docs = Path(__file__).resolve().parents[1] / "docs"
     blocks = [
         (page.name, block)
-        for page in sorted(docs.rglob("*.md"))
+        for page in _documented_pages()
         for block in re.findall(r"```powershell\n(.*?)```", page.read_text(encoding="utf-8"), re.S)
     ]
     assert blocks, "the pages are supposed to lead with PowerShell"

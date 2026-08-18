@@ -255,6 +255,7 @@ class RunReceipt:
     drift_evidence: str = ""
     drift_evidence_sha256: str = ""
     drift_verdict: str = ""
+    pruned_dirs: tuple[str, ...] = ()
     _records: list[dict[str, Any]] = field(default_factory=list, repr=False)
 
     @property
@@ -322,6 +323,7 @@ class RunReceipt:
             drift_evidence=run.get("drift_evidence", ""),
             drift_evidence_sha256=run.get("drift_evidence_sha256", ""),
             drift_verdict=run.get("drift_verdict", ""),
+            pruned_dirs=tuple(str(item) for item in run.get("pruned_dirs") or ()),
         )
         receipt._records = list(read_records(receipt.records_path))
         return receipt
@@ -449,6 +451,18 @@ class RunReceipt:
         self.drift_verdict = verdict
         self.write_manifest()
 
+    def record_discovery(self, pruned_dirs: Iterable[str]) -> None:
+        """Record the folders discovery pruned, so a skipped day leaves a trace.
+
+        Pruning is correct -- lamp frames are not science shots -- but it is
+        invisible: without this, a receipt for a drive whose day folder held a
+        snapshot.toml reads exactly like a receipt for a drive that never had
+        that day at all.
+        """
+
+        self.pruned_dirs = tuple(str(item) for item in pruned_dirs)
+        self.write_manifest()
+
     def finish(self, state: str) -> None:
         self.state = state
         self.write_manifest()
@@ -490,6 +504,17 @@ class RunReceipt:
             ),
             f"snapshot_id = {_toml_string(self.snapshot_id)}",
             f"expected_files = {self.expected_files}",
+            # Written only when something was pruned, so a run that skipped
+            # nothing keeps the manifest it always had.
+            *(
+                [
+                    "pruned_dirs = ["
+                    + ", ".join(_toml_string(item) for item in self.pruned_dirs)
+                    + "]"
+                ]
+                if self.pruned_dirs
+                else []
+            ),
             *self._authorization_lines(),
             "",
             "[counts]",
@@ -570,6 +595,7 @@ def list_run_summaries(runs_root: Path) -> list[dict[str, Any]]:
                 "volume_label": receipt.volume_label,
                 "drive_id": receipt.drive_id,
                 "drive_warning": receipt.drive_warning,
+                "pruned_dirs": list(receipt.pruned_dirs),
                 "updated_at": manifest.stat().st_mtime,
             }
         )
