@@ -334,6 +334,22 @@ def test_a_home_naming_an_absent_catalog_is_empty_not_broken(tmp_path: Path) -> 
         status, body, _ = client.get("/")
         assert status == 200
         assert _is_html(body)
+        # Not scanned yet is a state of the FULL page, never a lesser one: the
+        # operator begins work before any scan result exists — Browse, the
+        # composer and the calibrate stepper are all already there.
+        assert "picker-dialog" in body
+        assert "Browse" in body
+        assert "Compose" in body
+        assert "Calibrate" in body
+        # The scaffolding catalog never lands in the campaign home; the built
+        # page does land in the CONFIGURED output, exactly as a ready build
+        # would.
+        assert not (tmp_path / CATALOG_NAME).exists()
+        assert sorted(item.name for item in tmp_path.iterdir()) == [
+            "campaign-page",
+            "campaign.toml",
+        ]
+        assert (tmp_path / "campaign-page" / "index.html").is_file()
 
 
 # ---------------------------------------------------------------------------

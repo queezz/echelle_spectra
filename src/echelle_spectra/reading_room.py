@@ -1690,7 +1690,6 @@ def _composer_card(
             "Data folder (this drive's SIF shots)",
             "",
             placeholder="the folder holding this drive's SIF shots",
-            note="Not recorded by any catalog or receipt — the one field this page cannot fill.",
             browse=served,
         )
         + '<label class="field"><span>Calibration</span>'
@@ -1709,8 +1708,8 @@ def _composer_card(
             "",
             placeholder=f"{values['verdict'].rsplit('/', 1)[-1]} in the data folder",
         )
-        + _text_field("f-registry", "Registry", values["registry"])
-        + _text_field("f-calibrations", "Snapshot root", values["calibrations"])
+        + _text_field("f-registry", "Registry", values["registry"], browse=served)
+        + _text_field("f-calibrations", "Snapshot root", values["calibrations"], browse=served)
         + _text_field("f-catalog", "Merged catalog", values["catalog"])
         + _text_field("f-plan", "Plan file to save", values["plan"])
         + _text_field("f-pattern", "SIF pattern", values["pattern"])
@@ -1798,13 +1797,22 @@ def _registry_card(context: dict[str, Any]) -> str:
 
 
 def _legend(title: str, entries: list[tuple[str, str, str]]) -> str:
-    """One tab's legend — the only place on the page where a state is taught."""
+    """One tab's legend — the only place on the page where a state is taught.
+
+    Folded closed by default: the teaching is on the page exactly once, but it
+    sits quietly behind its header until asked (owner correction 2026-08-18,
+    "the UI should teach me but not scream").
+    """
 
     rows = "".join(
         f'<li>{_pill(state, label)} <span class="legend-note">{_e(meaning)}</span></li>'
         for state, label, meaning in entries
     )
-    return _card(title, f'<ul class="legend">{rows}</ul>')
+    return _card(
+        title,
+        '<details class="fold-group legend-fold"><summary>the words, when you want them'
+        f'</summary><ul class="legend">{rows}</ul></details>',
+    )
 
 
 def _step_legend_card() -> str:
@@ -2594,9 +2602,11 @@ function pickerRender(payload) {
   var entries = picker.path ? (payload.dirs || []) : (payload.drives || []);
   Array.prototype.forEach.call(entries, function (entry) {
     var folder = typeof entry === 'string' ? { name: entry, path: entry } : entry;
-    var counted = typeof folder.sif_count === 'number'
-      ? folder.sif_count + ' SIF file(s)'
-      : 'SIF files not counted';
+    var counted = folder.has_snapshot
+      ? 'saved snapshot'
+      : typeof folder.sif_count === 'number'
+        ? folder.sif_count + ' SIF file(s)'
+        : 'SIF files not counted';
     body.appendChild(pickerRow(
       String(folder.name || folder.path || ''), String(folder.path || ''), counted
     ));

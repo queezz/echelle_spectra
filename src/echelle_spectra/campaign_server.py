@@ -24,7 +24,9 @@ import json
 import os
 import string
 import sys
+import tempfile
 import threading
+from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
@@ -208,8 +210,17 @@ def browse(raw: str | None) -> dict[str, Any]:
                 except OSError:  # pragma: no cover - vanished mid-walk
                     continue
                 child = Path(entry.path)
+                try:
+                    has_snapshot = (child / "snapshot.toml").is_file()
+                except OSError:  # pragma: no cover - unreadable mount points
+                    has_snapshot = False
                 dirs.append(
-                    {"name": entry.name, "path": str(child), "sif_count": count_sif(child)}
+                    {
+                        "name": entry.name,
+                        "path": str(child),
+                        "sif_count": count_sif(child),
+                        "has_snapshot": has_snapshot,
+                    }
                 )
     except (PermissionError, OSError) as exc:
         raise HomeError(f"cannot read {resolved}: {exc.strerror or exc}") from None
@@ -277,6 +288,31 @@ def render_empty(server: CampaignServer, values: dict[str, Any]) -> str:
         return EMPTY_PLACEHOLDER
     server.empty_page_rendered = True
     return str(renderer(values))
+
+
+def empty_catalog_path(server: CampaignServer) -> Path:
+    """One synthesized zero-sources catalog per server, in the system temp.
+
+    A campaign that has not been scanned yet still gets the FULL page: zero
+    drives is a state of the campaign, not a lesser page.  The scaffolding
+    catalog lives in the system temp and is never written into the campaign
+    home -- the real one appears there when the first processing run writes
+    it, and this one is forgotten.
+    """
+
+    cached = getattr(server, "empty_catalog", None)
+    if cached is not None and cached.is_file():
+        return cached
+    root = Path(tempfile.mkdtemp(prefix="echelle-serve-"))
+    path = root / "empty-catalog.json"
+    payload = {
+        "schema": "echelle-merged-catalog/v1",
+        "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "sources": [],
+    }
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    server.empty_catalog = path
+    return path
 
 
 def build_page(server: CampaignServer, values: dict[str, Any]) -> bytes:
@@ -415,8 +451,13 @@ class CampaignHandler(BaseHTTPRequestHandler):
         values = home_values(home)
         catalog = values["catalog"]
         if catalog is None or not catalog.is_file():
-            self._html(render_empty(server, values))
-            return
+            # Not scanned yet: serve the full page over a synthesized empty
+            # catalog, so every control -- Browse, the composer, the calibrate
+            # stepper -- exists before the first scan result does.
+            values = dict(values)
+            values["catalog"] = empty_catalog_path(server)
+            if values["output"] is None or not values["output"].parent.is_dir():
+                values["output"] = empty_catalog_path(server).parent / "page"
         try:
             self._send(200, build_page(server, values), "text/html; charset=utf-8")
         except (OSError, ValueError) as exc:
