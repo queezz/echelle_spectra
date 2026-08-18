@@ -552,6 +552,11 @@ def _build_parser(prog: str) -> argparse.ArgumentParser:
         metavar="N",
         help=f"Loopback port to bind (default: {DEFAULT_PORT}; 0 picks a free one).",
     )
+    parser.add_argument(
+        "--open",
+        action="store_true",
+        help="Open the served page in the default browser once it is up.",
+    )
     return parser
 
 
@@ -569,6 +574,15 @@ def serve_main(argv: list[str] | None = None, *, prog: str = "echelle serve") ->
     except OSError as exc:
         print(f"ERROR: cannot bind {HOST}:{args.port} ({exc.strerror or exc})", file=sys.stderr)
         return 1
+    if args.open:
+        import webbrowser
+
+        # The server is already bound, so the page is there when the tab lands.
+        if not webbrowser.open(server.url):
+            print(
+                f"WARNING: no default browser answered; open {server.url} by hand",
+                file=sys.stderr,
+            )
     return run_server(server)
 
 

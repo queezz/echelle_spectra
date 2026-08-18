@@ -1040,6 +1040,20 @@ def web_main(argv: list[str] | None = None, *, prog: str = "echelle web") -> int
     args = parser.parse_args(argv)
 
     def run() -> int:
+        # `echelle web --open` with nothing to build and no home is somebody
+        # ASKING TO USE THE PAGE, not asking for a lecture: start the served
+        # page, which begins from zero — pick or create the campaign home in
+        # the browser. The teaching refusal below stays for the flagless form.
+        if (
+            args.open
+            and not args.practice
+            and not (args.catalog or args.output or args.home)
+            and not (Path.cwd() / CAMPAIGN_HOME_NAME).is_file()
+        ):
+            from .campaign_server import serve_main
+
+            print("nothing built here yet — serving the campaign page instead")
+            return serve_main(["--open"])
         if args.practice:
             conflicts = [
                 flag

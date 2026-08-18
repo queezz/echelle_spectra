@@ -536,3 +536,39 @@ def test_the_cold_start_refusal_offers_practice(tmp_path: Path, monkeypatch, cap
         web_main([])
 
     assert "echelle web --practice --open" in capsys.readouterr().err
+
+
+def test_web_open_with_nothing_serves_the_page_instead_of_lecturing(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
+    """The typed command is somebody asking to USE the page: start it."""
+
+    monkeypatch.chdir(tmp_path)
+    served: list[list[str]] = []
+    from echelle_spectra import campaign_server
+
+    monkeypatch.setattr(
+        campaign_server, "serve_main", lambda argv=None, **_: served.append(argv) or 0
+    )
+
+    assert web_main(["--open"]) == 0
+
+    assert served == [["--open"]]
+    assert "serving the campaign page instead" in capsys.readouterr().out
+
+
+def test_web_open_with_a_home_in_reach_still_builds_statically(
+    tmp_path: Path, monkeypatch
+) -> None:
+    _catalog(tmp_path)
+    _home(tmp_path, 'catalog = "all-years.json"\noutput = "page"\n')
+    (tmp_path / "page").mkdir()
+    monkeypatch.chdir(tmp_path)
+    opened: list[str] = []
+    monkeypatch.setattr(
+        campaign_tools_cli.webbrowser, "open", lambda uri: opened.append(uri) or True
+    )
+
+    assert web_main(["--open"]) == 0
+
+    assert opened == [(tmp_path / "page" / "index.html").resolve().as_uri()]
