@@ -1486,3 +1486,17 @@ def test_the_plan_sentence_stands_with_and_without_a_calibration(tmp_path: Path)
     # The page's own JavaScript is the other half of the same rule.
     assert "function epochClause(epoch)" in named
     assert "values.epoch_clause = epochClause(values.epoch);" in named
+
+
+def test_the_fifth_verdict_word_is_its_own_loud_state(page: str) -> None:
+    # era-misassigned-calibration arrived with the 2026-08-19 auditor round:
+    # the lines fit the other isotope at one era shift and the calendar
+    # excludes it.  It must render as its own alarm, never as unrecognized.
+    from echelle_spectra.reading_room import _verdict_state
+
+    css_class, label = _verdict_state("era-misassigned-calibration")
+    assert css_class == "verdict-era-misassigned"
+    assert label == "era-misassigned calibration"
+    assert ".verdict-era-misassigned { color" in page
+    assert ".card.verdict-era-misassigned { border-left" in page
+    assert "era-misassigned-calibration" in page

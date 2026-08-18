@@ -292,6 +292,10 @@ _VERDICT_STATES = {
     "aligned": ("verdict-aligned", "aligned"),
     "shifted": ("verdict-shifted", "shifted"),
     "misaligned-beyond-repair": ("verdict-beyond-repair", "misaligned-beyond-repair"),
+    "era-misassigned-calibration": (
+        "verdict-era-misassigned",
+        "era-misassigned calibration",
+    ),
     "insufficient-data": ("state-insufficient-data", "insufficient-data"),
 }
 
@@ -2380,6 +2384,14 @@ def _verdict_legend_card() -> str:
                 "past the repair limit; the raw SIF data is needed.",
             ),
             (
+                "verdict-era-misassigned",
+                "era-misassigned-calibration",
+                "the lines fit the other isotope at exactly one era shift and the "
+                "calendar excludes it: the calibration is from the wrong era — "
+                "recalibrate the cube onto the right snapshot (the full form, "
+                "never --wavelength-only).",
+            ),
+            (
                 "state-insufficient-data",
                 "insufficient-data",
                 "a judged verdict, never aligned: the sample could not carry one.",
@@ -2587,6 +2599,7 @@ section.panel {
 .verdict-aligned { color: var(--good); }
 .verdict-shifted { color: var(--shift); }
 .verdict-beyond-repair { color: var(--bad); }
+.verdict-era-misassigned { color: var(--bad); font-weight: 600; }
 .card.state-missing-drive { border-left: .35rem solid var(--miss); }
 .card.state-unmeasured { border-left: .35rem dashed var(--unmeasured); }
 .card.state-empty { border-left: .35rem dotted var(--empty); }
@@ -2596,6 +2609,7 @@ section.panel {
 .card.verdict-aligned { border-left: .35rem solid var(--good); }
 .card.verdict-shifted { border-left: .35rem solid var(--shift); }
 .card.verdict-beyond-repair { border-left: .35rem solid var(--bad); }
+.card.verdict-era-misassigned { border-left: .35rem solid var(--bad); }
 .card.verdict { margin-bottom: 1rem; color: var(--ink); }
 /* The stepper: one horizontal row of boxes per drive, drawn with borders and
    arrows in CSS -- no library, nothing fetched, and it scrolls inside itself
