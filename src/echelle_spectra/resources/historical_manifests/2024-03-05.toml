@@ -9,15 +9,15 @@ notes = "Thin retrospective binder. Historical source files retain their origina
 role = "pattern"
 path = "pattern_CMOS_20240305.txt"
 source_name = "pattern_CMOS_20240305.txt"
-size_bytes = 332800
-sha256 = "46f05940cd873f1921bfb562590a5b40c99dc25e897b1b4eade8e4ab817b42b6"
+size_bytes = 330240
+sha256 = "9f1f9757158a5c8713822fcffb7248ebbc5360b280781bd3a43c2c0b6b537c31"
 
 [[artifacts]]
 role = "wavelength"
 path = "Th_wavelength_CMOS_20240305.txt"
 source_name = "Th_wavelength_CMOS_20240305.txt"
-size_bytes = 9549
-sha256 = "206d663c5a35fac0a72816be9e41ad1de0072c3cde0ca62dc277b0a8e799c3b3"
+size_bytes = 9332
+sha256 = "4035af13f45de97a35f9de94f755471f7d3e23e65c34371fbbbb54e03d0a8377"
 
 [[artifacts]]
 role = "sphere"
@@ -37,8 +37,8 @@ sha256 = "84458e65f34ec90dd3a010f4946a4e711444af606a1ac2ce9e9af16e5850d036"
 role = "integral"
 path = "integrating_sphere.txt"
 source_name = "integrating_sphere.txt"
-size_bytes = 524
-sha256 = "cd2efc11ba9af3582b5bcdabec3a3cdbd971a55b1fc7fab4062ebebe3013198d"
+size_bytes = 497
+sha256 = "4c9323aa0a61c2bff9ba51df2b8b6c8d80f57c3766749ecbcdcb03ddae28b966"
 
 [[artifacts]]
 role = "lamp"

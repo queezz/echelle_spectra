@@ -82,7 +82,10 @@ echelle drift refine drift-evidence-001.json --calibrations calibrations --accep
 the next free `drift-evidence-NNN.json`, numbered from 001 — evidence stays
 immutable, so a rerun takes the next name rather than overwriting one. `--every`
 is optional too, derived as `max(1, cubes // 20)` so roughly 20 cubes are
-measured; an explicit `--every` or `-o` always wins.
+measured. With `--from`/`--to`, `cubes` counts only the cubes inside the
+window: the audit filters by date before it samples, so deriving from the
+unfiltered set would promise twenty measurements and take one. An explicit
+`--every` or `-o` always wins.
 
 The audit fits baseline-subtracted Balmer and Fulcher centroids over the
 plasma-bright frames only, then leaves wavelength for detector pixels. Each
@@ -129,8 +132,15 @@ for the gate and the authorization each receipt records.
 
 ## The campaign page
 
-```console
-echelle web --catalog all-years.json --drift epoch-drift.json --registry calibration_registry.toml --output reading-room --open
+```powershell
+$Data = "D:\NIFS"
+
+echelle web `
+  --catalog "$Data\all-years.json" `
+  --output "$Data\campaign-page" `
+  --registry "$Data\calibration_registry.toml" `
+  --drift "$Data\epoch-drift.json" `
+  --open
 ```
 
 `echelle web` writes one self-contained `index.html` — no sidecar, no second

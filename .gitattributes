@@ -6,3 +6,12 @@ kit/echelle text eol=lf
 src/echelle_spectra/resources/header_template.txt text eol=lf
 src/echelle_spectra/resources/header_template_spectrum.txt text eol=lf
 tests/golden/*.txt text eol=lf
+
+# The packaged calibration artifacts are pinned by size and SHA-256 in the
+# historical binders, so their identity is their exact bytes.  Without this a
+# Windows checkout with core.autocrlf=true rewrites every line ending and every
+# digest check fails on a fresh clone.
+src/echelle_spectra/resources/calibration_files/*.txt text eol=lf
+src/echelle_spectra/resources/calibration_files/alignments/*.txt text eol=lf
+src/echelle_spectra/resources/calibration_files/alignments/*.toml text eol=lf
+src/echelle_spectra/resources/calibration_files/export_configs/*.toml text eol=lf

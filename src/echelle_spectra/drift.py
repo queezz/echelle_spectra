@@ -276,7 +276,7 @@ def cube_date(attrs: dict[str, Any]) -> tuple[date | None, str]:
     return None, ""
 
 
-def _filter_by_date(
+def filter_by_date(
     paths: list[Path], *, date_from: str | None, date_to: str | None
 ) -> list[Path]:
     """Keep cubes whose acquisition date lies inside an inclusive interval."""
@@ -309,6 +309,10 @@ def _filter_by_date(
             f"{date_from or '-inf'} and {date_to or '+inf'}"
         )
     return selected
+
+
+#: Kept so in-package callers that imported the private name keep working.
+_filter_by_date = filter_by_date
 
 
 # ---------------------------------------------------------------------------
@@ -1205,7 +1209,7 @@ def audit_cubes(  # noqa: C901 - one readable pass over cubes, lines, and shots
 
     resolved = resolve_cube_paths(cube_paths)
     if date_from or date_to:
-        resolved = _filter_by_date(resolved, date_from=date_from, date_to=date_to)
+        resolved = filter_by_date(resolved, date_from=date_from, date_to=date_to)
     selected = select_sample_paths(resolved, every=every, shots=shots)
 
     per_line: list[dict[str, Any]] = []

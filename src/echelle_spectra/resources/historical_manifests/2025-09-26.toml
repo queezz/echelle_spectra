@@ -45,8 +45,8 @@ source_name = "Ne-0.02s-x3-bright-lines_bg.sif"
 role = "integral"
 path = "integrating_sphere.txt"
 source_name = "integrating_sphere.txt"
-size_bytes = 524
-sha256 = "cd2efc11ba9af3582b5bcdabec3a3cdbd971a55b1fc7fab4062ebebe3013198d"
+size_bytes = 497
+sha256 = "4c9323aa0a61c2bff9ba51df2b8b6c8d80f57c3766749ecbcdcb03ddae28b966"
 
 [[artifacts]]
 role = "alignment_settings"
