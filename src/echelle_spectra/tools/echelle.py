@@ -716,7 +716,6 @@ class Calibrations:
         """
         Read the integrating sphere wavelength characteristic
         """
-        from scipy.constants import Planck, speed_of_light
         from scipy.interpolate import interp1d
 
         data = np.loadtxt(join(self.folder, self.filenames["integral"]))
@@ -738,16 +737,67 @@ class Calibrations:
         # negative factor, which that same drop mask already accounts for.
         self.zero_response_columns = int(np.count_nonzero(y == 0.0))
         response = np.where(y == 0.0, np.nan, y)
-        with np.errstate(divide="ignore", invalid="ignore"):
-            wmsr = (
-                self.integral(x) * self.sphr.info["ExposureTime"] / response * 1e-2
-            )  # W/(m2 sr nm)
-        wm = wmsr * 4 * np.pi  # W/(m2 sr nm)
-        phmsr = (
-            wmsr * x * 1e-9 / (speed_of_light * Planck)
-        )  # convert W (or J/s) to Nph/s
+        self.absolute = _absolute_factor_curves(
+            self.integral(x), self.sphr.info["ExposureTime"], response, x
+        )
 
-        self.absolute = {"wmsr": wmsr, "wm": wm, "phmsr": phmsr}
+    def absolute_on_detector_grid(self):
+        """Return the same absolute factors on the whole (order, pixel) grid.
+
+        :meth:`absolute_calibration` evaluates the sphere response only where
+        the order-border selection kept it, so ``absolute`` is one flat array
+        living on *this* snapshot's kept samples.  Recalibrating a cube written
+        under a different era's snapshot needs the factor at the *cube's* own
+        (order, detector-pixel) pairs, and a different wavelength table moves
+        the order borders, so the two sets do not have to agree.
+
+        The response is a per-order measurement of the sphere over the full
+        detector width, and the borders only decide which order's copy of an
+        overlapping column is published.  Evaluating the very same formula on
+        the unselected grid therefore reports a measurement, never a guess: it
+        is NaN exactly where the sphere gave nothing to measure -- the
+        partial-order pad that runs off the sensor, a column of exactly zero net
+        response, and any column whose wavelength the sphere's spectral
+        reference does not cover.  Selecting this grid by ``order_borders`` and
+        the finite-wavelength mask reproduces ``absolute`` element for element.
+        """
+
+        wavelength = np.asarray(self.order_wavel, dtype=float)
+        response = np.asarray(self.sphr.order_spectra[0], dtype=float) - np.asarray(
+            self.bkgr.order_spectra[0], dtype=float
+        )
+        response = np.where(response == 0.0, np.nan, response)
+        knots = np.asarray(self.integral.x, dtype=float)
+        # ``interp1d`` refuses out-of-range input, and the sphere's spectral
+        # reference genuinely says nothing outside its own band.
+        inside = (
+            np.isfinite(wavelength) & (wavelength >= knots.min()) & (wavelength <= knots.max())
+        )
+        radiance = np.full(wavelength.shape, np.nan)
+        if np.any(inside):
+            radiance[inside] = self.integral(wavelength[inside])
+        return _absolute_factor_curves(
+            radiance, self.sphr.info["ExposureTime"], response, wavelength
+        )
+
+
+def _absolute_factor_curves(radiance, exposure_time, response, wavelength):
+    """Turn one sphere response into the three absolute calibration factors.
+
+    Shared by the border-selected calibration and the whole-detector-grid
+    evaluation so both can never drift apart; the arrays may be of any shape as
+    long as they agree.
+    """
+
+    from scipy.constants import Planck, speed_of_light
+
+    with np.errstate(divide="ignore", invalid="ignore"):
+        wmsr = radiance * exposure_time / response * 1e-2  # W/(m2 sr nm)
+        wm = wmsr * 4 * np.pi  # W/(m2 nm)
+        # convert W (or J/s) to Nph/s
+        phmsr = wmsr * wavelength * 1e-9 / (speed_of_light * Planck)
+    return {"wmsr": wmsr, "wm": wm, "phmsr": phmsr}
+
 
 # MARK: Spectrum
 def _apply_absolute_calibration(counts, absolute_scale, exposure_time):

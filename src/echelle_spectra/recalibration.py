@@ -74,7 +74,10 @@ def _require_unchanged_unapplied_roles(
         raise RecalibrationError(
             "new snapshot changes unselected calibration role(s) "
             + ", ".join(changed)
-            + "; apply both deltas or choose a snapshot whose other roles are unchanged"
+            + "; a full recalibration (neither --wavelength-only nor --factor-only) now "
+            "applies a different era's wavelength solution and sphere response together "
+            "on the cube's own detector grid, so run that instead -- or choose a snapshot "
+            "whose other roles are unchanged"
         )
 
 
@@ -109,7 +112,9 @@ def _polynomial_payload(snapshot: Snapshot, solutions: dict[int, list[float]]) -
     }
 
 
-def _evaluate_wavelength(ds, snapshot: Snapshot) -> tuple[np.ndarray, dict[str, Any]]:
+def _evaluate_wavelength(
+    ds, snapshot: Snapshot
+) -> tuple[np.ndarray, dict[str, Any], dict[int, list[float]]]:
     if "detector_pixel" not in ds.coords or "echelle_order" not in ds.coords:
         raise RecalibrationError(
             "wavelength recalibration needs aligned detector_pixel and echelle_order coordinates"
@@ -128,7 +133,7 @@ def _evaluate_wavelength(ds, snapshot: Snapshot) -> tuple[np.ndarray, dict[str, 
     for order in np.unique(orders):
         selected = orders == order
         wavelength[selected] = np.polyval(solutions[int(order)], pixels[selected])
-    return wavelength, _polynomial_payload(snapshot, represented_solutions)
+    return wavelength, _polynomial_payload(snapshot, represented_solutions), solutions
 
 
 #: Absolute-factor kinds and the intensity units each one produces.  Ordered
@@ -181,56 +186,75 @@ def _factor_kind(factor) -> str:
     return kind
 
 
+def _cube_detector_grid(ds) -> tuple[np.ndarray, np.ndarray]:
+    """Return the cube's own (echelle order, detector pixel) sample addresses."""
+
+    if "detector_pixel" not in ds.coords or "echelle_order" not in ds.coords:
+        raise RecalibrationError(
+            "absolute-factor recalibration needs aligned detector_pixel and "
+            "echelle_order coordinates"
+        )
+    pixels = np.asarray(ds.coords["detector_pixel"].values, dtype=float)
+    orders = np.asarray(ds.coords["echelle_order"].values, dtype=float)
+    if not np.all(np.isfinite(pixels)) or not np.all(np.isfinite(orders)):
+        raise RecalibrationError("cube detector_pixel/echelle_order coordinates are not finite")
+    return orders.astype(int), pixels.astype(int)
+
+
 def factor_from_snapshot(ds, snapshot: Snapshot) -> np.ndarray:
-    """Load a snapshot's sphere pair and align its factor by raw order/pixel."""
+    """Evaluate a snapshot's absolute factor on the cube's own detector grid.
+
+    A cross-era revision is exactly the case this has to survive: the new
+    snapshot carries its own wavelength table, that table moves the order
+    borders, and the border move changes which (order, pixel) pairs the new
+    snapshot publishes.  Matching the two snapshots' published sample sets is
+    therefore the wrong contract -- it fails for precisely the era change the
+    revision exists to perform.
+
+    The right grid is the cube's.  Extraction geometry is frozen (the pattern
+    digest is checked before anything here runs), so every cube sample names a
+    detector column inside a diffraction order that both snapshots cut the same
+    way, and the new snapshot's sphere pair measured that column whether or not
+    its borders chose to publish it.  ``absolute_on_detector_grid`` re-evaluates
+    the snapshot's own factor formula there, so a sample recovered across a
+    moved border is a measurement, not an interpolation or an extrapolation of
+    the response curve.
+
+    Samples the new snapshot genuinely cannot answer for come back as NaN and
+    are dropped and counted upstream: the partial-order pad that leaves the
+    sensor, a column of exactly zero net sphere response, and any column outside
+    the band the sphere's spectral reference covers.  The sphere is never
+    invented where it did not shine.
+    """
 
     from .spectrocube_cli import _snapshot_camera
     from .tools.loader import build_calibration
 
+    orders, pixels = _cube_detector_grid(ds)
     calibration = build_calibration(
         snapshot.root,
         _snapshot_camera(snapshot),
         calibration_files=snapshot.calibration_files(),
     )
     kind = _factor_kind(ds["applied_absolute_calibration_factor"])
-    factor = np.asarray(calibration.absolute[kind], dtype=float)
-    wavelength = np.asarray(calibration.wavelength, dtype=float)
-    detector_grid = np.broadcast_to(
-        np.arange(calibration.DIMW), calibration.order_borders.shape
-    )[calibration.order_borders]
-    order_grid = np.broadcast_to(
-        np.asarray(calibration.order_ids)[:, None], calibration.order_borders.shape
-    )[calibration.order_borders]
-    # Length trap: Calibrations.wavelength keeps the partial-order NaN pad
-    # (N_full) while EchelleImage.wavelength and every absolute factor are built
-    # from the already-pruned sphere spectra (N_keep).  The N_full grids above
-    # take the keep mask; the factor is already in wavelength[keep] order and
-    # must not be masked again.
-    keep = np.isfinite(wavelength)
-    if factor.size != int(np.count_nonzero(keep)):
+    grid = np.asarray(calibration.absolute_on_detector_grid()[kind], dtype=float)
+    order_ids = np.asarray(calibration.order_ids, dtype=int)
+    rows = {int(order_id): index for index, order_id in enumerate(order_ids)}
+    missing = sorted(set(orders.tolist()) - set(rows))
+    if missing:
         raise RecalibrationError(
-            f"snapshot absolute factor has {factor.size} samples for "
-            f"{int(np.count_nonzero(keep))} retained wavelength samples"
+            "new snapshot has no diffraction order for represented order(s): "
+            + ", ".join(map(str, missing))
         )
-    lookup = {
-        (int(order), int(pixel)): float(value)
-        for order, pixel, value in zip(order_grid[keep], detector_grid[keep], factor)
-    }
-    try:
-        return np.asarray(
-            [
-                lookup[(int(order), int(pixel))]
-                for order, pixel in zip(
-                    ds.coords["echelle_order"].values,
-                    ds.coords["detector_pixel"].values,
-                )
-            ],
-            dtype=float,
-        )
-    except KeyError as exc:
+    width = int(grid.shape[1])
+    outside = (pixels < 0) | (pixels >= width)
+    if np.any(outside):
         raise RecalibrationError(
-            f"new snapshot factor has no raw order/pixel sample {exc.args[0]}"
-        ) from exc
+            "cube detector pixel(s) fall outside the new snapshot's "
+            f"{width}-column detector: "
+            + ", ".join(map(str, sorted(set(pixels[outside].tolist()))[:8]))
+        )
+    return grid[np.asarray([rows[int(order)] for order in orders], dtype=int), pixels]
 
 
 def _replace_factor(revised, original, new_snapshot: Snapshot, new_factor: np.ndarray | None):
@@ -242,6 +266,15 @@ def _replace_factor(revised, original, new_snapshot: Snapshot, new_factor: np.nd
     new factor is non-finite or non-positive is removed and counted in the
     ``dropped_nonpositive_factor_columns`` attribute instead of refusing the
     revision.  Every retained sample keeps the strictly positive guarantee.
+
+    A cross-era revision adds one more way for a sample to be uncalibratable,
+    and it deserves its own count.  A non-finite replacement means the new
+    snapshot's sphere never answered for that detector column at all, which is a
+    coverage statement about the calibration; a finite non-positive one means it
+    answered with noise, which is a measurement.  Both are dropped, and the
+    coverage half is reported separately as
+    ``dropped_uncovered_factor_columns`` so an operator can tell an era whose
+    sphere does not reach this cube from an era that merely measured badly.
     """
 
     if "applied_absolute_calibration_factor" not in revised:
@@ -257,16 +290,15 @@ def _replace_factor(revised, original, new_snapshot: Snapshot, new_factor: np.nd
     if replacement.shape != old.shape:
         raise RecalibrationError("replacement absolute factor must be wavelength-aligned")
     previous = np.asarray(old.values, dtype=float)
-    usable = (
-        np.isfinite(replacement)
-        & (replacement > 0)
-        & np.isfinite(previous)
-        & (previous > 0)
-    )
+    covered = np.isfinite(replacement)
+    usable = covered & (replacement > 0) & np.isfinite(previous) & (previous > 0)
     dropped = int(usable.size - np.count_nonzero(usable))
+    uncovered = int(covered.size - np.count_nonzero(covered))
     if not np.any(usable):
         raise RecalibrationError(
-            "no wavelength sample has a strictly positive old and replacement absolute factor"
+            "no wavelength sample has a strictly positive old and replacement absolute factor; "
+            f"{uncovered} of {covered.size} samples lie outside the new snapshot's sphere "
+            "coverage, which usually means the wrong snapshot or the wrong detector"
         )
     if dropped:
         revised = revised.isel(wavelength=np.flatnonzero(usable))
@@ -275,15 +307,22 @@ def _replace_factor(revised, original, new_snapshot: Snapshot, new_factor: np.nd
         revised.attrs["dropped_nonpositive_factor_columns"] = (
             int(revised.attrs.get("dropped_nonpositive_factor_columns", 0)) + dropped
         )
-    source_signal = revised["intensity"] / old
-    revised["intensity"] = source_signal * replacement
+    if uncovered:
+        revised.attrs["dropped_uncovered_factor_columns"] = (
+            int(revised.attrs.get("dropped_uncovered_factor_columns", 0)) + uncovered
+        )
+    # Rescale by the ratio rather than by dividing out the old factor and
+    # multiplying the new one back in.  An unchanged factor then gives a ratio of
+    # exactly 1.0 and leaves every stored intensity bit for bit as it was, which
+    # is what makes recalibrating a cube onto its own snapshot a true round trip.
+    revised["intensity"] = revised["intensity"] * (replacement / old)
     revised["intensity"].attrs.update(original["intensity"].attrs)
     revised["applied_absolute_calibration_factor"] = (
         ("wavelength",),
         replacement,
         dict(old.attrs),
     )
-    return revised, dropped
+    return revised, dropped, uncovered
 
 
 def _append_history(
@@ -293,6 +332,7 @@ def _append_history(
     changes: list[str],
     *,
     dropped_nonpositive_factor_columns: int = 0,
+    dropped_uncovered_factor_columns: int = 0,
 ) -> dict[str, Any]:
     history = []
     raw_history = ds.attrs.get("recalibration_history_json")
@@ -316,6 +356,8 @@ def _append_history(
     }
     if dropped_nonpositive_factor_columns:
         event["dropped_nonpositive_factor_columns"] = int(dropped_nonpositive_factor_columns)
+    if dropped_uncovered_factor_columns:
+        event["dropped_uncovered_factor_columns"] = int(dropped_uncovered_factor_columns)
     history.append(event)
     revised.attrs.update(new_snapshot.provenance_attrs())
     revised.attrs["recalibration_history_json"] = json.dumps(
@@ -323,6 +365,127 @@ def _append_history(
     )
     revised.attrs["previous_snapshot_manifest_json"] = str(ds.attrs["snapshot_manifest_json"])
     return event
+
+
+def _json_records(attrs, name: str) -> list[dict[str, Any]] | None:
+    raw = attrs.get(name)
+    if not raw:
+        return None
+    try:
+        records = json.loads(str(raw))
+    except (TypeError, ValueError):
+        raise RecalibrationError(f"cube has malformed {name}") from None
+    if not isinstance(records, list):
+        raise RecalibrationError(f"cube has malformed {name}")
+    return records
+
+
+def _refresh_wavelength_derived_attrs(revised, solutions: dict[int, list[float]]) -> None:
+    """Recompute every attribute the superseded wavelength solution produced.
+
+    A revised cube advertises more than its wavelength coordinate: the export
+    also wrote each order's wavelength span and the pre-crop bounds of the whole
+    exported axis.  Those are statements about the solution, not about the data,
+    so leaving them behind after a revision publishes the old era's numbers under
+    the new era's snapshot id -- the exact drift found where an order still
+    advertised its old range, off by the recalibration shift.
+
+    Both are rebuilt from the new polynomials over the same detector pixels the
+    export used, which the cube still records: ``order_wavelength_ranges_nm_json``
+    counts an order's finite pixels from zero (the partial-order pad is a tail),
+    and the pre-crop axis is the order-border span intersected with that pad.
+    Extraction geometry is frozen, so those pixel sets did not move -- only the
+    wavelength each one maps to.
+    """
+
+    ranges = _json_records(revised.attrs, "order_wavelength_ranges_nm_json")
+    finite_pixels: dict[int, int] = {}
+    if ranges is not None:
+        rebuilt = []
+        for record in ranges:
+            try:
+                order = int(record["order"])
+                n_px = int(record["n_px"])
+            except (KeyError, TypeError, ValueError):
+                raise RecalibrationError(
+                    "cube has malformed order_wavelength_ranges_nm_json"
+                ) from None
+            finite_pixels[order] = n_px
+            coefficients = solutions.get(order)
+            if coefficients is None:
+                raise RecalibrationError(
+                    "new snapshot has no wavelength polynomial for order "
+                    f"{order}, which the cube's order_wavelength_ranges_nm_json describes"
+                )
+            values = np.polyval(coefficients, np.arange(max(n_px, 0), dtype=float))
+            rebuilt.append(
+                {
+                    "order": order,
+                    "min_nm": float(np.min(values)) if values.size else float("nan"),
+                    "max_nm": float(np.max(values)) if values.size else float("nan"),
+                    "n_px": n_px,
+                }
+            )
+        revised.attrs["order_wavelength_ranges_nm_json"] = json.dumps(
+            rebuilt, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        )
+
+    borders = _json_records(revised.attrs, "order_border_pixel_ranges_json")
+    has_bounds = (
+        "original_wavelength_min_nm" in revised.attrs
+        or "original_wavelength_max_nm" in revised.attrs
+    )
+    if borders is not None and has_bounds:
+        spans = []
+        for record in borders:
+            try:
+                order = int(record["order"])
+                start = int(record["start_px"])
+                stop = int(record["end_px"]) + 1
+            except (KeyError, TypeError, ValueError):
+                raise RecalibrationError(
+                    "cube has malformed order_border_pixel_ranges_json"
+                ) from None
+            stop = min(stop, finite_pixels.get(order, stop))
+            coefficients = solutions.get(order)
+            if coefficients is None or stop <= start:
+                continue
+            spans.append(np.polyval(coefficients, np.arange(start, stop, dtype=float)))
+        if spans:
+            joined = np.concatenate(spans)
+            revised.attrs["original_wavelength_min_nm"] = float(np.min(joined))
+            revised.attrs["original_wavelength_max_nm"] = float(np.max(joined))
+
+
+def _refresh_wavelength_accuracy(revised, snapshot: Snapshot, payload: dict[str, Any]) -> None:
+    """Restate the cube's wavelength accuracy from the new snapshot's alignment.
+
+    The accuracy is the snapshot's alignment RMS carried into nanometres through
+    this cube's dispersion, so both halves of it belong to the superseded
+    solution.  A new snapshot that records no alignment cannot make the claim at
+    all, and the attribute is removed rather than left standing.
+    """
+
+    if "wavelength_accuracy_nm" not in revised.attrs:
+        return
+    from .tools.spectrocube_export import _wavelength_accuracy_nm
+
+    records = {
+        int(record["order"]): {"coefficients": list(record["coefficients"])}
+        for record in payload["orders"]
+    }
+    accuracy = _wavelength_accuracy_nm(
+        snapshot,
+        records,
+        np.asarray(revised.coords["detector_pixel"].values, dtype=float),
+        np.asarray(revised.coords["echelle_order"].values, dtype=int),
+    )
+    if accuracy is None:
+        revised.attrs.pop("wavelength_accuracy_nm", None)
+        revised.attrs.pop("wavelength_accuracy_source", None)
+    else:
+        revised.attrs["wavelength_accuracy_nm"] = accuracy
+        revised.attrs["wavelength_accuracy_source"] = "snapshot alignment rms_px"
 
 
 def recalibrate_dataset(
@@ -362,15 +525,17 @@ def recalibrate_dataset(
     revised = ds.copy(deep=True)
     changes: list[str] = []
     polynomial_payload: dict[str, Any] | None = None
+    solutions: dict[int, list[float]] = {}
     dropped_nonpositive_factor_columns = 0
+    dropped_uncovered_factor_columns = 0
     if update_wavelength:
-        wavelength, polynomial_payload = _evaluate_wavelength(revised, new_snapshot)
+        wavelength, polynomial_payload, solutions = _evaluate_wavelength(revised, new_snapshot)
         revised = revised.assign_coords(wavelength=("wavelength", wavelength))
         changes.append("wavelength")
 
     if update_factor:
-        revised, dropped_nonpositive_factor_columns = _replace_factor(
-            revised, ds, new_snapshot, new_factor
+        revised, dropped_nonpositive_factor_columns, dropped_uncovered_factor_columns = (
+            _replace_factor(revised, ds, new_snapshot, new_factor)
         )
         changes.append("absolute-factor")
 
@@ -380,11 +545,17 @@ def recalibrate_dataset(
         new_snapshot,
         changes,
         dropped_nonpositive_factor_columns=dropped_nonpositive_factor_columns,
+        dropped_uncovered_factor_columns=dropped_uncovered_factor_columns,
     )
     if polynomial_payload is not None:
         revised.attrs["wavelength_polynomials_json"] = json.dumps(
             polynomial_payload, sort_keys=True, separators=(",", ":")
         )
+        # Every attribute the old solution produced is restated here, after the
+        # factor pass has settled which samples survive, so the cube never
+        # advertises one era's wavelengths under another era's snapshot id.
+        _refresh_wavelength_derived_attrs(revised, solutions)
+        _refresh_wavelength_accuracy(revised, new_snapshot, polynomial_payload)
     order = np.argsort(np.asarray(revised.coords["wavelength"].values), kind="stable")
     return revised.isel(wavelength=order), event
 

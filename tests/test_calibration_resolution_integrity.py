@@ -20,6 +20,7 @@ import pytest
 from echelle_spectra.recalibration import (
     RecalibrationError,
     _factor_kind,
+    _replace_factor,
     factor_from_snapshot,
     recalibrate_dataset,
 )
@@ -120,16 +121,27 @@ def detector(monkeypatch: pytest.MonkeyPatch) -> dict[str, np.ndarray]:
     return frames
 
 
-def _write_sources(root: Path, *, shift: float, integral_scale: float) -> dict[str, Path]:
+def _write_sources(
+    root: Path,
+    *,
+    shift: float,
+    integral_scale: float,
+    order_offsets: tuple[float, float] = (0.0, 0.0),
+    sphere_marker: str = "",
+) -> dict[str, Path]:
     root.mkdir(parents=True, exist_ok=True)
     lower_centers, upper_centers = _order_centers()
     pattern = root / "pattern.txt"
     np.savetxt(pattern, np.column_stack([lower_centers, upper_centers]), fmt="%d")
 
     rows = [
-        (ORDER_IDS[0], pixel, 436.0 - 0.1 * pixel + shift) for pixel in (2, 10, 18, 26, 34)
+        (ORDER_IDS[0], pixel, 436.0 - 0.1 * pixel + shift + order_offsets[0])
+        for pixel in (2, 10, 18, 26, 34)
     ]
-    rows += [(ORDER_IDS[1], pixel, 433.0 - 0.1 * pixel + shift) for pixel in (1, 8, 15, 22)]
+    rows += [
+        (ORDER_IDS[1], pixel, 433.0 - 0.1 * pixel + shift + order_offsets[1])
+        for pixel in (1, 8, 15, 22)
+    ]
     wavelength = root / "wavelength.txt"
     wavelength.write_text(
         "# synthetic lamp identification\n"
@@ -147,9 +159,13 @@ def _write_sources(root: Path, *, shift: float, integral_scale: float) -> dict[s
     np.savetxt(integral, np.column_stack([micrometres, radiance]), fmt="%.8f")
 
     sphere = root / "sphere.sif"
-    sphere.write_bytes(b"synthetic integrating-sphere frame")
+    # A distinct marker makes this era's sphere pair a distinct artifact digest,
+    # which is what a real era change always is.
+    sphere.write_bytes(f"synthetic integrating-sphere frame{sphere_marker}".encode())
     background = root / "sphere_bg.sif"
-    background.write_bytes(b"synthetic integrating-sphere background frame")
+    background.write_bytes(
+        f"synthetic integrating-sphere background frame{sphere_marker}".encode()
+    )
     return {
         "pattern": pattern,
         "wavelength": wavelength,
@@ -165,9 +181,15 @@ def _snapshot(
     *,
     shift: float = 0.0,
     integral_scale: float = 1.0,
+    order_offsets: tuple[float, float] = (0.0, 0.0),
+    sphere_marker: str = "",
 ):
     files = _write_sources(
-        root / f"sources-{snapshot_id}", shift=shift, integral_scale=integral_scale
+        root / f"sources-{snapshot_id}",
+        shift=shift,
+        integral_scale=integral_scale,
+        order_offsets=order_offsets,
+        sphere_marker=sphere_marker,
     )
     return create_snapshot(
         root / "calibrations",
@@ -437,6 +459,551 @@ class TestRealPipelineCube:
             np.asarray(revised["applied_absolute_calibration_factor"].values) > 0
         )
         assert np.all(np.isfinite(np.asarray(revised["intensity"].values)))
+
+
+#: Packet F14 -- the two eras a cross-era revision has to join.  The cube is born
+#: under the old one; the new one is a genuine era change, so it brings its own
+#: lamp identification *and* its own sphere pair.
+OLD_ERA_ID = "20190314_cmos"
+NEW_ERA_ID = "20250926_cmos"
+#: The new era lands its upper order this much redder than the lower one.  That
+#: relative move -- not the common shift, which slides both orders together --
+#: is what walks the order border, and the border decides which detector columns
+#: a snapshot publishes an absolute factor for.
+NEW_ERA_ORDER_OFFSET_NM = 0.2
+#: A column where the new era's sphere measured exactly its own background.  The
+#: sphere never shone there, so no era change can produce a factor for it.
+NEW_ERA_DEAD_SPHERE_PIXEL = 12
+
+
+def _era_frames() -> dict[str, dict[str, np.ndarray]]:
+    """Detector frames per era: the new one has one dead sphere column."""
+
+    old = _detector_frames()
+    new = _detector_frames()
+    lower_centers, _ = _order_centers()
+    center = lower_centers[NEW_ERA_DEAD_SPHERE_PIXEL]
+    rows = np.arange(center - DV, center + DV + 1)
+    inside = (rows >= 0) & (rows < DIMO)
+    new["sphere"][0][rows[inside], NEW_ERA_DEAD_SPHERE_PIXEL] = 30.0 / (2 * DV + 1)
+    return {OLD_ERA_ID: old, NEW_ERA_ID: new}
+
+
+@pytest.fixture
+def two_era_detector(monkeypatch: pytest.MonkeyPatch) -> dict[str, dict[str, np.ndarray]]:
+    """Serve each snapshot the sphere its own era measured.
+
+    A snapshot copies its artifacts into a folder named for its id, so the path
+    the pipeline reads names the era without the fixture having to thread it
+    through ``build_calibration``.
+    """
+
+    eras = _era_frames()
+
+    def read_image(fpth, spec="black", crop=(0, -1), exptime=1):
+        path = Path(str(fpth))
+        frames = eras.get(path.parent.name, eras[OLD_ERA_ID])
+        name = path.name.casefold()
+        if name.endswith("_bg.sif"):
+            images = frames["background"]
+        elif name.endswith("sphere.sif"):
+            images = frames["sphere"]
+        else:
+            images = frames["shot"]
+        info = {
+            "NumberOfFrames": int(images.shape[0]),
+            "xbin": 1,
+            "ybin": 1,
+            "size": np.array([DIMW, DIMO]),
+            "ExposureTime": EXPOSURE_S,
+            "CycleTime": 1.0,
+        }
+        return images.copy(), info
+
+    monkeypatch.setattr(echelle_module, "read_image", read_image)
+    return eras
+
+
+def _published_samples(snapshot) -> set[tuple[int, int]]:
+    """The (order, pixel) pairs a snapshot publishes an absolute factor for.
+
+    This is the sample set the pre-F14 ``factor_from_snapshot`` demanded a cube
+    be a subset of: the snapshot's order borders intersected with its
+    finite-wavelength keep mask.
+    """
+
+    calibration = build_calibration(
+        snapshot.root, "CMOS", calibration_files=snapshot.calibration_files()
+    )
+    keep = np.isfinite(np.asarray(calibration.wavelength, dtype=float))
+    pixels = np.broadcast_to(np.arange(calibration.DIMW), calibration.order_borders.shape)[
+        calibration.order_borders
+    ]
+    orders = np.broadcast_to(
+        np.asarray(calibration.order_ids)[:, None], calibration.order_borders.shape
+    )[calibration.order_borders]
+    return set(zip(orders[keep].tolist(), pixels[keep].tolist()))
+
+
+def _old_era_cube(tmp_path: Path):
+    snapshot = _snapshot(tmp_path, OLD_ERA_ID, sphere_marker=" 2019")
+    calibration = build_calibration(
+        snapshot.root, "CMOS", calibration_files=snapshot.calibration_files()
+    )
+    spectrum = load_spectrum(_shot_file(tmp_path), calibration=calibration)
+    return snapshot, _export(spectrum, snapshot)
+
+
+def _write_alignment(snapshot, *, rms_px: float) -> None:
+    """Give a snapshot the alignment record the wavelength accuracy reads."""
+
+    (snapshot.root / "alignment.toml").write_text(
+        'instrument_id = "cmos"\n'
+        'base_wavelength_file = "wavelength.txt"\n'
+        "n_lines = 9\n"
+        f"rms_px = {rms_px!r}\n"
+        "[transform]\ndx_px = 0.0\ndy_px = 0.0\ntheta_rad = 0.0\n",
+        encoding="utf-8",
+    )
+
+
+def _new_era_snapshot(tmp_path: Path):
+    return _snapshot(
+        tmp_path,
+        NEW_ERA_ID,
+        shift=WAVELENGTH_SHIFT_NM,
+        order_offsets=(0.0, NEW_ERA_ORDER_OFFSET_NM),
+        sphere_marker=" 2025",
+    )
+
+
+class TestCrossEraRecalibration:
+    """Packet F14 -- a cube born in one era, recalibrated onto another."""
+
+    def test_a_moved_border_defeats_the_matching_samples_contract(
+        self, tmp_path: Path, two_era_detector
+    ) -> None:
+        # The refusal this packet exists to remove: the new era publishes a
+        # different set of (order, pixel) samples, so a contract that demands
+        # every cube sample appear in it fails for exactly the era change the
+        # revision is for.
+        _, cube = _old_era_cube(tmp_path)
+        new = _new_era_snapshot(tmp_path)
+
+        cube_samples = set(
+            zip(
+                np.asarray(cube.ds["echelle_order"].values, dtype=int).tolist(),
+                np.asarray(cube.ds["detector_pixel"].values, dtype=int).tolist(),
+            )
+        )
+        unmatched = sorted(cube_samples - _published_samples(new))
+        assert unmatched, "fixture no longer moves the order border"
+        assert (ORDER_IDS[1], 2) in unmatched
+
+    def test_the_cube_grid_recovers_every_border_moved_sample(
+        self, tmp_path: Path, two_era_detector
+    ) -> None:
+        _, cube = _old_era_cube(tmp_path)
+        new = _new_era_snapshot(tmp_path)
+
+        factor = factor_from_snapshot(cube.ds, new)
+        orders = np.asarray(cube.ds["echelle_order"].values, dtype=int)
+        pixels = np.asarray(cube.ds["detector_pixel"].values, dtype=int)
+        published = _published_samples(new)
+        recovered = np.asarray(
+            [(int(o), int(p)) not in published for o, p in zip(orders, pixels)]
+        )
+        assert np.any(recovered)
+
+        # A sample the new era's borders did not publish is still a measurement:
+        # its own sphere pair minus background, through its own integral curve,
+        # at that very detector column.
+        calibration = build_calibration(
+            new.root, "CMOS", calibration_files=new.calibration_files()
+        )
+        rows = {int(value): index for index, value in enumerate(calibration.order_ids)}
+        expected = calibration.absolute_on_detector_grid()["wmsr"]
+        for order, pixel in zip(orders[recovered], pixels[recovered]):
+            if pixel == NEW_ERA_DEAD_SPHERE_PIXEL:
+                continue
+            assert np.isfinite(expected[rows[int(order)], int(pixel)])
+        np.testing.assert_array_equal(
+            factor[recovered & (pixels != NEW_ERA_DEAD_SPHERE_PIXEL)],
+            [
+                expected[rows[int(order)], int(pixel)]
+                for order, pixel in zip(orders, pixels)
+                if (int(order), int(pixel)) not in published
+                and int(pixel) != NEW_ERA_DEAD_SPHERE_PIXEL
+            ],
+        )
+
+    def test_a_full_cross_era_revision_applies_both_deltas(
+        self, tmp_path: Path, two_era_detector
+    ) -> None:
+        old, cube = _old_era_cube(tmp_path)
+        new = _new_era_snapshot(tmp_path)
+
+        revised, event = recalibrate_dataset(cube.ds, new)
+
+        assert event["changes"] == ["wavelength", "absolute-factor"]
+        assert event["old_snapshot_id"] == old.snapshot_id
+        assert event["new_snapshot_id"] == new.snapshot_id
+        assert event["old_snapshot_manifest_json"] == old.provenance_attrs()[
+            "snapshot_manifest_json"
+        ]
+        assert event["new_snapshot_manifest_json"] == new.provenance_attrs()[
+            "snapshot_manifest_json"
+        ]
+        assert revised.attrs["snapshot_id"] == new.snapshot_id
+        assert (
+            revised.attrs["calibration_file_digests_json"]
+            == new.provenance_attrs()["calibration_file_digests_json"]
+        )
+
+        # The new era's wavelength solution, evaluated on the cube's own pixels.
+        payload = json.loads(revised.attrs["wavelength_polynomials_json"])
+        assert payload["snapshot_id"] == new.snapshot_id
+        pixels = np.asarray(revised.coords["detector_pixel"].values, dtype=float)
+        orders = np.asarray(revised.coords["echelle_order"].values, dtype=int)
+        for record in payload["orders"]:
+            selected = orders == record["order"]
+            np.testing.assert_allclose(
+                np.polyval(record["coefficients"], pixels[selected]),
+                np.asarray(revised.coords["wavelength"].values)[selected],
+                rtol=0.0,
+                atol=5e-10,
+            )
+        # The upper order moved by the era shift plus its own offset, the lower
+        # order by the era shift alone: a real solution change, not a slide.
+        for order, expected in (
+            (ORDER_IDS[0], WAVELENGTH_SHIFT_NM),
+            (ORDER_IDS[1], WAVELENGTH_SHIFT_NM + NEW_ERA_ORDER_OFFSET_NM),
+        ):
+            record = next(item for item in payload["orders"] if item["order"] == order)
+            assert np.polyval(record["coefficients"], 5.0) - np.polyval(
+                json.loads(cube.ds.attrs["wavelength_polynomials_json"])["orders"][
+                    [item["order"] for item in payload["orders"]].index(order)
+                ]["coefficients"],
+                5.0,
+            ) == pytest.approx(expected, abs=1e-9)
+
+        factor = np.asarray(revised["applied_absolute_calibration_factor"].values)
+        assert np.all(np.isfinite(factor)) and np.all(factor > 0)
+        assert np.all(np.diff(np.asarray(revised.coords["wavelength"].values)) > 0)
+
+        from spectrocube import SpectroCube
+
+        assert SpectroCube.from_dataset(revised).validate().ok
+
+    def test_extraction_geometry_is_untouched_by_the_revision(
+        self, tmp_path: Path, two_era_detector
+    ) -> None:
+        _, cube = _old_era_cube(tmp_path)
+        new = _new_era_snapshot(tmp_path)
+        revised, _ = recalibrate_dataset(cube.ds, new)
+
+        # Every surviving sample still names the detector column it was cut
+        # from; only the wavelength and the factor attached to it changed.
+        kept = set(
+            zip(
+                np.asarray(revised.coords["echelle_order"].values, dtype=int).tolist(),
+                np.asarray(revised.coords["detector_pixel"].values, dtype=int).tolist(),
+            )
+        )
+        original = set(
+            zip(
+                np.asarray(cube.ds["echelle_order"].values, dtype=int).tolist(),
+                np.asarray(cube.ds["detector_pixel"].values, dtype=int).tolist(),
+            )
+        )
+        assert kept <= original
+        assert (
+            revised.attrs["order_border_pixel_ranges_json"]
+            == cube.ds.attrs["order_border_pixel_ranges_json"]
+        )
+
+    def test_a_dead_new_era_sphere_column_is_uncovered_dropped_and_counted(
+        self, tmp_path: Path, two_era_detector
+    ) -> None:
+        _, cube = _old_era_cube(tmp_path)
+        new = _new_era_snapshot(tmp_path)
+
+        factor = factor_from_snapshot(cube.ds, new)
+        orders = np.asarray(cube.ds["echelle_order"].values, dtype=int)
+        pixels = np.asarray(cube.ds["detector_pixel"].values, dtype=int)
+        dead = (orders == ORDER_IDS[0]) & (pixels == NEW_ERA_DEAD_SPHERE_PIXEL)
+        assert np.count_nonzero(dead) == 1
+        # The old era measured that column perfectly well; the new one did not.
+        # No amount of smoothness licenses inventing a response there.
+        assert np.all(np.isfinite(np.asarray(cube.ds["applied_absolute_calibration_factor"])))
+        assert not np.isfinite(factor[dead][0])
+
+        revised, event = recalibrate_dataset(cube.ds, new)
+
+        assert event["dropped_uncovered_factor_columns"] == 1
+        assert event["dropped_nonpositive_factor_columns"] == 1
+        assert revised.attrs["dropped_uncovered_factor_columns"] == 1
+        # The cumulative attribute already carried the column export dropped.
+        assert revised.attrs["dropped_nonpositive_factor_columns"] == 2
+        assert revised.sizes["wavelength"] == cube.wavelength.size - 1
+        kept = set(
+            zip(
+                np.asarray(revised.coords["echelle_order"].values, dtype=int).tolist(),
+                np.asarray(revised.coords["detector_pixel"].values, dtype=int).tolist(),
+            )
+        )
+        assert (ORDER_IDS[0], NEW_ERA_DEAD_SPHERE_PIXEL) not in kept
+
+    def test_wavelength_only_across_eras_names_the_full_revision(
+        self, tmp_path: Path, two_era_detector
+    ) -> None:
+        _, cube = _old_era_cube(tmp_path)
+        new = _new_era_snapshot(tmp_path)
+
+        with pytest.raises(RecalibrationError) as raised:
+            recalibrate_dataset(cube.ds, new, update_factor=False)
+        message = str(raised.value)
+        assert "sphere" in message and "sphere_background" in message
+        assert "--wavelength-only" in message and "full recalibration" in message
+
+    def test_wavelength_only_still_serves_a_same_sphere_target(
+        self, tmp_path: Path, two_era_detector
+    ) -> None:
+        _, cube = _old_era_cube(tmp_path)
+        # A refinement snapshot: a new lamp solution over the same sphere pair.
+        refined = _snapshot(
+            tmp_path, "20190401_cmos", shift=WAVELENGTH_SHIFT_NM, sphere_marker=" 2019"
+        )
+
+        revised, event = recalibrate_dataset(cube.ds, refined, update_factor=False)
+
+        assert event["changes"] == ["wavelength"]
+        np.testing.assert_array_equal(
+            np.asarray(revised["applied_absolute_calibration_factor"].values),
+            np.asarray(cube.ds["applied_absolute_calibration_factor"].values),
+        )
+        np.testing.assert_array_equal(
+            np.asarray(revised["intensity"].values), np.asarray(cube.intensity)
+        )
+        np.testing.assert_allclose(
+            np.asarray(revised.coords["wavelength"].values),
+            np.asarray(cube.wavelength) + WAVELENGTH_SHIFT_NM,
+            rtol=0.0,
+            atol=1e-9,
+        )
+
+    def test_recalibrating_onto_its_own_snapshot_is_a_bit_exact_round_trip(
+        self, tmp_path: Path, two_era_detector
+    ) -> None:
+        snapshot, cube = _old_era_cube(tmp_path)
+
+        revised, event = recalibrate_dataset(cube.ds, snapshot)
+
+        assert event["changes"] == ["wavelength", "absolute-factor"]
+        assert "dropped_nonpositive_factor_columns" not in event
+        assert "dropped_uncovered_factor_columns" not in event
+        for name in ("wavelength", "detector_pixel", "echelle_order"):
+            np.testing.assert_array_equal(
+                np.asarray(revised.coords[name].values), np.asarray(cube.ds[name].values)
+            )
+        for name in ("intensity", "applied_absolute_calibration_factor"):
+            np.testing.assert_array_equal(
+                np.asarray(revised[name].values), np.asarray(cube.ds[name].values)
+            )
+        assert (
+            revised.attrs["order_wavelength_ranges_nm_json"]
+            == cube.ds.attrs["order_wavelength_ranges_nm_json"]
+        )
+
+    def test_an_unchanged_factor_leaves_every_intensity_bit_alone(self) -> None:
+        """The round trip at the scale where floating point can break it.
+
+        The shipped cube is 2304 columns wide across 29 orders.  Dividing the
+        old factor out and multiplying the same value back in loses the last bit
+        on roughly one sample in ten at that width, so the round trip has to be
+        an identity by construction rather than by luck: an unchanged factor
+        gives a ratio of exactly one.
+        """
+
+        import xarray as xr
+
+        generator = np.random.default_rng(20250926)
+        factor = generator.random(29 * 2304) * 3.0e-9 + 1.0e-12
+        intensity = generator.random(29 * 2304) * 1.0e-3
+        dataset = xr.Dataset(
+            {"intensity": (("frame", "wavelength"), intensity[None, :])},
+            coords={"frame": [0], "wavelength": np.arange(factor.size, dtype=float)},
+        )
+        dataset["applied_absolute_calibration_factor"] = (
+            ("wavelength",),
+            factor,
+            {"absolute_kind": "wmsr"},
+        )
+        # Dividing out and multiplying back in would move these samples.
+        assert not np.array_equal((intensity / factor) * factor, intensity)
+
+        revised, dropped, uncovered = _replace_factor(dataset, dataset, None, factor.copy())
+
+        assert (dropped, uncovered) == (0, 0)
+        np.testing.assert_array_equal(
+            np.asarray(revised["intensity"].values)[0], intensity
+        )
+
+
+def _decoded(value):
+    """Read a JSON attribute string back into data, or return nothing."""
+
+    stripped = value.strip()
+    if stripped[:1] not in "[{":
+        return None
+    try:
+        return json.loads(stripped)
+    except ValueError:
+        return None
+
+
+def _numbers(value):
+    """Every number reachable inside an attribute value, JSON strings included."""
+
+    if isinstance(value, bool):
+        return
+    if isinstance(value, (int, float, np.integer, np.floating)):
+        yield float(value)
+    elif isinstance(value, str):
+        decoded = _decoded(value)
+        if decoded is not None:
+            yield from _numbers(decoded)
+    elif isinstance(value, dict):
+        for item in value.values():
+            yield from _numbers(item)
+    elif isinstance(value, (list, tuple, np.ndarray)):
+        for item in value:
+            yield from _numbers(item)
+
+
+class TestNoAttributeOutlivesItsWavelengthSolution:
+    """Packet F14 -- a revised cube must not advertise the old era's numbers."""
+
+    #: Provenance that is *supposed* to quote the superseded solution.
+    HISTORY_ATTRS = frozenset(
+        {
+            "recalibration_history_json",
+            "previous_snapshot_manifest_json",
+            "snapshot_manifest_json",
+            "calibration_file_digests_json",
+        }
+    )
+
+    def test_no_attribute_value_still_matches_the_old_solution(
+        self, tmp_path: Path, two_era_detector
+    ) -> None:
+        _, cube = _old_era_cube(tmp_path)
+        new = _new_era_snapshot(tmp_path)
+
+        # Every wavelength the old solution derived and published as an
+        # attribute.  After the revision none of them may still be quoted.
+        stale = set()
+        for record in json.loads(cube.ds.attrs["order_wavelength_ranges_nm_json"]):
+            stale.update((float(record["min_nm"]), float(record["max_nm"])))
+        for name in ("original_wavelength_min_nm", "original_wavelength_max_nm"):
+            if name in cube.ds.attrs:
+                stale.add(float(cube.ds.attrs[name]))
+        assert len(stale) >= 2
+
+        revised, _ = recalibrate_dataset(cube.ds, new)
+
+        offenders = {
+            name: number
+            for name, value in revised.attrs.items()
+            if name not in self.HISTORY_ATTRS
+            for number in _numbers(value)
+            if any(abs(number - old) <= 1e-12 for old in stale)
+        }
+        assert not offenders, f"attributes still carrying the old solution: {offenders}"
+
+    def test_each_order_range_is_restated_from_the_new_solution(
+        self, tmp_path: Path, two_era_detector
+    ) -> None:
+        _, cube = _old_era_cube(tmp_path)
+        new = _new_era_snapshot(tmp_path)
+        revised, _ = recalibrate_dataset(cube.ds, new)
+
+        before = {
+            int(record["order"]): record
+            for record in json.loads(cube.ds.attrs["order_wavelength_ranges_nm_json"])
+        }
+        after = {
+            int(record["order"]): record
+            for record in json.loads(revised.attrs["order_wavelength_ranges_nm_json"])
+        }
+        assert set(after) == set(before)
+        for order, expected_shift in (
+            (ORDER_IDS[0], WAVELENGTH_SHIFT_NM),
+            (ORDER_IDS[1], WAVELENGTH_SHIFT_NM + NEW_ERA_ORDER_OFFSET_NM),
+        ):
+            # The order still spans the same detector pixels -- extraction
+            # geometry did not move -- but every wavelength it claims did.
+            assert after[order]["n_px"] == before[order]["n_px"]
+            for bound in ("min_nm", "max_nm"):
+                assert after[order][bound] - before[order][bound] == pytest.approx(
+                    expected_shift, abs=1e-9
+                )
+
+    def test_the_pre_crop_axis_bounds_are_restated_too(
+        self, tmp_path: Path, two_era_detector
+    ) -> None:
+        snapshot = _snapshot(tmp_path, OLD_ERA_ID, sphere_marker=" 2019")
+        calibration = build_calibration(
+            snapshot.root, "CMOS", calibration_files=snapshot.calibration_files()
+        )
+        spectrum = load_spectrum(_shot_file(tmp_path), calibration=calibration)
+        cube = _export(spectrum, snapshot, wavelength_min_nm=431.0)
+        assert "original_wavelength_min_nm" in cube.ds.attrs
+
+        revised, _ = recalibrate_dataset(cube.ds, _new_era_snapshot(tmp_path))
+
+        # The bounds are rebuilt over the same border-and-pad pixel set the
+        # export used, so the lower order's move is the common era shift.
+        assert float(revised.attrs["original_wavelength_max_nm"]) - float(
+            cube.ds.attrs["original_wavelength_max_nm"]
+        ) == pytest.approx(WAVELENGTH_SHIFT_NM, abs=1e-9)
+        assert float(revised.attrs["original_wavelength_min_nm"]) != pytest.approx(
+            float(cube.ds.attrs["original_wavelength_min_nm"]), abs=1e-9
+        )
+        # A user-requested crop threshold is an input, not a derived wavelength.
+        assert float(revised.attrs["wavelength_crop_min_nm"]) == 431.0
+
+    def test_the_wavelength_accuracy_is_restated_or_withdrawn(
+        self, tmp_path: Path, two_era_detector
+    ) -> None:
+        snapshot = _snapshot(tmp_path, OLD_ERA_ID, sphere_marker=" 2019")
+        _write_alignment(snapshot, rms_px=0.4)
+        calibration = build_calibration(
+            snapshot.root, "CMOS", calibration_files=snapshot.calibration_files()
+        )
+        spectrum = load_spectrum(_shot_file(tmp_path), calibration=calibration)
+        cube = _export(spectrum, snapshot)
+        # 0.1 nm per pixel of dispersion, so the RMS lands as 0.04 nm.
+        assert float(cube.ds.attrs["wavelength_accuracy_nm"]) == pytest.approx(0.04, abs=1e-6)
+
+        aligned_era = _new_era_snapshot(tmp_path)
+        _write_alignment(aligned_era, rms_px=0.1)
+        revised, _ = recalibrate_dataset(cube.ds, aligned_era)
+        assert float(revised.attrs["wavelength_accuracy_nm"]) == pytest.approx(0.01, abs=1e-6)
+        assert revised.attrs["wavelength_accuracy_source"] == "snapshot alignment rms_px"
+
+        # An era that recorded no alignment cannot make the claim at all, and the
+        # cube must stop making it on that era's behalf.
+        silent_era = _snapshot(
+            tmp_path,
+            "20250927_cmos",
+            shift=WAVELENGTH_SHIFT_NM,
+            order_offsets=(0.0, NEW_ERA_ORDER_OFFSET_NM),
+            sphere_marker=" 2025b",
+        )
+        withdrawn, _ = recalibrate_dataset(cube.ds, silent_era)
+        assert "wavelength_accuracy_nm" not in withdrawn.attrs
+        assert "wavelength_accuracy_source" not in withdrawn.attrs
 
 
 #: A column where the sphere measured exactly its own background: net response
