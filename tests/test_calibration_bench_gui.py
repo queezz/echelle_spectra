@@ -18,6 +18,7 @@ from PyQt5 import QtCore, QtGui, QtWidgets
 
 from echelle_spectra import calibration_bench_gui as bench_gui
 from echelle_spectra import calibration_campaign as campaign_module
+from echelle_spectra import folder_picker
 from echelle_spectra.calibration_bench import (
     BenchFrame,
     CalibrationBenchSession,
@@ -38,6 +39,7 @@ from echelle_spectra.calibration_bench_gui import (
     BENCH_RESIDUAL_LINES,
     BENCH_TOOLTIP_LIMIT,
     BENCH_TOP_END_LINES,
+    CAMPAIGN_HOME_NAME,
     CONFIG_ROOT_NAME,
     SNAPSHOT_ROOT_NAME,
     CalibrationBenchWindow,
@@ -46,17 +48,21 @@ from echelle_spectra.calibration_bench_gui import (
     absolute_root,
     acquisition_date_from_metadata,
     acquisition_date_from_name,
+    acquisition_folders_in,
     apply_windows_taskbar_identity,
     bench_default_geometry,
     bench_layout_unit,
     bench_minimum_size,
     bench_point_sizes,
     bench_window_icon,
+    campaign_home_above,
+    campaign_home_snapshot_root,
     default_bench_roots,
     forget_session_layout,
     one_line,
     resolve_calibration_file,
     role_combo_minimum_width,
+    snapshot_destination,
     snapshot_identity,
 )
 from echelle_spectra.calibration_campaign import (
@@ -997,6 +1003,22 @@ def test_only_the_verdict_shouts(qt_app, tmp_path):
     window.close()
 
 
+def _is_whole_path(tooltip: str) -> bool:
+    """Whether this tooltip is a path and nothing else.
+
+    Absolute-only, and parsed rather than pattern-matched: prose is not an
+    absolute path on any platform this runs on, and a path is one whatever
+    length the checkout gives it. Deliberately not measured against
+    ``tmp_path`` or the repository root — an assertion that knows where it is
+    installed is the assertion that broke here in the first place.
+    """
+
+    try:
+        return Path(tooltip).is_absolute()
+    except (OSError, ValueError):  # a sentence the platform will not parse
+        return False
+
+
 def test_long_help_reads_in_the_dock_not_in_a_floating_tooltip(qt_app, tmp_path):
     """F16 item 6: tooltips are one short line; the dock carries the rest."""
 
@@ -1015,7 +1037,16 @@ def test_long_help_reads_in_the_dock_not_in_a_floating_tooltip(qt_app, tmp_path)
         tooltip = widget.toolTip()
         assert tooltip, f"{widget} carries no explanation"
         assert "\n" not in tooltip, f"{widget} tooltip spans lines: {tooltip!r}"
-        assert len(tooltip) <= BENCH_TOOLTIP_LIMIT, f"{widget}: {tooltip!r}"
+        # A tooltip whose WHOLE content is a path is exempt from the cap. The
+        # rule it is exempt from is about *prose*: an explanation long enough
+        # to need reading belongs in the dock. A path is not an explanation,
+        # it is the fact itself, and shortening it is the one thing that makes
+        # it useless — which is why the roots deliberately hand their whole
+        # path in as the hint. The cap used to be applied to these too, so
+        # whether this test passed depended on how deep the checkout was: the
+        # same bench passed at C:\echelle and failed one directory further in.
+        if not _is_whole_path(tooltip):
+            assert len(tooltip) <= BENCH_TOOLTIP_LIMIT, f"{widget}: {tooltip!r}"
         # The full text is longer than the tooltip and lives in the dock.
         assert widget.property("explainText")
 
@@ -3462,6 +3493,8 @@ def _bench_from_main(monkeypatch, argv) -> dict:
         seen["snapshots_said"] = window.snapshot_root_value.text()
         seen["configs_said"] = window.config_root_value.text()
         seen["snapshots_tooltip"] = window.snapshot_root_value.toolTip()
+        seen["save_said"] = window.save_message_value.text()
+        seen["notice"] = window._destination.notice
         seen["snapshot_id"] = window.snapshot_id_edit.text().strip()
         seen["snapshot_date"] = window.snapshot_date
         seen["valid_from"] = window.valid_from
@@ -3564,6 +3597,274 @@ def test_the_save_tab_names_the_whole_destination_not_its_last_folder(
     assert str(data / SNAPSHOT_ROOT_NAME / CONFIG_ROOT_NAME) in seen["configs_said"]
     # The whole path is one hover away even when the label paints it shortened.
     assert seen["snapshots_tooltip"] == str(data / SNAPSHOT_ROOT_NAME)
+    # And the line names the folder that will actually appear — root joined to
+    # the identity — rather than stopping at the arrangement above it.
+    assert str(data / SNAPSHOT_ROOT_NAME / "20250926_cmos") in seen["snapshots_said"]
+
+
+def _shelf(tmp_path: Path, name: str, *acquisitions: str) -> Path:
+    """A folder holding dated acquisition folders and nothing else."""
+
+    shelf = tmp_path / name
+    shelf.mkdir(parents=True)
+    for entry in acquisitions:
+        (shelf / entry).mkdir()
+    return shelf
+
+
+def test_a_calibrations_folder_never_grows_a_second_one_inside_it(tmp_path):
+    """Owner, 2026-08-18 night: he opened ``spec_div6\\calibrations`` — the
+    parent holding several acquisition folders — and the bench saved into
+    ``calibrations\\calibrations``: "Which is fine... but somewhat 'whatever,
+    I'll save it wherever'."
+
+    Two shapes say the same thing, and neither may be answered by joining
+    ``calibrations`` on again: a folder already carrying the name, and a folder
+    already holding the dated acquisition folders that name is for. Both take
+    the snapshots directly, and both say so — a silent right answer is what
+    this replaces, not a silent wrong one.
+    """
+
+    doubled = _shelf(tmp_path / "spec_div6", SNAPSHOT_ROOT_NAME, "20250926_calib")
+    by_name = snapshot_destination(doubled)
+    assert by_name.output_root == doubled
+    assert by_name.output_root != doubled / SNAPSHOT_ROOT_NAME
+    assert by_name.config_root == doubled / CONFIG_ROOT_NAME
+    assert by_name.notice and by_name.surprising
+    assert SNAPSHOT_ROOT_NAME in by_name.notice
+    # One line, so the strip that carries it stays a strip.
+    assert "\n" not in by_name.notice
+
+    # Named anything at all, but holding the dated folders: the same shelf.
+    shelf = _shelf(tmp_path, "all-campaigns", "20250926_calib", "20261101_calib")
+    by_contents = snapshot_destination(shelf)
+    assert by_contents.output_root == shelf
+    assert by_contents.notice and "2" in by_contents.notice
+    assert "20250926_calib" in by_contents.notice
+
+    # And the ordinary case is untouched: one campaign's own folder still gets
+    # its calibrations beside the lamp frames, with nothing to announce.
+    plain = tmp_path / "20250926_calib"
+    plain.mkdir()
+    ordinary = snapshot_destination(plain)
+    assert (ordinary.output_root, ordinary.config_root) == default_bench_roots(plain)
+    assert ordinary.notice == "" and not ordinary.surprising
+
+
+def test_a_folder_of_dated_folders_is_read_one_level_deep_and_by_the_date_rule(
+    tmp_path,
+):
+    """What counts as an acquisition folder here is what counts everywhere."""
+
+    shelf = _shelf(tmp_path, "shelf", "20250926_calib", "20261101_calib")
+    # A file whose name is dated is not a folder; a folder that is not dated is
+    # not an acquisition; a dated folder nested deeper is not this shelf's.
+    (shelf / "20240101_notes.txt").write_text("not a folder", encoding="utf-8")
+    (shelf / "scratch").mkdir()
+    (shelf / "scratch" / "20190115_calib").mkdir()
+
+    assert acquisition_folders_in(shelf) == ("20250926_calib", "20261101_calib")
+    # A folder that is not there at all is not an error, it is no acquisitions.
+    assert acquisition_folders_in(tmp_path / "nowhere") == ()
+    assert acquisition_folders_in(None) == ()
+
+
+def test_a_campaign_home_above_the_folder_names_where_snapshots_go(tmp_path):
+    """A campaign that names its own calibrations folder has already answered
+    this for every folder underneath it."""
+
+    home_dir = tmp_path / "spec_div6"
+    shared = home_dir / "calibration-store"
+    shared.mkdir(parents=True)
+    (home_dir / CAMPAIGN_HOME_NAME).write_text(
+        'catalog = "all-years.json"\ncalibrations = "calibration-store"\n',
+        encoding="utf-8",
+    )
+    folder = home_dir / "2026-08" / "20250926_calib"
+    folder.mkdir(parents=True)
+
+    found = campaign_home_above(folder)
+    assert found == home_dir / CAMPAIGN_HOME_NAME
+    # Read against the home's own folder, never against the working directory:
+    # the file is meant to be copied beside a campaign and understood anywhere.
+    assert campaign_home_snapshot_root(found) == shared
+
+    destination = snapshot_destination(folder)
+    assert destination.output_root == shared
+    assert destination.config_root == shared / CONFIG_ROOT_NAME
+    assert str(home_dir / CAMPAIGN_HOME_NAME) in destination.source
+    assert destination.notice and str(shared) in destination.notice
+
+    # An absolute path in the home is taken as written.
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    (home_dir / CAMPAIGN_HOME_NAME).write_text(
+        f'calibrations = {str(elsewhere)!r}\n'.replace("\\", "\\\\"),
+        encoding="utf-8",
+    )
+    assert snapshot_destination(folder).output_root == elsewhere
+
+
+def test_a_campaign_home_that_says_nothing_useful_is_not_an_outage(tmp_path):
+    """A hand-edited TOML with a typo in it must not take the bench off air."""
+
+    home_dir = tmp_path / "spec_div6"
+    folder = home_dir / "20250926_calib"
+    folder.mkdir(parents=True)
+
+    for text in (
+        "this is not TOML at all [[[",  # unparseable
+        'catalog = "all-years.json"',  # parses, names no calibrations folder
+        "calibrations = 7",  # names one, but not as a path
+        'calibrations = "   "',  # names one, but as nothing
+    ):
+        (home_dir / CAMPAIGN_HOME_NAME).write_text(text, encoding="utf-8")
+        destination = snapshot_destination(folder)
+        assert destination.output_root == folder / SNAPSHOT_ROOT_NAME, text
+        assert destination.notice == "", text
+
+    # A home that is not there at all is the same non-event.
+    assert campaign_home_above(None) is None
+    assert campaign_home_snapshot_root(None) is None
+    assert campaign_home_snapshot_root(home_dir / "no-such.toml") is None
+
+
+def test_the_explicit_output_root_flag_outranks_every_derivation(tmp_path):
+    """The override stays the override: nothing derived may quietly move it."""
+
+    shelf = _shelf(tmp_path / "spec_div6", SNAPSHOT_ROOT_NAME, "20250926_calib")
+    (tmp_path / "spec_div6" / CAMPAIGN_HOME_NAME).write_text(
+        'calibrations = "store"\n', encoding="utf-8"
+    )
+    (tmp_path / "spec_div6" / "store").mkdir()
+    chosen = tmp_path / "somewhere-else"
+
+    destination = snapshot_destination(shelf, output_root=chosen)
+    assert destination.output_root == chosen
+    assert destination.config_root == chosen / CONFIG_ROOT_NAME
+    # Nothing to announce: the operator typed this, so it cannot surprise them.
+    assert destination.notice == ""
+    assert "--output-root" in destination.source
+    # And --config-root is still independently honoured, made absolute.
+    both = snapshot_destination(shelf, output_root=chosen, config_root="rel-configs")
+    assert both.config_root == Path.cwd() / "rel-configs"
+
+
+def test_the_bench_names_its_destination_before_the_save_not_after_it(
+    qt_app, tmp_path, monkeypatch
+):
+    """"Done — saved in ..." arrived too late to be a decision.
+
+    A bench launched at the doubled shape says, at first paint and without a
+    press, the exact folder the next snapshot will be created as — and says
+    that it declined the folder's obvious default and why.
+    """
+
+    shelf = _shelf(tmp_path / "spec_div6", SNAPSHOT_ROOT_NAME, "20250926_calib")
+    monkeypatch.chdir(tmp_path)
+
+    seen = _bench_from_main(monkeypatch, [str(shelf)])
+
+    assert seen["output_root"] == shelf
+    assert seen["output_root"] != shelf / SNAPSHOT_ROOT_NAME
+    # Said on the Save tab's own line, before anything has been written.
+    assert "Nothing has been saved yet" in seen["save_said"]
+    assert str(shelf / seen["snapshot_id"]) in seen["save_said"]
+    assert seen["notice"] and seen["notice"] in seen["save_said"]
+    # And standing on the roots line, which now names the folder not the shelf.
+    assert str(shelf / seen["snapshot_id"]) in seen["snapshots_said"]
+    assert seen["notice"] in seen["snapshots_said"]
+
+
+def test_opening_a_shelf_folder_says_where_it_will_save_and_offers_the_choice(
+    qt_app, tmp_path, monkeypatch
+):
+    """The same decision when the folder arrives through the picker instead."""
+
+    plain = _calibration_folder(tmp_path, "20250926_calib")
+    window = _bench_at(tmp_path, plain)
+    window.show()
+    assert window._destination.notice == ""
+
+    shelf = _shelf(tmp_path / "spec_div6", SNAPSHOT_ROOT_NAME, "20261101_calib")
+    _answer_folder_dialog(monkeypatch, shelf)
+    window.open_folder_button.click()
+    _wait_for_loads(window, qt_app)
+
+    assert window.output_root == shelf
+    assert window.config_root == shelf / CONFIG_ROOT_NAME
+    said = window.save_message_value.text()
+    assert str(shelf / window.snapshot_id_edit.text().strip()) in said
+    assert window._destination.notice in said
+    # The choice is a control on the Save tab, not a flag to relaunch behind:
+    # never hidden, and pressable the moment the notice is on screen. (Its own
+    # visibility, not the tab's — an off-screen run has no tab raised.)
+    assert not window.choose_output_root_button.isHidden()
+    assert window.choose_output_root_button.isEnabled()
+    window.close()
+
+
+def test_the_destination_line_follows_the_identity_that_is_typed_into_it(
+    qt_app, tmp_path
+):
+    """The destination is the root plus THIS identity, so it moves with it."""
+
+    window = _window(tmp_path)
+    window.snapshot_id_edit.setText("20261101_cmos")
+    qt_app.processEvents()
+    assert str(window.output_root / "20261101_cmos") in window.snapshot_root_value.text()
+    # An identity nobody has typed yet names the root and asks for one.
+    window.snapshot_id_edit.setText("")
+    qt_app.processEvents()
+    assert str(window.output_root) in window.snapshot_root_value.text()
+    assert "identity" in window.snapshot_root_value.text()
+    window.close()
+
+
+def test_the_change_button_moves_where_this_bench_writes(qt_app, tmp_path, monkeypatch):
+    """The visible choice the notice points at actually moves both roots."""
+
+    shelf = _shelf(tmp_path / "spec_div6", SNAPSHOT_ROOT_NAME, "20250926_calib")
+    window = _bench_at(
+        tmp_path,
+        shelf,
+        **{
+            "output_root": shelf,
+            "destination": snapshot_destination(shelf),
+        },
+    )
+    window.show()
+    assert window._destination.notice
+
+    chosen = tmp_path / "picked-by-hand"
+    chosen.mkdir()
+    asked: list[Path] = []
+    monkeypatch.setattr(
+        bench_gui,
+        "choose_output_root",
+        lambda parent, start: (asked.append(Path(start)) or str(chosen)),
+    )
+    window.choose_output_root_button.click()
+
+    assert asked == [shelf]
+    assert window.output_root == chosen
+    assert window.config_root == chosen / CONFIG_ROOT_NAME
+    # The notice is spent: this destination is now the operator's own decision.
+    assert window._destination.notice == ""
+    assert str(chosen) in window.save_message_value.text()
+    assert str(chosen) in window.snapshot_root_value.text()
+
+    # Choosing the folder it is already writing to changes nothing and says so.
+    monkeypatch.setattr(
+        bench_gui, "choose_output_root", lambda parent, start: str(chosen)
+    )
+    window.choose_output_root_button.click()
+    assert "nothing was changed" in window.save_message_value.text()
+    # And a cancelled dialog is not a decision either.
+    monkeypatch.setattr(bench_gui, "choose_output_root", lambda parent, start: "")
+    window.choose_output_root_button.click()
+    assert window.output_root == chosen
+    window.close()
 
 
 def test_the_save_tab_reading_shortens_in_the_middle_and_keeps_the_whole_path(
@@ -4582,6 +4883,122 @@ def test_a_pattern_file_can_be_chosen_on_the_same_terms(qt_app, tmp_path: Path):
     window.close()
 
 
+def _wavelength_table(tmp_path: Path, name: str, *rows) -> Path:
+    """A wavelength table in the shipped six-column shape."""
+
+    path = tmp_path / name
+    path.write_text(
+        "# Order From To Center Wavelength Species\n"
+        + "".join(
+            f"{order} {center - 5} {center + 5} {center} {nm} ThI  # OK\n"
+            for order, center, nm in rows
+        ),
+        encoding="utf-8",
+    )
+    return path
+
+
+def test_the_bench_changes_its_wavelength_table_live_and_says_what_it_cost(
+    qt_app, tmp_path: Path, monkeypatch
+):
+    """The third launch argument stops being one (owner: "CLI OR GUI. Not both").
+
+    Swapping the table invalidates anchors the way a pattern rebase does — an
+    anchor is a table row paired with a measured centroid, so a row from a
+    table the bench no longer reads is half a measurement — so it wears the
+    rebase's shape, not a setter's: the file is read first, both sides are
+    dropped through the doors they already have, and one notice says what the
+    swap cost as well as what it bought.
+    """
+
+    window, _launch, _sphere = _extraction_bench(tmp_path)
+    before = window.campaign.wavelength_source
+    window.campaign.comparison = campaign_module.SphereComparison(
+        ComparisonState.READY, "measured against the old table"
+    )
+    # Work the operator would lose, of exactly the kind the swap invalidates.
+    window.session.anchors[(0, 1.0, 2.0)] = object()
+    assert str(before) in window.wavelength_choice_value.text()
+
+    later = _wavelength_table(tmp_path, "Th_wavelength_CMOS_20250926.txt", (0, 25.0, 600.5))
+    monkeypatch.setattr(
+        QtWidgets.QFileDialog,
+        "getOpenFileName",
+        lambda *args, **values: (str(later), ""),
+    )
+    window.choose_wavelength_button.click()
+
+    assert window.campaign.wavelength_source == later
+    assert [line.wavelength_nm for line in window.session.lines] == [600.5]
+    # Anchors gone, and the derived outputs with them.
+    assert window.session.anchors == {}
+    assert window.campaign.comparison.state is ComparisonState.NOT_RUN
+    # One honest notice: the table, the rows, and the anchors it cost.
+    said = window.save_message_value.text()
+    assert str(later) in said
+    assert "1 row(s)" in said
+    assert "1 anchor(s)" in said and "dropped" in said
+    # And the standing reading follows the table rather than the launch flag.
+    assert str(later) in window.wavelength_choice_value.text()
+    assert window.wavelength_choice_value.toolTip() == str(later)
+    window.close()
+
+
+def test_a_wavelength_table_the_bench_cannot_read_changes_nothing(
+    qt_app, tmp_path: Path, monkeypatch
+):
+    """A refusal leaves the bench reading what it was reading, anchors intact."""
+
+    window, _launch, _sphere = _extraction_bench(tmp_path)
+    before = window.campaign.wavelength_source
+    lines_before = window.session.lines
+    window.session.anchors[(0, 1.0, 2.0)] = object()
+
+    junk = tmp_path / "prose.txt"
+    junk.write_text("# a header and nothing under it\n", encoding="utf-8")
+    monkeypatch.setattr(
+        QtWidgets.QFileDialog, "getOpenFileName", lambda *a, **k: (str(junk), "")
+    )
+    window.choose_wavelength_button.click()
+
+    assert "was not adopted" in window.save_message_value.text()
+    assert window.campaign.wavelength_source == before
+    assert window.session.lines == lines_before
+    assert len(window.session.anchors) == 1
+
+    # Naming the table it already reads is not a swap, and does not cost the
+    # anchors that a swap would.
+    monkeypatch.setattr(
+        QtWidgets.QFileDialog, "getOpenFileName", lambda *a, **k: (str(before), "")
+    )
+    window.choose_wavelength_button.click()
+    assert "already reads" in window.save_message_value.text()
+    assert len(window.session.anchors) == 1
+
+    # A cancelled dialog is not a decision either.
+    monkeypatch.setattr(
+        QtWidgets.QFileDialog, "getOpenFileName", lambda *a, **k: ("", "")
+    )
+    window.choose_wavelength_button.click()
+    assert window.campaign.wavelength_source == before
+    window.close()
+
+
+def test_the_busy_gate_covers_the_wavelength_picker_too(qt_app, tmp_path: Path):
+    """It moves the very session and campaign a running task is reading."""
+
+    window, _launch, _sphere = _extraction_bench(tmp_path)
+    window._campaign_thread = bench_gui.CampaignTaskThread(lambda: None, window)
+    try:
+        window.refresh_campaign()
+        assert not window.choose_wavelength_button.isEnabled()
+    finally:
+        window._campaign_thread = None
+    window.refresh_campaign()
+    assert window.choose_wavelength_button.isEnabled()
+    window.close()
+
+
 def test_a_campaign_without_a_sphere_says_why_it_cannot_extract(qt_app, tmp_path: Path):
     """A disabled button that does not say why is a bench that went quiet."""
 
@@ -5034,6 +5451,114 @@ def test_the_folder_picker_shows_the_files_it_will_not_let_you_pick(
         for entry in dialog.directory().entryList(QtCore.QDir.Files)
     }
     assert set(_REAL_2025_NAMES) <= listed
+
+
+def test_a_pasted_path_walks_the_dialog_there_instead_of_answering_blind(
+    qt_app, tmp_path, monkeypatch
+):
+    """Owner, 2026-08-18: "I want a file dialog which allows me to paste in the
+    folder for preview. Now I can just paste it for selection, not going near."
+
+    Qt's non-native dialog treats its line edit as the answer only: the pasted
+    path sat in the field, Choose returned it, and the greyed listing this
+    dialog exists for was never shown for the folder actually being picked.
+    Typing a real directory is navigation now, so the preview arrives before
+    the press rather than never.
+    """
+
+    folder = _calibration_folder(tmp_path, "20250926_calib")
+    elsewhere = _calibration_folder(tmp_path, "20261101_calib")
+    opened: list[QtWidgets.QFileDialog] = []
+    monkeypatch.setattr(
+        QtWidgets.QFileDialog, "exec_", lambda dialog: (opened.append(dialog) or 0)
+    )
+
+    assert bench_gui.choose_calibration_folder(None, folder) == ""
+    dialog = opened[0]
+    assert Path(dialog.directory().absolutePath()) == folder
+
+    edit = dialog.findChildren(QtWidgets.QLineEdit)[0]
+    edit.setText(str(elsewhere))
+    qt_app.processEvents()
+
+    # The dialog is standing in the pasted folder, and its contents are listed
+    # BEFORE anything is chosen — which is the whole of the request.
+    assert Path(dialog.directory().absolutePath()) == elsewhere
+    listed = {
+        Path(entry).name for entry in dialog.directory().entryList(QtCore.QDir.Files)
+    }
+    assert set(_REAL_2025_NAMES) <= listed
+    # And the text survives the navigation: ``setDirectory`` empties the field,
+    # so a pasted path that vanished mid-paste would be worse than no jump.
+    assert edit.text() == str(elsewhere)
+
+    # A path with quotes around it — copied out of Explorer's address bar or a
+    # shell — is the same gesture and is followed the same way.
+    edit.setText(f'"{folder}"')
+    qt_app.processEvents()
+    assert Path(dialog.directory().absolutePath()) == folder
+
+    # Half a path, or a file, is ordinary text: it must not move the dialog.
+    edit.setText(str(elsewhere)[:-3])
+    qt_app.processEvents()
+    assert Path(dialog.directory().absolutePath()) == folder
+    edit.setText(str(folder / _REAL_2025_NAMES[0]))
+    qt_app.processEvents()
+    assert Path(dialog.directory().absolutePath()) == folder
+
+
+def test_a_folder_dialog_reopens_where_it_was_last_left(qt_app, tmp_path, monkeypatch):
+    """A configured data directory is the right answer once per session.
+
+    Every reopening after that is the operator walking back to where they
+    already were, which is what the memory spares them. It is the *chosen*
+    folder that is remembered, not the one the dialog opened at, and each
+    dialog remembers its own — the folder being calibrated and the folder
+    snapshots are written to are two different questions.
+    """
+
+    first = _calibration_folder(tmp_path, "20250926_calib")
+    second = _calibration_folder(tmp_path, "20261101_calib")
+    opened: list[Path] = []
+
+    def answer(dialog):
+        opened.append(Path(dialog.directory().absolutePath()))
+        dialog.setDirectory(str(second))
+        dialog.selectFile(str(second))
+        return QtWidgets.QDialog.Accepted
+
+    monkeypatch.setattr(QtWidgets.QFileDialog, "exec_", answer)
+
+    assert Path(bench_gui.choose_calibration_folder(None, first)) == second
+    # Second opening ignores the suggested start and returns to the choice.
+    bench_gui.choose_calibration_folder(None, first)
+    assert opened == [first, second]
+
+    # The output-root picker keeps its own place rather than inheriting this.
+    bench_gui.choose_output_root(None, first)
+    assert opened[-1] == first
+
+    # A remembered folder that has gone away since — a share that dropped, a
+    # scratch folder cleaned up — is checked before it is offered, so the
+    # dialog can never open on nothing.
+    folder_picker.forget_folders()
+    vanishing = tmp_path / "was-here"
+    vanishing.mkdir()
+    folder_picker.remember_folder(bench_gui.CALIBRATION_FOLDER_MEMORY, vanishing)
+    assert folder_picker.remembered_folder(
+        bench_gui.CALIBRATION_FOLDER_MEMORY, first
+    ) == str(vanishing)
+    vanishing.rmdir()
+    assert folder_picker.remembered_folder(
+        bench_gui.CALIBRATION_FOLDER_MEMORY, first
+    ) == str(first)
+    # A file that was chosen is remembered by the folder that holds it.
+    folder_picker.remember_folder(
+        bench_gui.CALIBRATION_FOLDER_MEMORY, first / _REAL_2025_NAMES[0]
+    )
+    assert folder_picker.remembered_folder(
+        bench_gui.CALIBRATION_FOLDER_MEMORY, tmp_path
+    ) == str(first)
 
 
 def test_a_folder_is_not_opened_while_the_bench_is_still_reading(

@@ -16,6 +16,11 @@ import numpy as np
 import pyqtgraph as pg
 from PyQt5 import QtCore, QtGui, QtWidgets
 
+try:  # Python 3.11+ carries the reader; older runtimes wear the backport.
+    import tomllib
+except ModuleNotFoundError:  # pragma: no cover - exercised on 3.10 only
+    import tomli as tomllib
+
 from . import __version__
 from .calibration_bench import (
     AlignmentState,
@@ -45,6 +50,7 @@ from .calibration_campaign import (
     lamp_reference_set,
     triage_for_role,
 )
+from .folder_picker import ask_for_folder, configure_folder_dialog  # noqa: F401
 from .snapshot import SnapshotError, SnapshotReading, saved_snapshots_in
 from .tools.calibration_alignment import load_wavelength_table, table_vetting
 from .tools.pattern_extraction import (
@@ -194,28 +200,227 @@ def default_bench_roots(folder: str | PurePath | None = None) -> tuple[Path, Pat
     return snapshots, snapshots / CONFIG_ROOT_NAME
 
 
-def configure_folder_dialog(dialog: QtWidgets.QFileDialog) -> None:
-    """Make a folder picker show the files it is not offering to pick.
+#: The file a campaign home is recognised by.  Spelled here rather than
+#: imported from ``campaign_tools_cli``: a GUI launch must not drag a CLI
+#: module in behind it, and the name is a format constant either way.
+CAMPAIGN_HOME_NAME = "campaign.toml"
 
-    Windows' native folder picker hides files outright: a calibration folder
-    holding six SIFs reads "No items match your search", so the only way to
-    tell one dated folder from another was to open it, look, close it, and open
-    the right one — owner, 2026-08-18: "we should show contents, but make them
-    gray. Otherwise I have to open the same folder twice."
+#: The key inside a campaign home that names where that campaign's snapshots
+#: live — the same key ``echelle campaign`` reads for its ``--calibrations``.
+CAMPAIGN_HOME_SNAPSHOT_KEY = "calibrations"
 
-    Qt's own dialog does exactly the right thing in ``Directory`` mode with
-    ``ShowDirsOnly`` switched *off*: the files are listed and greyed, so the
-    folder's contents are evidence without ever becoming the answer.  The
-    native dialog cannot be told this, which is why this one asks for Qt's by
-    name.  Only folder pickers have the defect — a dialog that picks files
-    shows files already — so the pattern and previous-pair pickers keep the
-    native ``getOpenFileName`` they have always used.
+#: How far above the opened folder a campaign home is looked for.  Bounded on
+#: purpose: an unbounded walk to the root of a mapped share is a directory
+#: probe per level on a link that may be slow, and a campaign home more than
+#: four levels above the frames is not a home this folder belongs to.
+CAMPAIGN_HOME_SEARCH_DEPTH = 4
+
+
+def campaign_home_above(folder: str | PurePath | None) -> Path | None:
+    """The nearest ``campaign.toml`` at or above *folder*, or ``None``.
+
+    Nearest wins, walking upward: a campaign home beside the frames describes
+    those frames, and one further up describes the whole tree it sits over.
+    Only presence is decided here; what the file *says* is
+    :func:`campaign_home_snapshot_root`'s question.
     """
 
-    dialog.setFileMode(QtWidgets.QFileDialog.Directory)
-    dialog.setOption(QtWidgets.QFileDialog.ShowDirsOnly, False)
-    dialog.setOption(QtWidgets.QFileDialog.DontUseNativeDialog, True)
-    dialog.setAcceptMode(QtWidgets.QFileDialog.AcceptOpen)
+    if folder is None:
+        return None
+    base = absolute_root(folder)
+    for level, candidate in enumerate((base, *base.parents)):
+        if level > CAMPAIGN_HOME_SEARCH_DEPTH:
+            return None
+        home = candidate / CAMPAIGN_HOME_NAME
+        try:
+            if home.is_file():
+                return home
+        except OSError:  # pragma: no cover - a share that went away mid-walk
+            return None
+    return None
+
+
+def campaign_home_snapshot_root(home: str | PurePath | None) -> Path | None:
+    """Where a campaign home says that campaign's snapshots live.
+
+    ``None`` for a home that names no calibrations folder, and ``None`` for one
+    that cannot be read or does not parse — a hand-edited TOML with a typo in
+    it must not take the bench off the air, and the fallback below is the
+    behaviour the bench had before homes were consulted at all.
+
+    A relative path is read against the home's own folder, exactly as the
+    campaign tools read it: the file is meant to be copied beside a campaign
+    and understood from anywhere, so what it says is relative to itself and
+    never to whatever directory the bench was launched from.
+    """
+
+    if home is None:
+        return None
+    path = Path(home)
+    try:
+        with path.open("rb") as stream:
+            data = tomllib.load(stream)
+    except (OSError, tomllib.TOMLDecodeError, ValueError):
+        return None
+    if not isinstance(data, dict):  # pragma: no cover - tomllib returns a table
+        return None
+    raw = data.get(CAMPAIGN_HOME_SNAPSHOT_KEY)
+    if not isinstance(raw, str) or not raw.strip():
+        return None
+    named = Path(raw.strip()).expanduser()
+    return named if named.is_absolute() else path.parent / named
+
+
+def acquisition_folders_in(folder: str | PurePath | None) -> tuple[str, ...]:
+    """The dated acquisition folders sitting directly inside *folder*.
+
+    A folder holding ``20250926_calib`` and ``20261101_calib`` is a shelf of
+    calibrations, not one calibration: it is the *parent* the bench walks
+    through, and writing a snapshot into a ``calibrations`` folder inside it
+    would be filing this campaign under a folder that already means "all of
+    them".  One level deep and named by the same rule the snapshot identity is
+    dated by, so what counts as an acquisition folder here and what counts as
+    one everywhere else cannot drift.
+    """
+
+    if folder is None:
+        return ()
+    try:
+        entries = sorted(Path(folder).iterdir())
+    except OSError:
+        return ()
+    return tuple(
+        entry.name
+        for entry in entries
+        if acquisition_date_from_name(entry.name) is not None and entry.is_dir()
+    )
+
+
+@dataclass(frozen=True)
+class SnapshotDestination:
+    """Where this bench's next snapshot goes, and why it goes there.
+
+    The bench used to answer only the first half, and answer it by joining
+    ``calibrations`` onto whatever folder it was pointed at.  Pointed at a
+    folder already *called* ``calibrations``, that produced
+    ``calibrations\\calibrations`` without a word — owner, 2026-08-18: "Which is
+    fine... but somewhat 'whatever, I'll save it wherever'."  A destination is
+    a decision, so it now carries the reason it was reached and, when the
+    reason is one the operator would not have predicted, a notice that puts the
+    choice in front of them before the save rather than after it.
+    """
+
+    output_root: Path
+    config_root: Path
+    #: Short phrase naming what decided this, for the standing reading.
+    source: str
+    #: One line, or ``""``.  Non-empty means say this out loud and offer the
+    #: choice beside it; the bench went somewhere the folder alone did not say.
+    notice: str = ""
+
+    @property
+    def surprising(self) -> bool:
+        """Whether this destination needs saying rather than merely showing."""
+
+        return bool(self.notice)
+
+    def snapshot_root(self, snapshot_id: str) -> Path:
+        """The folder one named snapshot will actually be created in."""
+
+        named = snapshot_id.strip()
+        return self.output_root / named if named else self.output_root
+
+
+def snapshot_destination(
+    folder: str | PurePath | None,
+    *,
+    output_root: str | PurePath | None = None,
+    config_root: str | PurePath | None = None,
+) -> SnapshotDestination:
+    """Decide where snapshots land for a bench opened at *folder*.
+
+    Four answers, in the order they outrank each other:
+
+    ``--output-root`` wins absolutely.  An operator who typed a destination has
+    made the decision, and nothing derived may quietly move it.
+
+    Otherwise a campaign home at or above the folder decides, because a
+    campaign that names its own calibrations folder has already answered this
+    question for every folder underneath it — which is the difference between a
+    campaign and a pile of dated folders.
+
+    Otherwise, a folder that is *already* a calibrations shelf — named
+    ``calibrations``, or holding dated acquisition folders — takes the
+    snapshots directly rather than growing a second ``calibrations`` inside
+    itself.  This is the case that says so out loud: the bench is declining the
+    default it would otherwise have taken, and declining it silently is how the
+    doubled folder got made in the first place.
+
+    Otherwise the old rule, unchanged: the computed calibration sits beside the
+    lamp frames it was computed from, in ``calibrations/`` inside the folder.
+    """
+
+    def with_configs(root: Path, source: str, notice: str = "") -> SnapshotDestination:
+        configs = (
+            absolute_root(config_root)
+            if config_root is not None
+            else root / CONFIG_ROOT_NAME
+        )
+        return SnapshotDestination(root, configs, source, notice)
+
+    if output_root is not None:
+        return with_configs(absolute_root(output_root), "the --output-root you passed")
+
+    base = absolute_root(Path.cwd() if folder is None else folder)
+
+    home = campaign_home_above(base)
+    named = campaign_home_snapshot_root(home)
+    if home is not None and named is not None:
+        root = absolute_root(named)
+        if root != base / SNAPSHOT_ROOT_NAME:
+            return with_configs(
+                root,
+                f"the campaign home {home}",
+                f"This folder belongs to the campaign described by {home}, so "
+                f"snapshots go to the calibrations folder that home names — "
+                f"{root} — and not into a new one beside the frames.",
+            )
+        return with_configs(root, f"the campaign home {home}")
+
+    already = base.name.casefold() == SNAPSHOT_ROOT_NAME.casefold()
+    holds = () if already else acquisition_folders_in(base)
+    if already:
+        why = (
+            f"This folder is already named {SNAPSHOT_ROOT_NAME}, so snapshots "
+            f"are written straight into it — a {SNAPSHOT_ROOT_NAME} folder "
+            f"inside a {SNAPSHOT_ROOT_NAME} folder is not what you meant."
+        )
+    elif holds:
+        listed = ", ".join(holds[:3]) + ("…" if len(holds) > 3 else "")
+        why = (
+            f"This folder already holds {len(holds)} dated acquisition "
+            f"folder(s) ({listed}), so it is the shelf those calibrations "
+            f"belong on: snapshots are written straight into it rather than "
+            f"into a new {SNAPSHOT_ROOT_NAME} folder inside it."
+        )
+    else:
+        why = ""
+    if why:
+        return with_configs(
+            base,
+            "the folder you opened, which is already a calibrations shelf",
+            f"{why} Press Change to put them elsewhere.",
+        )
+
+    snapshots, _configs = default_bench_roots(base)
+    return with_configs(snapshots, "the calibration folder the bench is open at")
+
+
+#: Which dialog's session memory is which.  The folder being calibrated and
+#: the folder snapshots are written to are two different questions, and one
+#: remembered answer for both would walk each dialog to the other's place.
+CALIBRATION_FOLDER_MEMORY = "bench-calibration-folder"
+OUTPUT_ROOT_MEMORY = "bench-output-root"
 
 
 def choose_calibration_folder(parent, start_dir: str | PurePath) -> str:
@@ -223,15 +428,29 @@ def choose_calibration_folder(parent, start_dir: str | PurePath) -> str:
 
     A module-level function rather than an inline dialog, for the same reason
     the main GUI's ``choose_snapshot_folder`` is one: a test can answer this
-    without a real modal appearing off-screen and hanging the run.
+    without a real modal appearing off-screen and hanging the run.  What the
+    dialog itself knows how to do — show greyed contents, follow a pasted path,
+    reopen where it was left — lives in :mod:`echelle_spectra.folder_picker`,
+    shared with the viewer so the pair cannot drift again.
     """
 
-    dialog = QtWidgets.QFileDialog(parent, "Open calibration folder", str(start_dir))
-    configure_folder_dialog(dialog)
-    if not dialog.exec_():
-        return ""
-    chosen = dialog.selectedFiles()
-    return chosen[0] if chosen else ""
+    return ask_for_folder(
+        parent,
+        "Open calibration folder",
+        start_dir,
+        memory_key=CALIBRATION_FOLDER_MEMORY,
+    )
+
+
+def choose_output_root(parent, start_dir: str | PurePath) -> str:
+    """Ask where this bench's snapshots should be written."""
+
+    return ask_for_folder(
+        parent,
+        "Choose where snapshots are written",
+        start_dir,
+        memory_key=OUTPUT_ROOT_MEMORY,
+    )
 
 
 #: A calibration folder's name begins with the day its frames were taken —
@@ -947,6 +1166,7 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         folder: str | Path | None = None,
         output_root: str | Path = SNAPSHOT_ROOT_NAME,
         config_root: str | Path | None = None,
+        destination: SnapshotDestination | None = None,
         snapshot_id: str = "",
         snapshot_date: date | None = None,
         snapshot_id_explicit: bool = False,
@@ -979,6 +1199,17 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
             if config_root is None
             else absolute_root(config_root)
         )
+        #: Why the roots are where they are, and whether that needs saying.
+        #: ``main`` decides this from the folder argument and the flags and
+        #: hands it over; a bench built without one is standing on roots
+        #: somebody passed directly, which is its own complete answer.
+        self._destination = destination or SnapshotDestination(
+            self.output_root,
+            self.config_root,
+            "the roots this bench was launched with",
+        )
+        self.output_root = self._destination.output_root
+        self.config_root = self._destination.config_root
         self.initial_snapshot_id = snapshot_id
         self.initial_detector = detector
         self.initial_base_snapshot = base_snapshot
@@ -1307,6 +1538,15 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         )
         self._measure_status_band()
         self._distribute_space()
+        # The Save tab's own line, filled in once the whole window exists.  A
+        # bench launched at a folder never presses Open folder, so this is the
+        # only place its destination — and the notice, when the bench declined
+        # the obvious default — gets said rather than merely shown.
+        notice = self._destination.notice
+        self.save_message_value.setText(
+            f"Nothing has been saved yet. {self.snapshot_destination_sentence()}."
+            + (f" {notice}" if notice else "")
+        )
 
     #: What "workable" means for either working table, in rows rather than in a
     #: pixel guess that a larger platform font would quietly invalidate.
@@ -2718,12 +2958,51 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         # the launcher started in.  The whole path is shown, shortened in the
         # middle only when it will not fit, and is one hover — or one click
         # into the Why dock — away from being read exactly.
+        # The snapshot line answers "where is this about to go?" — the root
+        # plus the identity above it, which is the folder that will actually
+        # appear — rather than naming the arrangement and leaving the operator
+        # to do the join. It is said here, before the press, because a
+        # destination is a decision; it used to be said only afterwards, and a
+        # bench opened at a folder already called calibrations quietly made a
+        # second one inside it (owner, 2026-08-18: "somewhat 'whatever, I'll
+        # save it wherever'").
+        #
+        # The control that moves it sits beside BOTH root lines rather than
+        # under them, and the notice rides on the end of the snapshot line
+        # rather than on a wrapping label of its own. Both are the same
+        # economy: this tab's minimum height is charged to every other tab in
+        # the rail and then to the Why dock below them, so a row added here is
+        # a row taken off the dock. A button beside a two-line column is
+        # shorter than the column and costs nothing.
+        destination_row = QtWidgets.QHBoxLayout()
+        destination_row.setContentsMargins(0, 0, 0, 0)
+        roots_column = QtWidgets.QVBoxLayout()
+        roots_column.setContentsMargins(0, 0, 0, 0)
         self.snapshot_root_value = _ElidingLabel("")
         self.snapshot_root_value.setObjectName("mutedText")
-        layout.addWidget(self.snapshot_root_value)
+        roots_column.addWidget(self.snapshot_root_value)
         self.config_root_value = _ElidingLabel("")
         self.config_root_value.setObjectName("mutedText")
-        layout.addWidget(self.config_root_value)
+        roots_column.addWidget(self.config_root_value)
+        destination_row.addLayout(roots_column, 1)
+        self.choose_output_root_button = QtWidgets.QPushButton("Change…")
+        self.choose_output_root_button.clicked.connect(self._choose_output_root)
+        self._explainable(
+            self.choose_output_root_button,
+            "Choosing where snapshots are written",
+            "Opens a folder picker for the snapshot root — the folder the "
+            "bench creates one subfolder in per snapshot identity. It is the "
+            "same decision --output-root makes on the command line, made "
+            "here instead, and it moves the generated settings bundles with "
+            "it so everything this bench writes stays in one place. Opening "
+            "another calibration folder derives the root again from that "
+            "folder, so a choice made here belongs to the folder it was made "
+            "for.",
+        )
+        destination_row.addWidget(
+            self.choose_output_root_button, 0, QtCore.Qt.AlignVCenter
+        )
+        layout.addLayout(destination_row)
         # Both readings, and both explanations, are written in one place: the
         # roots move when another calibration folder is opened, and a label
         # filled in at build time only would have gone on naming the first one.
@@ -3263,6 +3542,38 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         pattern_row.addWidget(self.extract_pattern_button)
         layout.addLayout(pattern_row)
 
+        # The wavelength table, on the same terms and in the same shape: it is
+        # the pattern's opposite number — the pattern says which pixels an
+        # order occupies, the table says which wavelengths — and it was the
+        # last of the three launch arguments that could not be changed without
+        # closing the bench (owner, 2026-08-18: "CLI OR GUI. Not both").
+        #
+        # Its own row rather than the end of the pattern's: this column's
+        # minimum width is the widest row in it, and a third button on that row
+        # pushed the whole two-rail layout past what the left rail could give
+        # up. A row of its own costs height in a column that has height, which
+        # is the cheap axis here.
+        wavelength_row = QtWidgets.QHBoxLayout()
+        self.wavelength_choice_value = _ElidingLabel("Wavelengths: —")
+        self.wavelength_choice_value.setObjectName("mutedText")
+        wavelength_row.addWidget(self.wavelength_choice_value, 1)
+        self.choose_wavelength_button = QtWidgets.QPushButton("Choose wavelength table…")
+        self._explainable(
+            self.choose_wavelength_button,
+            "Reading wavelengths off a different table",
+            "Picks the wavelength table the whole bench reads: the rows a "
+            "click can snap to, the expected lines listed beside the spectrum, "
+            "and the wavelengths every residual is measured in. Swapping it "
+            "clears every anchor — an anchor pairs one table row with one "
+            "measured centroid, so rows from a table the bench no longer reads "
+            "are half a measurement — and drops the factors, the settings "
+            "bundle and the save state derived from them, exactly as changing "
+            "the pattern does. Whose vetting the new table's OK marks carry "
+            "travels with it, and a stranger inherits none.",
+        )
+        wavelength_row.addWidget(self.choose_wavelength_button)
+        layout.addLayout(wavelength_row)
+
         # The other half of the comparison, on the same terms as the pattern:
         # the previous pair arrived as a command line, and a command line is a
         # launch convenience, not a place to change an input from (owner,
@@ -3366,10 +3677,15 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         self.regenerate_tomls_button.clicked.connect(self._regenerate_tomls)
         self.recompute_sphere_button.clicked.connect(self._start_sphere_comparison)
         self.choose_pattern_button.clicked.connect(self._choose_pattern_file)
+        self.choose_wavelength_button.clicked.connect(self._choose_wavelength_file)
         self.choose_previous_button.clicked.connect(self._choose_previous_pair)
         self.extract_pattern_button.clicked.connect(self._extract_pattern_from_sphere)
         self.save_snapshot_button.clicked.connect(self._save_snapshot)
         self.snapshot_id_edit.textChanged.connect(self.refresh_campaign)
+        # The destination is the root plus this identity, so the line that
+        # names it has to move when the identity does — including when the
+        # bench itself re-derives one from a folder that was just opened.
+        self.snapshot_id_edit.textChanged.connect(self._describe_destination)
         # ``textEdited`` fires for the operator's keystrokes and never for the
         # bench's own ``setText``, which is exactly the distinction between a
         # decision and a derivation.
@@ -3714,8 +4030,10 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         target = absolute_root(Path(folder))
         self.calibration_folder = target
         self.last_folder = target
-        self.output_root, self.config_root = default_bench_roots(target)
-        self._describe_output_roots()
+        # Decided rather than joined: a campaign home above this folder, or a
+        # folder that is already a calibrations shelf, both answer this before
+        # the ``calibrations/`` default gets to.
+        self._adopt_destination(snapshot_destination(target))
         self._rewatch(target)
         self._forget_session()
         self._rename_snapshot_identity(target)
@@ -3730,9 +4048,13 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
             else "It holds no SIF files yet — drop them in and they will load."
         )
         already = self._announce_saved_calibration()
+        # The destination is named as a folder, before anything is written to
+        # it, and the notice — when the bench declined the obvious default —
+        # is said in the same breath rather than left on a label to be noticed.
+        notice = self._destination.notice
         self._save_says(
-            f"Opened {target}. {tail} Snapshots and settings will be written "
-            f"under {self.output_root}."
+            f"Opened {target}. {tail} {self.snapshot_destination_sentence()}."
+            + (f" {notice}" if notice else "")
             + (f" {already}" if already else "")
         )
         return found
@@ -3801,23 +4123,98 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         self.snapshot_id_edit.setText(self.initial_snapshot_id)
         self._describe_snapshot_identity()
 
+    def snapshot_destination_sentence(self) -> str:
+        """Where the next Save will actually write, said before it is pressed.
+
+        Named to the *snapshot folder*, not to the root above it: the root is
+        an arrangement, and the folder that is about to appear is the thing the
+        operator will go looking for.  Said with the identity currently in the
+        field, so editing the identity moves this line with it.
+        """
+
+        snapshot_id = self.snapshot_id_edit.text().strip()
+        target = self._destination.snapshot_root(snapshot_id)
+        if not snapshot_id:
+            return f"Next snapshot → inside {target} (give it an identity above)"
+        return f"Next snapshot → {target}"
+
+    def _adopt_destination(self, destination: SnapshotDestination) -> None:
+        """Stand the bench's outputs on a decided destination, and show it."""
+
+        self._destination = destination
+        self.output_root = destination.output_root
+        self.config_root = destination.config_root
+        self._describe_output_roots()
+
+    def _choose_output_root(self) -> None:
+        """Send this bench's snapshots somewhere else, on a deliberate press."""
+
+        if self._campaign_thread is not None:
+            return
+        start = self.output_root if self.output_root.is_dir() else self.last_folder
+        chosen = choose_output_root(self, start)
+        if not chosen:
+            return
+        picked = absolute_root(Path(chosen))
+        if picked == self.output_root:
+            self._save_says(f"Snapshots already go to {picked}; nothing was changed.")
+            return
+        self._adopt_destination(
+            SnapshotDestination(picked, picked / CONFIG_ROOT_NAME, "the folder you chose")
+        )
+        # What the new root already holds is the same question the bench asks
+        # of a folder it opens, and the answer belongs on screen at once.
+        self._read_saved_snapshots()
+        self._save_says(
+            f"Snapshots and settings will now be written under {picked}. "
+            + self.snapshot_destination_sentence()
+            + "."
+        )
+        self.refresh()
+
+    def _describe_destination(self) -> None:
+        """Put the destination, and any notice about it, in front of the press.
+
+        The snapshot root's own line carries it.  A second line would have been
+        clearer and would have cost the Why dock a row of reading, and this one
+        was already the line the operator looks at for this answer — it simply
+        used to stop one join short of answering it.
+        """
+
+        sentence = self.snapshot_destination_sentence()
+        notice = self._destination.notice
+        # The middot rather than a dash: the notice carries dashes of its own,
+        # and the strip's other composed line already joins with this one.
+        self.snapshot_root_value.setText(f"{sentence} · {notice}" if notice else sentence)
+        self._explainable(
+            self.snapshot_root_value,
+            "Where this snapshot is about to be written",
+            "The exact folder the next Save creates: the snapshot root, plus "
+            "the identity in the field above. One subfolder per identity is "
+            "created inside that root, and everything else this bench "
+            "generates lives under it too, the settings bundles included, in "
+            f"a configs subfolder. The root is decided by "
+            f"{self._destination.source} — an --output-root you passed wins "
+            "absolutely, then a campaign home at or above the folder, then the "
+            "folder itself when it is already a calibrations shelf, and "
+            "otherwise the calibrations folder inside the calibration folder "
+            "the bench is open at, so the computed calibration sits beside the "
+            "lamp frames it was computed from. This is said before the press "
+            "because a destination is a decision; it used to be said only "
+            "once the files were already written. Press Change to send them "
+            f"somewhere else. {notice} In full: {self.output_root}",
+            # The whole path, deliberately unshortened: the tooltip rule about
+            # one short line is about explanations, and a path is the fact.
+            hint=str(self.output_root),
+        )
+        # Loud only when the bench went somewhere the folder alone did not say.
+        _emphasise(self.snapshot_root_value, self.body_pt, bold=bool(notice))
+        _emphasise(self.choose_output_root_button, self.body_pt, bold=bool(notice))
+
     def _describe_output_roots(self) -> None:
         """Say where this folder's snapshots and settings bundles will land."""
 
-        self.snapshot_root_value.setText(f"Snapshots: {self.output_root}")
-        self._explainable(
-            self.snapshot_root_value,
-            "Where saved snapshots are written",
-            "Every snapshot this bench saves is created inside this folder, "
-            "one subfolder per snapshot identity. Unless you passed "
-            "--output-root, it is the calibrations folder inside the "
-            "calibration folder the bench is open at — the computed "
-            "calibration sits beside the lamp frames it was computed from, and "
-            "that folder holds it all. Everything the bench generates lives "
-            "under this one folder, the settings bundles included, in a "
-            f"configs subfolder. In full: {self.output_root}",
-            hint=str(self.output_root),
-        )
+        self._describe_destination()
         self.config_root_value.setText(f"Configs: {self.config_root}")
         self._explainable(
             self.config_root_value,
@@ -4426,6 +4823,95 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
                 loader=loader, chosen_path=chosen_path, sphere_path=sphere_path
             )
         )
+
+    def _choose_wavelength_file(self) -> None:
+        """Name a different wavelength table, on the pattern picker's terms.
+
+        A plain setter would have been the obvious shape and the wrong one:
+        swapping the table invalidates anchors exactly the way a pattern rebase
+        does, so it takes the rebase's shape — read the file first, refuse
+        without changing anything if it is not a table, and say what the swap
+        cost in the same breath as what it bought.
+
+        Synchronous, where the pattern picker is not: a wavelength table is a
+        few kilobytes of text and nothing has to be re-extracted from a frame
+        to read it, so there is no long read here to keep off the GUI thread.
+        """
+
+        if self.campaign is None or self._campaign_thread is not None:
+            return
+        start = self.campaign.wavelength_source.parent
+        chosen, _filter = QtWidgets.QFileDialog.getOpenFileName(
+            self,
+            "Choose the wavelength table this bench reads",
+            str(start if start.is_dir() else self.last_folder),
+            "Wavelength tables (*.txt);;All files (*)",
+        )
+        if not chosen:
+            return
+        chosen_path = Path(chosen)
+        if chosen_path == self.campaign.wavelength_source:
+            self._save_says(
+                f"The bench already reads {chosen_path}; nothing was changed."
+            )
+            return
+        self._adopt_wavelength_rebase(chosen_path)
+
+    def _adopt_wavelength_rebase(self, source: Path) -> None:
+        """Swap the table under the whole bench, and say what that cost.
+
+        The invalidation runs through the doors that already exist — the
+        campaign's ``_invalidate_outputs`` by way of
+        :meth:`CalibrationCampaignSession.adopt_wavelength_table`, and the
+        session's ``clear_anchors`` by way of
+        :meth:`CalibrationBenchSession.adopt_lines` — rather than through a
+        second reset here that would drift from them.
+
+        The table is read before either is touched, so a file that is not a
+        wavelength table leaves the bench standing exactly where it was.
+        """
+
+        if self.campaign is None:
+            return
+        try:
+            rows = self.campaign.adopt_wavelength_table(source)
+            cleared = self.session.adopt_lines(
+                rows,
+                # Read from the table itself, so an adjusted table inherits the
+                # vetting of the curated one it came from and a stranger
+                # inherits none — the same question ``main`` asks at launch.
+                vetting=table_vetting(source, [_CALIBRATION_DIR]),
+            )
+        except (OSError, ValueError) as exc:
+            self._save_says(f"That wavelength table was not adopted: {exc}")
+            self.refresh()
+            return
+        # Drawn from the old table's rows: the expected-line list, the sticks
+        # under the spectrum, and the correction they were last drawn at.
+        self._catalog_cache.clear()
+        self._catalog_rows = ()
+        self._drawn_correction = None
+
+        sentences = [f"Reading wavelengths from {source} — {len(rows)} row(s)."]
+        if cleared:
+            sentences.append(
+                f"{cleared} anchor(s) were fitted against the old table's rows "
+                "and have been dropped; re-anchor and refit."
+            )
+        else:
+            sentences.append("No anchors were fitted yet, so none were lost.")
+        vetting = self.session.vetting
+        sentences.append(
+            f"Vetting: {vetting.message}."
+            if vetting is not None
+            else "Nobody was asked what this table's OK marks are vetted by."
+        )
+        sentences.append(
+            "The factors, the settings bundle and the save state derived from "
+            "the old table have been dropped with them."
+        )
+        self.refresh()
+        self._save_says(" ".join(sentences))
 
     def _choose_previous_pair(self) -> None:
         """Name the previous campaign's sphere pair from inside the bench.
@@ -5296,6 +5782,7 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
             enabled and not busy and self._sphere_pair_assigned()
         )
         self._refresh_pattern_source(busy)
+        self._refresh_wavelength_source(busy)
         self._refresh_previous_pair(busy)
         # An offer to overwrite belongs to the identity that was refused.  The
         # id field is edited between the refusal and the press, and this runs on
@@ -5344,6 +5831,40 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         # background — decided here, after the roles are known.
         self._follow_assigned_lamp_signal()
         self._pair_lamp_background()
+
+    def _refresh_wavelength_source(self, busy: bool) -> None:
+        """Say which wavelength table the bench reads, and whose vetting it carries.
+
+        Beside the pattern's own line and on the same terms: the file is a fact
+        about this calibration that the residuals cannot tell you, because a
+        table from the wrong era fits its own rows perfectly well.
+        """
+
+        if self.campaign is None:
+            self.wavelength_choice_value.setText("Wavelengths: —")
+            self.choose_wavelength_button.setEnabled(False)
+            return
+        source = self.campaign.wavelength_source
+        self.wavelength_choice_value.setText(f"Wavelengths: {source}")
+        vetting = self.session.vetting
+        carries = (
+            f" Vetting: {vetting.message}."
+            if vetting is not None
+            else " Nobody was asked what its OK marks are vetted by."
+        )
+        self._explainable(
+            self.wavelength_choice_value,
+            "The wavelength table this bench is reading",
+            "Every row a click can snap to, every expected line listed beside "
+            "the spectrum, and the wavelength every residual is measured in "
+            "comes off this file. It is no longer fixed at launch: the picker "
+            f"beside it changes the table in place.{carries} "
+            f"In full: {source}",
+            # The whole path, like the pattern line beside it: this is a
+            # reading of a fact, and the short-line rule is about explanations.
+            hint=str(source),
+        )
+        self.choose_wavelength_button.setEnabled(not busy)
 
     def _refresh_pattern_source(self, busy: bool) -> None:
         """Say which pattern the bench wears, and what may be done about it.
@@ -6608,9 +7129,17 @@ def main(argv: Sequence[str] | None = None) -> int:
     # directory the shortcut started in — is what the roots hang off.  An
     # explicit flag still wins, and is made absolute so the Save tab can be
     # honest about it too.
-    default_output, default_config = default_bench_roots(args.folder)
-    output_root = default_output if args.output_root is None else absolute_root(args.output_root)
-    config_root = default_config if args.config_root is None else absolute_root(args.config_root)
+    # ``--output-root`` is the override and wins absolutely; without it the
+    # folder is asked what it already is — a campaign with a home above it, a
+    # calibrations shelf, or one campaign's own folder — rather than simply
+    # having ``calibrations`` joined onto it.
+    destination = snapshot_destination(
+        args.folder, output_root=args.output_root, config_root=args.config_root
+    )
+    output_root = destination.output_root
+    config_root = destination.config_root
+    if destination.notice:
+        print(destination.notice)
 
     # The calibration is dated by the day its images were taken.  The folder
     # the bench was launched at is the first place that says so — the owner's
@@ -6665,6 +7194,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         folder=args.folder,
         output_root=output_root,
         config_root=config_root,
+        destination=destination,
         snapshot_id=snapshot_id,
         snapshot_date=(
             acquisition_date_from_name(args.snapshot_id)

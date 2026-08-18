@@ -1913,6 +1913,42 @@ class CalibrationCampaignSession:
         self._invalidate_outputs()
         return self.sphere_band_offsets()
 
+    def adopt_wavelength_table(
+        self, wavelength_source: str | Path
+    ) -> tuple[CalibrationTableLine, ...]:
+        """Read wavelengths off a different table, and forget the old one's work.
+
+        The last of the three launch arguments to stop being one.  The pattern
+        already moved here for the reason this follows it: an operator who has
+        opened the wrong era's table finds out from the residuals, and closing
+        the bench to fix it costs every role assignment and every anchor in the
+        window (owner, 2026-08-18: "CLI OR GUI. Not both").
+
+        A swap invalidates the same way a pattern rebase does, and for the same
+        kind of reason rather than a weaker one: an anchor pairs a *table row*
+        with a measured centroid, so rows from a table this campaign no longer
+        reads are the other half of a measurement that no longer exists.  The
+        derived outputs go through the one door they always go through,
+        :meth:`_invalidate_outputs`; the anchors are the alignment session's to
+        drop, through :meth:`CalibrationBenchSession.adopt_lines`, and the
+        caller does both because only the caller holds both.
+
+        The table is read before anything is assigned, so a file that is not a
+        wavelength table leaves the campaign standing on the one it had.
+        Returns the rows, so the caller need not read the file twice.
+        """
+
+        source = Path(wavelength_source)
+        rows = tuple(load_wavelength_table(source))
+        if not rows:
+            raise ValueError(
+                f"{source} holds no wavelength rows — a wavelength table names "
+                "an order, a pixel and a wavelength per row"
+            )
+        self.wavelength_source = source
+        self._invalidate_outputs()
+        return rows
+
     def pattern_band_warning(
         self, threshold: float = BAND_OFFSET_ATTENTION_ROWS
     ) -> str:

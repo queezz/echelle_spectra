@@ -10,6 +10,7 @@ from PyQt5.QtWidgets import QApplication, QMainWindow
 from pyqtgraph.Qt import QtCore, QtGui
 
 from . import __version__, _config
+from .folder_picker import ask_for_folder
 from .lhd_text import render_lhd_header, write_lhd_text
 from .resources import window_layout
 from .tools import echelle as ech
@@ -51,28 +52,32 @@ def packaged_calibration_label(camera):
     return f"Packaged {camera}"
 
 
+#: This dialog's own session memory.  The viewer walks back to the same
+#: snapshot shelf all day; the configured data directory is the right answer
+#: for the first opening and the wrong one for every opening after it.
+SNAPSHOT_FOLDER_MEMORY = "viewer-snapshot-folder"
+
+
 def choose_snapshot_folder(parent, start_dir):
     """Ask the operator for a calibration snapshot folder.
 
     Its own function so the in-GUI selector has one seam a test can stand in
     for: an off-screen run must never put a real modal dialog on the screen.
 
-    Qt's own dialog rather than the native picker, files visible but not
-    selectable: a snapshot folder is recognised by the snapshot.toml inside
-    it, and the native folder picker hides files entirely, forcing the
-    operator to open the same folder twice (owner, 2026-08-18: "we should
-    show contents, but make them gray").
+    What the dialog knows how to do lives in
+    :mod:`echelle_spectra.folder_picker`, shared with the calibration bench:
+    Qt's own dialog rather than the native picker so a snapshot folder's
+    greyed contents identify it, a typed or pasted path read as *navigation*
+    so that preview appears before the choice, and the folder it was last left
+    in. The two GUIs asked the same question with two hand-built dialogs, and
+    every habit taught to one of them had to be taught again to the other.
     """
-    dialog = QtWidgets.QFileDialog(
-        parent, "Open files through a saved calibration snapshot", str(start_dir)
+    return ask_for_folder(
+        parent,
+        "Open files through a saved calibration snapshot",
+        start_dir,
+        memory_key=SNAPSHOT_FOLDER_MEMORY,
     )
-    dialog.setFileMode(QtWidgets.QFileDialog.Directory)
-    dialog.setOption(QtWidgets.QFileDialog.ShowDirsOnly, False)
-    dialog.setOption(QtWidgets.QFileDialog.DontUseNativeDialog, True)
-    if dialog.exec_() != QtWidgets.QDialog.Accepted:
-        return ""
-    chosen = dialog.selectedFiles()
-    return chosen[0] if chosen else ""
 
 
 class CalibrationOverrideError(ValueError):

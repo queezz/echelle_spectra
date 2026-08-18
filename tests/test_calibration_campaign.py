@@ -3103,6 +3103,130 @@ def test_a_pattern_file_that_is_not_a_pattern_is_refused_whole(tmp_path):
     assert campaign.pattern_band_warning()
 
 
+# ---------------------------------------------------------------------------
+# Reading a different wavelength table, without closing.
+#
+# The last of the three launch arguments to stop being one.  It invalidates the
+# way a pattern rebase does — an anchor pairs a table row with a measured
+# centroid, so rows from a table the bench no longer reads are half a
+# measurement — which is why it wears the rebase's shape and not a setter's.
+# ---------------------------------------------------------------------------
+
+
+def _wavelength_file(tmp_path: Path, name: str, *rows: tuple[int, float, str]) -> Path:
+    """A wavelength table in the shipped six-column shape."""
+
+    path = tmp_path / name
+    path.write_text(
+        "# Order From To Center Wavelength Species\n"
+        + "".join(
+            f"{order} {center - 5} {center + 5} {center} {wavelength} ThI  # OK\n"
+            for order, center, wavelength in (
+                (row[0], row[1], row[2]) for row in rows
+            )
+        ),
+        encoding="utf-8",
+    )
+    return path
+
+
+def test_adopting_a_wavelength_table_drops_what_the_old_one_produced(tmp_path):
+    """The one press behind the bench's picker, in campaign memory alone."""
+
+    campaign, _sources = _campaign_with_sphere(tmp_path, 3.5)
+    alignment = _aligned_session(tmp_path)
+    campaign.compute_sphere_comparison(_calculator)
+    campaign.write_tomls(tmp_path / "configs", "20250813_cmos", alignment)
+    assert campaign.toml_state is TomlState.GENERATED
+    before_roles = set(campaign.measurements)
+
+    later = _wavelength_file(
+        tmp_path, "Th_wavelength_CMOS_20250926.txt", (0, 25.0, 600.5), (1, 55.0, 610.5)
+    )
+    rows = campaign.adopt_wavelength_table(later)
+
+    assert campaign.wavelength_source == later
+    assert [row.wavelength_nm for row in rows] == [600.5, 610.5]
+    # Dropped through the campaign's own invalidation, not a parallel reset —
+    # the same door adopting a pattern goes through.
+    assert campaign.comparison.state is ComparisonState.NOT_RUN
+    assert campaign.comparison.reason == "inputs changed"
+    assert campaign.toml_state is TomlState.NOT_GENERATED
+    assert campaign.save_state is SaveState.NOT_READY
+    # The roles, the files they name, and the pattern are all untouched: only
+    # the wavelengths changed, so only what was derived from them goes.
+    assert campaign.pattern_source.name == "pattern.txt"
+    assert campaign.measurements.keys() == before_roles
+
+
+def test_a_wavelength_file_that_is_not_a_table_is_refused_whole(tmp_path):
+    """A refusal leaves the campaign reading what it was reading."""
+
+    campaign, sources = _campaign_with_sphere(tmp_path, 3.5)
+    before = campaign.wavelength_source
+
+    empty = tmp_path / "no_rows.txt"
+    empty.write_text("# a header and nothing under it\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="no wavelength rows"):
+        campaign.adopt_wavelength_table(empty)
+    assert campaign.wavelength_source == before
+
+    with pytest.raises(OSError):
+        campaign.adopt_wavelength_table(tmp_path / "not-there.txt")
+    assert campaign.wavelength_source == before == sources["wavelength.txt"]
+
+
+def test_adopting_lines_clears_every_anchor_and_rescopes_the_lamp(tmp_path):
+    """An anchor IS a table row paired with a centroid; the row is gone."""
+
+    session = _aligned_session(tmp_path)
+    assert len(session.anchors) == 2
+    assert session.transform is not None
+    session.use_lamp_reference(lamp_reference_set("ThAr", session.lines))
+    assert session.reference is not None
+
+    later = (
+        CalibrationTableLine(0, 20, 30, 25, 600.5, "ThI", "ok"),
+        CalibrationTableLine(1, 50, 60, 55, 610.5, "ArI", "ok"),
+    )
+    cleared = session.adopt_lines(later)
+
+    assert cleared == 2
+    assert session.anchors == {}
+    assert session.transform is None and session.rms_px is None
+    assert session.lines == later
+    # The scoped rows came out of the old table; the campaign rebuilds them
+    # from the new one the next time it looks, which needs this to be None.
+    assert session.reference is None
+    assert session.reference_lines() == later
+    # Vetting travels with the table, and a stranger inherits none rather than
+    # inheriting the previous table's.
+    assert session.vetting is None
+
+    with pytest.raises(ValueError, match="at least one row"):
+        session.adopt_lines(())
+    assert session.lines == later
+
+
+def test_the_campaign_rescopes_the_lamp_from_the_table_now_being_read(tmp_path):
+    """The new table's rows are the ones a click can snap to, not the old."""
+
+    campaign, _sources = _campaign_with_sphere(tmp_path, 3.5)
+    session = _aligned_session(tmp_path)
+    first = campaign.scope_alignment_to_lamp(session)
+    assert first is session.reference
+
+    later = (
+        CalibrationTableLine(0, 20, 30, 25, 600.5, "ThI", "ok"),
+        CalibrationTableLine(1, 50, 60, 55, 610.5, "ArI", "ok"),
+    )
+    session.adopt_lines(later)
+    rescoped = campaign.scope_alignment_to_lamp(session)
+
+    assert rescoped is not first
+    assert {line.wavelength_nm for line in rescoped.lines} <= {600.5, 610.5}
+
+
 def test_a_snapshot_saved_after_a_rebase_carries_the_adopted_pattern(tmp_path):
     """What the bench wears is what the snapshot saves, digest for digest."""
 

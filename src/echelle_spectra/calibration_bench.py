@@ -783,6 +783,40 @@ class CalibrationBenchSession:
         self.clear_anchors()
         return cleared
 
+    def adopt_lines(
+        self, lines: Sequence[CalibrationTableLine], *, vetting: TableVetting | None = None
+    ) -> int:
+        """Read a different wavelength table, and drop what the old one fitted.
+
+        The mirror of :meth:`adopt_pattern`, one table over.  Every anchor
+        goes, and for a stricter reason than the pattern's: an anchor *is* a
+        table row paired with a measured centroid, so an anchor held over a
+        swap would pair this frame's pixels with a row from a table the bench
+        no longer reads — a measurement whose other half is gone.
+
+        The assigned lamp's scoped rows go too. They were selected out of the
+        old table, and the campaign re-scopes them from the new one the next
+        time it looks (``scope_alignment_to_lamp`` rebuilds whenever the
+        session is carrying no reference), which is how the new table's rows
+        become the ones a click can snap to.
+
+        Whose vetting the new table's ``OK`` marks carry travels with it, and
+        ``None`` is passed through honestly: a stranger inherits no vetting,
+        and inheriting the previous table's would be the one lie this class is
+        built to prevent.  Returns how many anchors were cleared, so the caller
+        can say so in as many words.
+        """
+
+        rows = tuple(lines)
+        if not rows:
+            raise ValueError("a wavelength table must hold at least one row")
+        cleared = len(self.anchors)
+        self.lines = rows
+        self.reference = None
+        self.vetting = vetting
+        self.clear_anchors()
+        return cleared
+
     def _release_frame(self) -> None:
         """Let go of the open acquisition and the background paired with it.
 

@@ -22,8 +22,9 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import numpy as np
 import pytest
-from PyQt5 import QtWidgets
+from PyQt5 import QtCore, QtWidgets
 
+from echelle_spectra import calibration_bench_gui as bench_gui
 from echelle_spectra import echelle_spectra_gui as gui
 from echelle_spectra.tools import echelle as echelle_module
 
@@ -1142,3 +1143,74 @@ def test_a_load_during_a_calibration_switch_is_queued_never_raced(
     assert window.cameras_tried == ["CMOS"]
     assert window.btn_open.isEnabled()
     assert window.calibration_select.isEnabled()
+
+
+def test_the_viewer_snapshot_dialog_follows_a_pasted_path_like_the_bench_does(
+    qt_app, tmp_path, monkeypatch
+):
+    """Owner, 2026-08-18: "I want a file dialog which allows me to paste in the
+    folder for preview. Now I can just paste it for selection, not going near."
+
+    The viewer and the calibration bench ask the same question with what is now
+    the same dialog, so this is the viewer's half of one change: a pasted path
+    that names a real folder navigates there, and the greyed contents that make
+    a snapshot folder recognisable — its ``snapshot.toml`` — are on screen
+    before Choose is pressed rather than never.
+    """
+
+    first = _write_snapshot(tmp_path / "first")
+    second = _write_snapshot(tmp_path / "second")
+    opened = []
+    monkeypatch.setattr(
+        QtWidgets.QFileDialog, "exec_", lambda dialog: (opened.append(dialog) or 0)
+    )
+
+    assert gui.choose_snapshot_folder(None, first) == ""
+    dialog = opened[0]
+    # Qt's own dialog, files listed and greyed: the same configuration the
+    # bench gets, because it is now literally the same code.
+    assert dialog.fileMode() == QtWidgets.QFileDialog.Directory
+    assert not dialog.testOption(QtWidgets.QFileDialog.ShowDirsOnly)
+    assert dialog.testOption(QtWidgets.QFileDialog.DontUseNativeDialog)
+    assert Path(dialog.directory().absolutePath()) == first
+
+    edit = dialog.findChildren(QtWidgets.QLineEdit)[0]
+    edit.setText(str(second))
+    qt_app.processEvents()
+
+    assert Path(dialog.directory().absolutePath()) == second
+    assert "snapshot.toml" in set(dialog.directory().entryList(QtCore.QDir.Files))
+    assert edit.text() == str(second)
+
+
+def test_the_viewer_snapshot_dialog_reopens_where_it_was_last_left(
+    qt_app, tmp_path, monkeypatch
+):
+    """The viewer walks back to the same snapshot shelf all day.
+
+    The configured data directory is the right answer for the first opening
+    and the wrong one for every opening after it. The bench's own pickers keep
+    their own places rather than sharing this one.
+    """
+
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    chosen = _write_snapshot(tmp_path / "shelf" / "20250926_cmos")
+    opened = []
+
+    def answer(dialog):
+        opened.append(Path(dialog.directory().absolutePath()))
+        dialog.setDirectory(str(chosen))
+        dialog.selectFile(str(chosen))
+        return QtWidgets.QDialog.Accepted
+
+    monkeypatch.setattr(QtWidgets.QFileDialog, "exec_", answer)
+
+    assert Path(gui.choose_snapshot_folder(None, data_dir)) == chosen
+    gui.choose_snapshot_folder(None, data_dir)
+    assert opened == [data_dir, chosen]
+
+    # Each question keeps its own memory: the bench's calibration-folder
+    # picker must not be walked to the viewer's snapshot shelf.
+    bench_gui.choose_calibration_folder(None, data_dir)
+    assert opened[-1] == data_dir
