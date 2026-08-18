@@ -174,6 +174,15 @@ def test_choosing_writes_the_path_into_the_field_and_derives_from_it(served_page
     assert "pickerClose();" in served_page
 
 
+def test_the_picker_takes_a_pasted_path_and_names_what_it_is_reading(served_page: str) -> None:
+    # A pasted path is navigation: the go box submits into pickerLoad.
+    assert 'id="picker-typed"' in served_page
+    assert "or paste a path and press Enter" in served_page
+    assert "if (value) { pickerLoad(value); }" in served_page
+    # A NAS can take seconds; the head says what is being read, immediately.
+    assert "'reading ' + (path || 'the drives')" in served_page
+
+
 def test_a_browse_error_is_one_sentence_inside_the_dialog(served_page: str) -> None:
     assert "alert(" not in served_page
     assert "confirm(" not in served_page

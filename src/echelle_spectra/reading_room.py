@@ -2519,6 +2519,8 @@ html.picker-open { overflow: hidden; }
 .picker-title { font-size: 1.05rem; margin: 0 0 .15rem; }
 .picker-path { margin: 0 0 .5rem; color: var(--muted);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace; overflow-wrap: anywhere; }
+.picker-go { margin: 0 0 .5rem; }
+.picker-go input { width: 100%; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 .picker-actions { display: flex; gap: .5rem; flex-wrap: wrap; margin: 0; }
 .picker-choose[disabled] { opacity: .55; cursor: default; }
 .picker-error { margin: .5rem 0 0; border-left: .2rem solid var(--bad); color: var(--bad);
@@ -2542,6 +2544,9 @@ _PICKER_MARKUP = """<div class="picker" id="picker" hidden>
  aria-labelledby="picker-title" tabindex="-1">
 <header class="picker-head"><h2 class="picker-title" id="picker-title">Pick a folder</h2>
 <p class="picker-path" id="picker-path">Drives on this machine</p>
+<form class="picker-go" id="picker-go">
+<input type="text" id="picker-typed" placeholder="or paste a path and press Enter">
+</form>
 <p class="picker-actions">
 <button type="button" class="picker-choose" id="picker-choose" disabled>Choose this folder</button>
 <button type="button" class="picker-close" id="picker-close" data-picker-close>Close</button>
@@ -2626,6 +2631,10 @@ function pickerLoad(path, keepError) {
      the drive list, which is the one listing with no folder to refuse. The
      retry cannot loop, because the drive list's own path is empty. */
   if (!keepError) { pickerSay(''); }
+  /* A NAS can take seconds to answer; silence reads as broken. Say what is
+     being read the moment the request leaves, and the render replaces it. */
+  var head = pickerEl('picker-path');
+  if (head) { head.textContent = 'reading ' + (path || 'the drives') + ' …'; }
   fetch(PICKER_BROWSE + encodeURIComponent(path || '')).then(function (response) {
     return response.json().then(function (payload) {
       return { ok: response.ok, payload: payload };
@@ -2680,6 +2689,16 @@ function pickerWire() {
   document.addEventListener('keydown', function (event) {
     if (event.key === 'Escape' && !box.hidden) { pickerClose(); }
   });
+  /* A pasted path is navigation: Enter goes there, no clicking down. */
+  var go = pickerEl('picker-go');
+  if (go) {
+    go.addEventListener('submit', function (event) {
+      event.preventDefault();
+      var typed = pickerEl('picker-typed');
+      var value = typed ? typed.value.trim() : '';
+      if (value) { pickerLoad(value); }
+    });
+  }
 }
 
 pickerWire();
