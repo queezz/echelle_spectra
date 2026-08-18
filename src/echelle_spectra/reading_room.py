@@ -1714,7 +1714,6 @@ def _composer_card(
         + _text_field("f-plan", "Plan file to save", values["plan"])
         + _text_field("f-pattern", "SIF pattern", values["pattern"])
         + "</div></details>"
-        '<p class="actions"><button type="button" id="compose">Compose</button></p>'
     )
     return _card("Compose a plan and commands", body, classes="rail-card--growing")
 
@@ -2427,9 +2426,14 @@ function wire() {
     );
     filterCatalog();
   });
-  byId('compose').addEventListener('click', compose);
-  var folder = byId('f-input');
-  if (folder) { folder.addEventListener('input', compose); }
+  /* Every composer field recomposes live: there is no Compose button,
+     because a button whose work already happened on the keystroke is a
+     control that visibly does nothing. */
+  ['f-input', 'f-output', 'f-label', 'f-verdict', 'f-registry',
+   'f-calibrations', 'f-catalog', 'f-plan', 'f-pattern'].forEach(function (id) {
+    var field = byId(id);
+    if (field) { field.addEventListener('input', compose); }
+  });
   var epoch = byId('f-epoch');
   if (epoch) { epoch.addEventListener('change', compose); }
   Object.keys(DERIVED_FIELDS).forEach(function (key) {

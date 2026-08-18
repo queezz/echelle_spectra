@@ -448,7 +448,9 @@ def test_each_rail_carries_only_its_own_tab_cargo(page: str) -> None:
     drives_left = _rail_group(page, "rail-left", "drives")
     for field in ("f-input", "f-output", "f-registry", "f-verdict", "f-epoch"):
         assert f'id="{field}"' in now_left
-    assert 'id="compose"' in now_left
+    # No Compose button: every field recomposes live on input, and a button
+    # whose work already happened is a control that visibly does nothing.
+    assert 'id="compose"' not in now_left
     for control in ("filter-year", "filter-epoch", "filter-drive", "filter-status"):
         assert f'id="{control}"' in drives_left and f'id="{control}"' not in now_left
     # The composer lives once, in Now; Drives keeps a compact one-press entry.
