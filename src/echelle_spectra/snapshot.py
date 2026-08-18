@@ -429,11 +429,20 @@ def _verify_artifact(  # noqa: C901 - one artifact, every way it can be wrong
     root: Path,
     reference_root: Path,
     verify_files: bool,
+    verify_references: bool = True,
     errors: list[str],
 ) -> Artifact:
     """Locate one artifact, check it, and return it carrying that location."""
 
     if artifact.is_reference:
+        if not verify_references:
+            # Not even a stat.  A referenced frame is 380 MB of raw detector
+            # sitting wherever it was measured, which on this instrument is
+            # routinely a share that may not be mounted; a light reading of the
+            # binder must not go looking for it, let alone hash it.  The path
+            # stays unresolved and :meth:`Snapshot.path_for` works it out on
+            # demand, as it always has.
+            return artifact
         target = reference_target(reference_root, artifact.path)
         if not target.is_file():
             # The absolute path, because "not found: ../../sphere.sif" tells an
@@ -474,7 +483,11 @@ def _verify_artifact(  # noqa: C901 - one artifact, every way it can be wrong
 
 
 def load_snapshot(  # noqa: C901 - one pass accumulates every validation failure
-    path: str | Path, *, verify_files: bool = True, reference_root: str | Path | None = None
+    path: str | Path,
+    *,
+    verify_files: bool = True,
+    verify_references: bool = True,
+    reference_root: str | Path | None = None,
 ) -> Snapshot:
     """Load and validate a snapshot directory or its manifest path.
 
@@ -482,6 +495,12 @@ def load_snapshot(  # noqa: C901 - one pass accumulates every validation failure
     when the folder is not yet standing in its final place — which is exactly
     the situation :func:`create_snapshot` validates from, one staging directory
     away from where the snapshot is about to live.
+
+    ``verify_references=False`` is the *light* check: schema, roles, and the
+    digests of the artifacts the snapshot owns — all of them kilobyte-sized
+    files inside the folder — with the referenced raw frames left entirely
+    alone.  It is what a reader asking "is this calibration done?" needs, and
+    it answers in milliseconds whether or not the frames are reachable.
     """
 
     supplied = Path(path)
@@ -579,6 +598,7 @@ def load_snapshot(  # noqa: C901 - one pass accumulates every validation failure
                 root=root,
                 reference_root=resolution_root,
                 verify_files=verify_files,
+                verify_references=verify_references,
                 errors=errors,
             )
         )
@@ -587,6 +607,165 @@ def load_snapshot(  # noqa: C901 - one pass accumulates every validation failure
     if errors:
         raise SnapshotValidationError(errors)
     return Snapshot(root=root, manifest=manifest, artifacts=artifacts)
+
+
+@dataclass(frozen=True)
+class SnapshotReading:
+    """One saved snapshot folder, read the way somebody glancing at it would.
+
+    A snapshot that has been saved says so only in its own files, and an
+    operator who has to open ``snapshot.toml`` and compare dates before he can
+    tell whether this morning's work landed has not been told anything (owner,
+    2026-08-18: "I'm not sure if that's done or not. No clear indications for
+    me").  This is the one object that answers it: what the calibration is
+    called, when it was saved, which lamps it used, how tight the alignment
+    came out, what the sphere comparison said, and whether the folder still
+    verifies against its own digests.
+
+    It never raises.  A binder that cannot be parsed, or that fails validation,
+    is a reading with ``errors`` — because "this one is broken, here is the
+    file" is an answer and an exception is not.
+    """
+
+    root: Path
+    snapshot_id: str
+    created_utc: str = ""
+    lamps: tuple[str, ...] = ()
+    alignment_rms_px: float | None = None
+    sphere_comparison: str = ""
+    errors: tuple[str, ...] = ()
+
+    @property
+    def valid(self) -> bool:
+        """Whether the light check found nothing wrong."""
+
+        return not self.errors
+
+    @property
+    def saved_local(self) -> str:
+        """``created_utc`` on the clock the operator is reading it by.
+
+        The binder records UTC, which is right for a file and wrong for the
+        question "did I save this this morning?".  A stamp that cannot be
+        parsed is handed back as it was written rather than dropped.
+        """
+
+        text = self.created_utc.strip()
+        if not text:
+            return ""
+        try:
+            moment = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        except ValueError:
+            return text
+        if moment.tzinfo is None:
+            moment = moment.replace(tzinfo=timezone.utc)
+        return moment.astimezone().strftime("%Y-%m-%d %H:%M")
+
+    def summary(self) -> str:
+        """One plain sentence-fragment naming this calibration and its verdict.
+
+        Every part is stated only when the binder has it, so an older or
+        hand-written snapshot reads short rather than reading a row of dashes.
+        The verdict is always last, and always there.
+        """
+
+        parts: list[str] = []
+        if self.saved_local:
+            parts.append(f"saved {self.saved_local}")
+        if self.lamps:
+            parts.append("/".join(self.lamps))
+        if self.alignment_rms_px is not None:
+            parts.append(f"RMS {self.alignment_rms_px:.2f} px")
+        if self.sphere_comparison:
+            parts.append(f"sphere comparison {self.sphere_comparison.replace('-', ' ')}")
+        parts.append(
+            "validated"
+            if self.valid
+            else f"DOES NOT VALIDATE — {self.errors[0]}"
+        )
+        return f"{self.snapshot_id} — " + ", ".join(parts)
+
+
+def _manifest_table(manifest: Mapping[str, Any], heading: str) -> Mapping[str, Any]:
+    """One optional TOML table, or an empty one — never a TypeError."""
+
+    table = manifest.get(heading)
+    return table if isinstance(table, dict) else {}
+
+
+def read_snapshot_folder(path: str | Path) -> SnapshotReading:
+    """Read one saved snapshot folder cheaply enough to say so at first paint.
+
+    The verdict comes from :func:`load_snapshot`'s light check — the same
+    schema, role and digest checks ``echelle snapshot validate`` runs, minus
+    the referenced raw frames — so nothing here reads more than a few kilobytes
+    inside the folder itself.
+    """
+
+    root = Path(path)
+    try:
+        with (root / "snapshot.toml").open("rb") as stream:
+            manifest: Mapping[str, Any] = tomllib.load(stream)
+    except (OSError, tomllib.TOMLDecodeError):
+        # Unparseable: the validator below says so in full, and the displayable
+        # facts simply are not there to display.
+        manifest = {}
+    try:
+        load_snapshot(root, verify_references=False)
+    except SnapshotValidationError as exc:
+        errors = tuple(exc.errors)
+    else:
+        errors = ()
+
+    raw_lamps = manifest.get("lamps")
+    rms = _manifest_table(manifest, "alignment").get("rms_px")
+    comparison = _manifest_table(manifest, "qc").get("sphere_comparison")
+    return SnapshotReading(
+        root=root,
+        # The folder name is the fallback because a binder whose id is missing
+        # is exactly the binder whose folder name has to carry the identity.
+        snapshot_id=str(manifest.get("id", "") or root.name),
+        created_utc=str(manifest.get("created_utc", "")),
+        lamps=tuple(
+            str(item).strip()
+            for item in (raw_lamps if isinstance(raw_lamps, list) else ())
+            if str(item).strip()
+        ),
+        alignment_rms_px=(
+            float(rms) if isinstance(rms, (int, float)) and not isinstance(rms, bool) else None
+        ),
+        sphere_comparison=str(comparison or "").strip(),
+        errors=errors,
+    )
+
+
+def saved_snapshots_in(output_root: str | Path) -> tuple[SnapshotReading, ...]:
+    """Every snapshot saved directly inside *output_root*, newest first.
+
+    One level deep and no deeper: a snapshot lives at ``<output root>/<id>``,
+    the settings bundles live beside them in a folder that holds no binder, and
+    the raw frames the binders point at can be anywhere at all — including a
+    share whose recursive walk would take the bench off the air.  Anything that
+    is not a directory holding a ``snapshot.toml`` is simply not a snapshot.
+    """
+
+    root = Path(output_root)
+    try:
+        entries = sorted(root.iterdir())
+    except OSError:
+        return ()
+    readings: list[SnapshotReading] = []
+    for entry in entries:
+        try:
+            holds_binder = entry.is_dir() and (entry / "snapshot.toml").is_file()
+        except OSError:  # pragma: no cover - an entry that vanished mid-scan
+            continue
+        if holds_binder:
+            readings.append(read_snapshot_folder(entry))
+    # ``created_utc`` is ISO-8601, so it sorts as text; the id breaks ties
+    # between two snapshots written inside the same second.
+    readings.sort(key=lambda reading: (reading.created_utc, reading.snapshot_id), reverse=True)
+    return tuple(readings)
 
 
 def create_snapshot(  # noqa: C901 - atomic assembly keeps all cleanup in one scope

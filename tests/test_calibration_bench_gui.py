@@ -73,7 +73,7 @@ from echelle_spectra.calibration_campaign import (
     triage_exposure,
     triage_for_role,
 )
-from echelle_spectra.snapshot import Snapshot
+from echelle_spectra.snapshot import Snapshot, create_snapshot
 from echelle_spectra.tools.calibration_alignment import CalibrationTableLine
 
 _COLUMNS = 80
@@ -4727,9 +4727,20 @@ def _calibration_folder(tmp_path: Path, name: str) -> Path:
 def _bench_at(tmp_path: Path, folder: Path, **options) -> CalibrationBenchWindow:
     """A bench launched at *folder* and holding nothing yet, as ``main`` leaves it."""
 
-    window = _manual_window(tmp_path, window_options={"folder": folder, **options})
-    window.output_root, window.config_root = bench_gui.default_bench_roots(folder)
-    window._describe_output_roots()
+    output_root, config_root = bench_gui.default_bench_roots(folder)
+    window = _manual_window(
+        tmp_path,
+        window_options={
+            # Both roots come in through the constructor, exactly as ``main``
+            # hands them over: the bench reads what the folder already holds
+            # while it is being built, and a root assigned afterwards would be
+            # a root assigned too late to be announced.
+            "folder": folder,
+            "output_root": output_root,
+            "config_root": config_root,
+            **options,
+        },
+    )
     # The shared fixture hands every window a frame; a freshly launched bench
     # has none, and an empty bench is the one that must never be questioned.
     window.session.forget_frame()
@@ -5067,6 +5078,211 @@ def test_the_input_line_names_the_launched_folder(qt_app, tmp_path):
     bare = _manual_window(tmp_path)
     assert "no folder open" in bare.watch_value.text()
     bare.close()
+    window.close()
+
+
+# ----------------------------------------------------------------------
+# "Is my calibration done?" — answered at open, and again at save
+# ----------------------------------------------------------------------
+
+
+_SAVED_LAMPS = ("Hg", "Ne", "ThAr", "Xe")
+
+
+def _save_a_calibration_in(
+    folder: Path,
+    *,
+    snapshot_id: str = "20190314_cmos",
+    lamps: tuple[str, ...] = _SAVED_LAMPS,
+) -> Snapshot:
+    """Write one complete snapshot under *folder*, shaped as the bench does.
+
+    Thin, like every snapshot the bench saves: the computed files are the
+    snapshot's own and the raw frames are referenced where they were measured.
+    """
+
+    for entry in ("pattern.txt", "wavelength.txt", "integral.txt"):
+        (folder / entry).write_text(f"{entry} rows\n", encoding="utf-8")
+    return create_snapshot(
+        folder / SNAPSHOT_ROOT_NAME,
+        snapshot_id=snapshot_id,
+        detector="cmos",
+        files={
+            "pattern": folder / "pattern.txt",
+            "wavelength": folder / "wavelength.txt",
+            "integral": folder / "integral.txt",
+            "sphere": folder / "sphere-0.1s-x3.sif",
+            "sphere_background": folder / "sphere-0.1s-x3-bg.sif",
+        },
+        lamps=lamps,
+        lamp_files=[("Ne", folder / "Ne-0.02s-x3-bright-lines.sif")],
+        reference_raw=True,
+        alignment={
+            "rms_px": 0.53,
+            "pattern_band_offset_note": "the sphere's bands sit on this pattern",
+        },
+        qc={"sphere_comparison": "ready"},
+    )
+
+
+def test_a_folder_that_already_holds_a_calibration_says_so_before_any_click(
+    qt_app, tmp_path
+):
+    """Owner, 2026-08-18, on his re-run of the 2019 campaign: "I'm not sure if
+    that's done or not. No clear indications for me. Unless I dig in and look
+    at the dates and all..."
+
+    The save had in fact succeeded and the folder held a complete snapshot.
+    Nothing on the bench said so. It says so now, at first paint, on the strip
+    that is never behind a tab — and the verdict is a real one, not a guess
+    from the folder's existence.
+    """
+
+    folder = _calibration_folder(tmp_path, "20190314_calib")
+    saved = _save_a_calibration_in(folder)
+    window = _bench_at(tmp_path, folder)
+    window.show()
+    qt_app.processEvents()
+
+    # The whole finding, in the dock that is already on screen at first paint.
+    docked = window.details_view.toPlainText()
+    assert "This folder already holds snapshot 20190314_cmos — saved " in docked
+    assert "Hg/Ne/ThAr/Xe" in docked
+    assert "RMS 0.53 px" in docked
+    assert "sphere comparison ready" in docked
+    assert "validated." in docked
+    assert "DOES NOT VALIDATE" not in docked
+    assert str(saved.root) in docked
+    # And the standing badge on Bench state, which no tab can hide and which
+    # keeps both its ends when the strip is narrow.
+    assert window.watch_value.text() == f"{folder} · holds 20190314_cmos, validated"
+    # The same sentence on the bench's running account and on the Save tab.
+    announced = window.save_message_value.text()
+    assert announced.startswith("This folder already holds snapshot 20190314_cmos — ")
+    assert str(saved.root) in announced
+    assert window.message_value.text() == announced
+    window.close()
+
+
+def test_several_saved_calibrations_name_the_newest_and_count_the_rest(
+    qt_app, tmp_path
+):
+    """One line, not a list: the newest in full, the others as a number."""
+
+    folder = _calibration_folder(tmp_path, "20190314_calib")
+    _save_a_calibration_in(folder, snapshot_id="20190314_cmos")
+    newest = _save_a_calibration_in(folder, snapshot_id="20190314_cmos-r1")
+    window = _bench_at(tmp_path, folder)
+    window.show()
+    qt_app.processEvents()
+
+    announced = window.save_message_value.text()
+    assert announced.startswith(
+        "This folder already holds snapshot 20190314_cmos-r1 — saved "
+    )
+    assert str(newest.root) in announced
+    assert "1 older snapshot(s) are saved in the same folder." in announced
+    assert "20190314_cmos" in window.details_view.toPlainText()
+    assert window.watch_value.text().endswith(" · holds 20190314_cmos-r1 +1, validated")
+    window.close()
+
+
+def test_a_saved_calibration_that_no_longer_verifies_names_the_broken_file(
+    qt_app, tmp_path
+):
+    """A folder that holds a snapshot is not the same claim as a folder whose
+    snapshot is intact, and the bench must never conflate the two."""
+
+    folder = _calibration_folder(tmp_path, "20190314_calib")
+    saved = _save_a_calibration_in(folder)
+    (saved.root / "pattern.txt").write_text("edited by hand\n", encoding="utf-8")
+
+    window = _bench_at(tmp_path, folder)
+    window.show()
+    qt_app.processEvents()
+
+    said = window.save_message_value.text()
+    assert "DOES NOT VALIDATE — artifact digest mismatch: pattern.txt" in said
+    assert str(saved.root) in said
+    assert "DOES NOT VALIDATE — artifact digest mismatch: pattern.txt" in (
+        window.details_view.toPlainText()
+    )
+    assert window.watch_value.text().endswith(
+        " · holds 20190314_cmos, DOES NOT VALIDATE"
+    )
+    window.close()
+
+
+def test_the_open_check_never_reaches_for_the_raw_frames_it_only_points_at(
+    qt_app, tmp_path
+):
+    """The referenced frames are hundreds of megabytes and routinely live on a
+    share. A folder whose calibration is intact reads as intact whether or not
+    that share is mounted this morning."""
+
+    folder = _calibration_folder(tmp_path, "20190314_calib")
+    _save_a_calibration_in(folder)
+    for name in _REAL_2025_NAMES:
+        (folder / name).unlink()
+
+    window = _bench_at(tmp_path, folder)
+    window.show()
+    qt_app.processEvents()
+
+    assert window.watch_value.text().endswith(" · holds 20190314_cmos, validated")
+    assert "validated." in window.details_view.toPlainText()
+    window.close()
+
+
+def test_a_saved_snapshot_leaves_the_strip_in_a_terminal_done_state(
+    qt_app, tmp_path
+):
+    """The press has to leave something behind that is still there a minute on.
+
+    The strip answered a successful save by moving straight to whatever the
+    checklist thought was next, so the one line an operator actually reads said
+    nothing at all about the thing he had just done.
+    """
+
+    folder = _calibration_folder(tmp_path, "20190314_calib")
+    window = _bench_at(tmp_path, folder)
+    window.show()
+    qt_app.processEvents()
+
+    assert window.next_step_value.text().startswith("Next:")
+    assert not window.next_step_button.isHidden()
+    assert window.watch_value.text() == str(folder)
+
+    saved = _save_a_calibration_in(folder)
+    window._campaign_task_completed(saved)
+    qt_app.processEvents()
+
+    settled = window.next_step_value.text()
+    assert settled == (
+        f"DONE — snapshot 20190314_cmos saved and validated in {saved.root}"
+    )
+    assert window.next_step_value.styleSheet() == bench_gui._SETTLED_STEP_STYLE
+    assert window.next_step_value.font().bold()
+    assert window.next_step_button.isHidden()
+    # It is a conclusion, so every later refresh finds the same line rather
+    # than the next suggestion.
+    window.refresh()
+    window.refresh_campaign()
+    qt_app.processEvents()
+    assert window.next_step_value.text() == settled
+    # And the always-visible badge now answers it from the disk itself, exactly
+    # as it will when this folder is opened again tomorrow.
+    assert window.watch_value.text().endswith(" · holds 20190314_cmos, validated")
+
+    # Another folder is another question: the terminal line belongs to the one
+    # it was saved for, and the next folder gets whatever it holds itself.
+    other = _calibration_folder(tmp_path, "20261101_calib")
+    window.open_calibration_folder(other)
+    _wait_for_loads(window, qt_app)
+
+    assert window._settled_step == ""
+    assert not window.next_step_value.text().startswith("DONE")
+    assert window.watch_value.text() == str(other)
     window.close()
 
 

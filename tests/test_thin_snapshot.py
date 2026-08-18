@@ -25,9 +25,12 @@ from echelle_spectra.calibration_registry import (
 from echelle_spectra.snapshot import (
     ARTIFACT_COPIED,
     ARTIFACT_REFERENCED,
+    Snapshot,
     SnapshotValidationError,
     create_snapshot,
     load_snapshot,
+    read_snapshot_folder,
+    saved_snapshots_in,
 )
 
 RAW_SPHERE = b"sphere pixels" * 16
@@ -57,16 +60,37 @@ def _sources(folder: Path) -> dict[str, Path]:
     }
 
 
-def _thin(folder: Path, *, snapshot_id: str = "20260813_cmos", **extra):
+def _thin(
+    folder: Path,
+    *,
+    snapshot_id: str = "20260813_cmos",
+    lamps: tuple[str, ...] = ("ThAr",),
+    **extra,
+):
     return create_snapshot(
         folder / "calibrations",
         snapshot_id=snapshot_id,
         detector="cmos",
         files=_sources(folder),
-        lamps=("ThAr",),
+        lamps=lamps,
         lamp_files=[("ThAr", folder / "ThAr-0.3s-x3.sif")],
         reference_raw=True,
         **extra,
+    )
+
+
+def _restamp(snapshot: Snapshot, created_utc: str) -> None:
+    """Rewrite one binder's save moment; the artifact digests are untouched."""
+
+    manifest = snapshot.root / "snapshot.toml"
+    lines = manifest.read_text(encoding="utf-8").splitlines()
+    manifest.write_text(
+        "\n".join(
+            f'created_utc = "{created_utc}"' if line.startswith("created_utc = ") else line
+            for line in lines
+        )
+        + "\n",
+        encoding="utf-8",
     )
 
 
@@ -206,6 +230,93 @@ def test_an_unknown_kind_is_refused_rather_than_guessed_at(
         load_snapshot(snapshot.root, verify_files=False)
 
     assert any("unknown kind 'linked'" in error for error in caught.value.errors)
+
+
+# ---------------------------------------------------------------------------
+# Reading a saved folder cheaply: "is my calibration done?"
+# ---------------------------------------------------------------------------
+
+
+def test_the_light_reading_verifies_its_own_files_and_leaves_the_frames_alone(
+    calibration_folder: Path,
+) -> None:
+    """Owner, 2026-08-18: "I'm not sure if that's done or not."
+
+    The answer has to arrive without hashing 380 MB of raw detector that may
+    not even be mounted, so the light check digests the snapshot's own
+    kilobyte-sized files and never touches a referenced source.
+    """
+
+    snapshot = _thin(
+        calibration_folder,
+        lamps=("Hg", "Ne", "ThAr", "Xe"),
+        alignment={"rms_px": 0.53},
+        qc={"sphere_comparison": "ready"},
+    )
+    # As if the share the frames live on were not mounted this morning.
+    (calibration_folder / "sphere-0.1s-x3.sif").unlink()
+    (calibration_folder / "ThAr-0.3s-x3.sif").unlink()
+
+    reading = read_snapshot_folder(snapshot.root)
+
+    assert reading.valid and reading.errors == ()
+    assert reading.snapshot_id == "20260813_cmos"
+    assert reading.lamps == ("Hg", "Ne", "ThAr", "Xe")
+    assert reading.alignment_rms_px == pytest.approx(0.53)
+    assert reading.sphere_comparison == "ready"
+    assert reading.saved_local  # the binder's UTC stamp, on this machine's clock
+    summary = reading.summary()
+    assert summary.startswith("20260813_cmos — saved ")
+    assert "Hg/Ne/ThAr/Xe" in summary
+    assert "RMS 0.53 px" in summary
+    assert "sphere comparison ready" in summary
+    assert summary.endswith("validated")
+
+    # The full check is unchanged, and still says the frames are gone.
+    with pytest.raises(SnapshotValidationError) as caught:
+        load_snapshot(snapshot.root)
+    assert any("sphere source not found" in error for error in caught.value.errors)
+
+
+def test_the_light_reading_names_the_file_whose_digest_moved(
+    calibration_folder: Path,
+) -> None:
+    snapshot = _thin(calibration_folder)
+    (snapshot.root / "pattern.txt").write_text("edited by hand\n", encoding="utf-8")
+
+    reading = read_snapshot_folder(snapshot.root)
+
+    assert not reading.valid
+    assert "artifact digest mismatch: pattern.txt" in reading.errors
+    assert "DOES NOT VALIDATE — artifact digest mismatch: pattern.txt" in reading.summary()
+
+
+def test_saved_snapshots_are_listed_newest_first_and_nothing_else_is_walked(
+    calibration_folder: Path,
+) -> None:
+    """One level deep: the settings bundles are not snapshots, and neither is
+    anything under the folders the binders point back at."""
+
+    first = _thin(calibration_folder, snapshot_id="20260813_cmos")
+    second = _thin(calibration_folder, snapshot_id="20260814_cmos")
+    # Newest is the one saved most recently, which is not the same fact as the
+    # one whose id carries the later acquisition date — a re-run of an old
+    # campaign is exactly the case that separates them.
+    _restamp(first, "2026-08-20T10:46:00+00:00")
+    _restamp(second, "2026-08-14T09:00:00+00:00")
+    root = calibration_folder / "calibrations"
+    (root / "configs").mkdir()
+    (root / "configs" / "campaign.toml").write_text("not a snapshot\n", encoding="utf-8")
+    (root / "loose-note.txt").write_text("not a snapshot either\n", encoding="utf-8")
+
+    readings = saved_snapshots_in(root)
+
+    assert [reading.snapshot_id for reading in readings] == [
+        "20260813_cmos",
+        "20260814_cmos",
+    ]
+    assert all(reading.valid for reading in readings)
+    assert saved_snapshots_in(calibration_folder / "nowhere") == ()
 
 
 # ---------------------------------------------------------------------------

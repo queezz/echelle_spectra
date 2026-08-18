@@ -45,7 +45,7 @@ from .calibration_campaign import (
     lamp_reference_set,
     triage_for_role,
 )
-from .snapshot import SnapshotError
+from .snapshot import SnapshotError, SnapshotReading, saved_snapshots_in
 from .tools.calibration_alignment import load_wavelength_table, table_vetting
 from .tools.pattern_extraction import (
     DEFAULT_SEARCH_RADIUS_PX,
@@ -82,6 +82,11 @@ _SPHERE_FACTORS_EXPLANATION = (
     "mismatch worth chasing before the trip. Only the sphere pair is needed — "
     "no lamp."
 )
+
+#: What the next-step strip wears once there is no next step left: the same
+#: green the Procedure tab paints a DONE row, so the two never disagree about
+#: what finished means.
+_SETTLED_STEP_STYLE = "color: #70d6ae;"
 
 #: The one folder everything the bench generates lives under, wherever its
 #: roots end up — owner, 2026-08-17: "It's kinder to keep all generated stuff
@@ -1007,6 +1012,17 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         #: The folder the last successful snapshot save wrote, so the offer to
         #: open it points at what was actually written rather than at a guess.
         self._saved_snapshot_root: Path | None = None
+        #: What this folder's output root already holds, newest first, read once
+        #: when the folder is opened and again after a save.  A saved snapshot
+        #: is a fact about a disk, not about this session, and until it was read
+        #: at open the only way to learn it was to go and read snapshot.toml
+        #: (owner, 2026-08-18: "Unless I dig in and look at the dates and all").
+        self._saved_readings: tuple[SnapshotReading, ...] = ()
+        #: The terminal line the next-step strip holds instead of a next step.
+        #: A snapshot saved and validated is a conclusion, and a strip that
+        #: answers it by suggesting something else has hidden the one thing the
+        #: operator pressed the button to find out.
+        self._settled_step = ""
         self._pattern_items: list[pg.PlotDataItem] = []
         self._pattern_key: tuple[int, int] | None = None
         self._selected_trace: int | None = None
@@ -1070,7 +1086,15 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         self._build_ui()
         self._connect_ui()
         self.setAcceptDrops(True)
+        # Before the first paint, not on the first click: a bench launched at a
+        # folder that has already been calibrated says so in the same breath as
+        # it opens.
+        self._read_saved_snapshots()
         self.refresh()
+        # Last, so the refresh above cannot narrate over it.
+        found = self._announce_saved_calibration()
+        if found:
+            self._save_says(found)
 
         self.poll_timer = QtCore.QTimer(self)
         self.poll_timer.setInterval(int(poll_interval_ms))
@@ -3695,6 +3719,9 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         self._rewatch(target)
         self._forget_session()
         self._rename_snapshot_identity(target)
+        # Read from the new root, before its SIFs are queued: what the folder
+        # already holds is the first thing to say about it.
+        self._read_saved_snapshots()
         found = self.add_paths([target])
         self.refresh()
         tail = (
@@ -3702,9 +3729,11 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
             if found
             else "It holds no SIF files yet — drop them in and they will load."
         )
+        already = self._announce_saved_calibration()
         self._save_says(
             f"Opened {target}. {tail} Snapshots and settings will be written "
             f"under {self.output_root}."
+            + (f" {already}" if already else "")
         )
         return found
 
@@ -3735,6 +3764,9 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         self._refused_identity = ""
         self.regenerate_tomls_button.setVisible(False)
         self._saved_snapshot_root = None
+        # The terminal line belongs to the folder it was saved for.  The next
+        # folder gets whatever *it* already holds, read fresh from its own root.
+        self._settled_step = ""
         # Drawn from the old frames and the old solve; a new folder redraws it.
         self._catalog_cache.clear()
         self._catalog_rows = ()
@@ -3798,6 +3830,100 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
             f"full: {self.config_root}",
             hint=str(self.config_root),
         )
+
+    # ------------------------------------------------------------------
+    # What this folder already holds: read at open, said without a click
+    # ------------------------------------------------------------------
+
+    def _read_saved_snapshots(self) -> None:
+        """Ask the output root what calibrations are already saved in it.
+
+        Synchronous on purpose.  It reads one small TOML per snapshot folder
+        and digests that snapshot's own kilobyte-sized files; the referenced
+        raw frames — which are the 380 MB ones, and the ones that may live on a
+        share — are never touched, and nothing below the output root's own
+        children is ever walked.  A folder with three saved calibrations in it
+        costs a handful of milliseconds, which is what buys the answer at first
+        paint rather than behind a button.
+        """
+
+        self._saved_readings = saved_snapshots_in(self.output_root)
+        self._describe_input_source()
+
+    def saved_calibration_badge(self) -> str:
+        """The short standing form, appended to the Bench state input line.
+
+        Deliberately a suffix on a line the strip already had rather than a row
+        of its own: the readings strip is a strip, and a fourth row in Bench
+        state costs the expected-line table below it the row it is measured by.
+        The line elides in the middle, so the folder at its head and the verdict
+        at its tail are the two things that survive any window width.
+        """
+
+        if not self._saved_readings:
+            return ""
+        newest = self._saved_readings[0]
+        verdict = "validated" if newest.valid else "DOES NOT VALIDATE"
+        others = f" +{len(self._saved_readings) - 1}" if len(self._saved_readings) > 1 else ""
+        return f" · holds {newest.snapshot_id}{others}, {verdict}"
+
+    def _saved_calibration_announcement(self) -> str:
+        """The whole finding as one sentence, or ``""`` when there is none."""
+
+        if not self._saved_readings:
+            return ""
+        newest = self._saved_readings[0]
+        others = len(self._saved_readings) - 1
+        sentence = (
+            f"This folder already holds snapshot {newest.summary()}. "
+            f"It sits in {newest.root}."
+        )
+        if others:
+            sentence += (
+                f" {others} older snapshot(s) are saved in the same folder."
+            )
+        return sentence
+
+    def _announce_saved_calibration(self) -> str:
+        """Write the finding into the Why dock, and hand it back to be said.
+
+        The dock is on screen at first paint and is built holding a general
+        explanation; this folder's own facts are worth more there than a
+        standing lesson, and putting them there is what makes the finding
+        arrive without a click.  A folder with nothing saved in it is not
+        announced at all — the checklist already says the snapshot row is not
+        done, and a bench that narrates absences buries the lines that matter.
+        """
+
+        found = self._saved_calibration_announcement()
+        if not found:
+            return ""
+        newest = self._saved_readings[0]
+        older = "\n".join(f"{reading.summary()}" for reading in self._saved_readings[1:])
+        self.explain(
+            "This folder already holds a saved calibration",
+            f"{found}\n\n"
+            "The verdict is the schema, role and digest check that "
+            "`echelle snapshot validate` runs, over the files the snapshot "
+            "itself holds. The raw detector frames the binder points back at "
+            "are not re-hashed: they are hundreds of megabytes and may live on "
+            "a share that is not mounted. So this says the saved calibration "
+            "is intact — not that every frame it was measured from is still "
+            "reachable from this machine."
+            + (
+                f"\n\nAlso saved in {self.output_root}:\n{older}"
+                if older
+                else ""
+            )
+            + (
+                ""
+                if newest.valid
+                else "\n\nA snapshot folder is never repaired in place. Save "
+                "again under a new identity, or restore the named file from "
+                "wherever this folder was copied from."
+            ),
+        )
+        return found
 
     # ------------------------------------------------------------------
     # Manual input: drag and drop, and a plain file dialog
@@ -4510,10 +4636,22 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
             self._saved_snapshot_root = saved_root
             self.open_snapshot_button.setVisible(True)
             self.open_snapshot_button.setToolTip(f"Open {saved_root} in the file manager")
+            # The strip stops asking for a next step, because there is not one:
+            # this is the end of the procedure, and it says the identity and the
+            # whole path, which are the two things the operator has to carry
+            # away from the bench (owner, 2026-08-18: "No clear indications for
+            # me").  It holds until another folder is opened.
+            self._settled_step = (
+                f"DONE — snapshot {result.snapshot_id} saved and validated in "
+                f"{saved_root}"
+            )
             self._save_says(
                 f"Snapshot {result.snapshot_id} saved and validated through "
                 f"Packet 0 in {saved_root}.{detail}"
             )
+            # And the always-visible reading now answers "is it done?" from the
+            # disk itself, exactly as it will when this folder is reopened.
+            self._read_saved_snapshots()
         self.refresh()
 
     def _open_saved_snapshot_folder(self) -> None:
@@ -5048,7 +5186,12 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
 
         if self.calibration_folder is not None:
             watched = " · watching for new SIFs" if self.watcher is not None else ""
-            self.watch_value.setText(f"{self.calibration_folder}{watched}")
+            # And whether this folder's calibration is already done, which is
+            # the one thing about a folder that used to require opening
+            # snapshot.toml and comparing dates to find out.
+            self.watch_value.setText(
+                f"{self.calibration_folder}{watched}{self.saved_calibration_badge()}"
+            )
         elif self.watcher is not None:
             self.watch_value.setText(f"watching {self.watcher.folder}")
         else:
@@ -5686,6 +5829,29 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         """
 
         if self.campaign is None:
+            return
+        # A saved and validated snapshot is not a step, it is the end of the
+        # procedure.  The strip used to answer the press by moving on to the
+        # next suggestion, which left the one line an operator reads saying
+        # nothing about the thing he had just done.
+        self.next_step_value.setStyleSheet(
+            _SETTLED_STEP_STYLE if self._settled_step else ""
+        )
+        _emphasise(self.next_step_value, self.body_pt, bold=bool(self._settled_step))
+        if self._settled_step:
+            self.next_step_value.setText(self._settled_step)
+            self._set_next_action(None)
+            self._explainable(
+                self.next_step_value,
+                "This calibration is saved",
+                f"{self._settled_step}.\n\nThe snapshot folder was written, its "
+                "manifest was re-read, and every artifact digest in it was "
+                "verified. Nothing further is required of this session. The "
+                "line stays here until you open another calibration folder — "
+                "and when you open this one again, the bench reads the same "
+                "fact back off the disk and says so on the Bench state strip.",
+                hint=self._settled_step,
+            )
             return
         pending = [
             item
