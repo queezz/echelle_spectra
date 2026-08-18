@@ -1665,16 +1665,23 @@ def _epoch_options(epochs: list[str], registry: dict[str, Any]) -> str:
     twice.
     """
 
-    if epochs:
-        return "".join(f'<option value="{_e(item)}">{_e(item)}</option>' for item in epochs)
-    saved = [item for item in (registry.get("saved") or []) if item]
-    if saved:
-        # A saved snapshot is real without a registry; it is only not yet
-        # registered, and the label says exactly that much and no more.
-        return "".join(
-            f'<option value="{_e(item)}">{_e(item)} — saved, not in any registry</option>'
-            for item in saved
-        )
+    # "unassigned" is a cube's way of saying it had no calibration identity;
+    # it is not a calibration anybody can choose.
+    known = [item for item in epochs if item and item != "unassigned"]
+    saved = [
+        item
+        for item in (registry.get("saved") or [])
+        if item and item not in known
+    ]
+    options = "".join(f'<option value="{_e(item)}">{_e(item)}</option>' for item in known)
+    # A saved snapshot is real without a registry; it is only not yet
+    # registered, and the label says exactly that much and no more.
+    options += "".join(
+        f'<option value="{_e(item)}">{_e(item)} — saved, not in any registry</option>'
+        for item in saved
+    )
+    if options:
+        return options
     stated = {
         "not supplied": "no registry supplied to this build",
         "unreadable": "registry unreadable — the commands name it unread",
