@@ -23,20 +23,29 @@ from echelle_spectra.campaign_run import (
     GATE_SAMPLE,
     GATE_UNGATED,
     GATE_UNRECORDED,
+    GATE_VERDICT,
+    ReceiptLookupError,
     RunReceipt,
     default_volume_label,
     ensure_drive_identity,
     read_drive_identity,
 )
+from echelle_spectra.campaign_tools_cli import catalog_main
 from echelle_spectra.catalog import (
     CATALOG_NAME,
     build_drive_catalog,
+    discover_drive_id,
     load_catalog,
     merge_catalogs,
     refresh_catalog_row,
     source_catalog_path,
 )
-from echelle_spectra.drift import DATE_ATTRIBUTES, cube_date
+from echelle_spectra.drift import (
+    DATE_ATTRIBUTES,
+    DRIFT_SCHEMA,
+    cube_date,
+    write_drift_evidence,
+)
 from echelle_spectra.recalibration import recalibrate_cube
 from echelle_spectra.snapshot import ROLE_FILENAMES, create_snapshot
 from echelle_spectra.spectrocube_cli import ExportResult, main
@@ -63,10 +72,32 @@ def _cube_writer(paths: list[Path]):
     return export
 
 
-def _process(argv: list[str]) -> int:
+def _sparing_writer():
+    """A fake exporter that keeps the real one's promise not to rewrite a cube.
+
+    The plain writer above always writes, which would let a second run claim
+    every cube the first one published.  The trip loop's second pass meets cubes
+    a sampling run already wrote, and the real exporter skips them, so a test
+    about who published what has to skip them too.
+    """
+
+    write = _cube_writer([])
+
+    def export(sif: Path, nc_out: Path, **kwargs) -> ExportResult:
+        if nc_out.exists() and not kwargs.get("overwrite"):
+            return ExportResult("skipped", "output exists; use --overwrite to replace it")
+        return write(sif, nc_out, **kwargs)
+
+    return export
+
+
+def _process(argv: list[str], *, export=None) -> int:
     with (
         patch("echelle_spectra.tools.loader.build_calibration", return_value=object()),
-        patch("echelle_spectra.spectrocube_cli._export_one", side_effect=_cube_writer([])),
+        patch(
+            "echelle_spectra.spectrocube_cli._export_one",
+            side_effect=export or _cube_writer([]),
+        ),
         pytest.raises(SystemExit) as result,
     ):
         main(argv)
@@ -376,6 +407,150 @@ def _epoch_registry(tmp_path: Path) -> tuple[Path, Path]:
         encoding="utf-8",
     )
     return registry, snapshots
+
+
+# ---------------------------------------------------------------------------
+# The input/output seam: the rehearsal sequence, typed with the ROOT paths
+#
+# The drive announces itself in the tree that is *read* and the cubes are
+# written somewhere else entirely, so a catalog that searched around the cubes
+# found no drive id at all; and `--receipt-dir` was given the runs root, which
+# holds no run.toml of its own, so the run was silently not identified either.
+# The first real end-to-end run therefore produced a catalog with an empty
+# drive_id, `run: null`, and every cube "unrecorded (pre-gate receipt)" -- while
+# `echelle status`, reading that very tree, reported the run completed.
+# ---------------------------------------------------------------------------
+
+
+def test_the_rehearsal_sequence_with_root_paths_fully_identifies_the_catalog(
+    tmp_path: Path, fake_spectrocube
+) -> None:
+    registry, snapshots = _epoch_registry(tmp_path)
+    drive = tmp_path / "NIFS"
+    _drive(drive, count=3)
+    runs = tmp_path / "runs"  # the --runs-dir ROOT, exactly as the loop prints it
+    cubes = drive / "cubes"
+    gated = [
+        str(drive / "shots"),
+        "-o",
+        str(cubes),
+        "--runs-dir",
+        str(runs),
+        "--registry",
+        str(registry),
+        "--calibrations",
+        str(snapshots),
+        "--volume-label",
+        "NIFS-A",
+    ]
+
+    # Steps 4-5: the unverified first sample. Then 6-7: the audited verdict
+    # spends that sample and takes the rest of the drive.
+    assert _process([*gated, "--sample", "1"], export=_sparing_writer()) == 0
+    evidence = write_drift_evidence(
+        tmp_path / "drift-evidence-001.json",
+        {"schema": DRIFT_SCHEMA, "verdict": "aligned", "snapshot_ids": ["20250101_cmos"]},
+    )
+    assert _process([*gated, "--drift-verdict", str(evidence)], export=_sparing_writer()) == 0
+
+    # The old empty-identity outcome, reproduced before the fix is asked for.
+    assert (drive / "shots" / DRIVE_ID_NAME).is_file()
+    assert discover_drive_id(cubes) == ""
+    assert not (runs / "run.toml").exists()
+
+    # Step 8, typed with the roots.
+    catalog = load_catalog(
+        build_drive_catalog(
+            cubes,
+            volume_label="NIFS-A",
+            receipt_dir=runs,
+            output=cubes / "catalog.json",
+        )
+    )
+
+    announced = read_drive_identity(drive / "shots")
+    assert announced is not None
+    assert catalog["drive_id"] == announced.drive_id != ""
+    assert catalog["run"] is not None
+    assert catalog["run"]["state"] == "completed"
+    assert catalog["run"]["gate"] == GATE_VERDICT
+    # Nothing is left unattributed: the sampled cube is identified by the
+    # sample's own receipt rather than condemned because the later run only
+    # skipped it.
+    assert sorted(row["gate"] for row in catalog["cubes"]) == [
+        GATE_SAMPLE,
+        GATE_VERDICT,
+        GATE_VERDICT,
+    ]
+    assert GATE_UNRECORDED not in {row["gate"] for row in catalog["cubes"]}
+
+    # The receipts themselves say which drive they belong to, not only which
+    # folder: two drives ending in the same folder name stay tellable apart.
+    assert all(
+        "nifs-a-shots" in manifest.parent.name for manifest in runs.rglob("run.toml")
+    )
+
+
+def test_a_receipt_folder_that_identifies_nothing_is_refused_by_name(
+    tmp_path: Path,
+) -> None:
+    cubes = tmp_path / "cubes"
+    cubes.mkdir()
+    empty = tmp_path / "not-runs"
+    empty.mkdir()
+
+    with pytest.raises(ReceiptLookupError) as absent:
+        build_drive_catalog(cubes, volume_label="NIFS-A", receipt_dir=tmp_path / "gone")
+    assert "--runs-dir" in str(absent.value)
+
+    with pytest.raises(ReceiptLookupError) as barren:
+        build_drive_catalog(cubes, volume_label="NIFS-A", receipt_dir=empty)
+    assert "no run receipt under" in str(barren.value)
+    assert "--runs-dir" in str(barren.value)
+
+
+def test_a_runs_root_holding_another_drives_receipts_is_refused_in_one_line(
+    tmp_path: Path, fake_spectrocube, capsys
+) -> None:
+    drive = tmp_path / "drive-a"
+    _drive(drive)
+    runs = tmp_path / "runs"
+    assert (
+        _process(
+            [
+                str(drive / "shots"),
+                "-o",
+                str(drive / "cubes"),
+                "--runs-dir",
+                str(runs),
+                "--volume-label",
+                "NIFS-A",
+            ]
+        )
+        == 0
+    )
+    capsys.readouterr()
+
+    stranger = tmp_path / "elsewhere"
+    stranger.mkdir()
+    code = catalog_main(
+        [
+            "build",
+            str(stranger),
+            "--volume-label",
+            "NIFS-B",
+            "--receipt-dir",
+            str(runs),
+        ]
+    )
+
+    assert code == 1
+    refusal = capsys.readouterr().err
+    assert refusal.startswith("ERROR: ")
+    assert refusal.count("\n") == 1
+    assert "none of which wrote cubes to" in refusal
+    assert "(from --receipt-dir)" in refusal
+    assert not (stranger / CATALOG_NAME).exists()
 
 
 # ---------------------------------------------------------------------------

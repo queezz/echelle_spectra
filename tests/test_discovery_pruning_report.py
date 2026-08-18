@@ -53,7 +53,11 @@ def _snapshot_marker(folder: Path) -> Path:
 def _process(argv: list[str]) -> int:
     """Run the shipped entry point with only the exporter replaced."""
 
-    def export(sif: Path, nc_out: Path, **_: object) -> ExportResult:
+    def export(sif: Path, nc_out: Path, **kwargs: object) -> ExportResult:
+        # The real exporter writes nothing during a dry run, and neither may
+        # this one: the destination folder does not exist yet.
+        if kwargs.get("dry_run"):
+            return ExportResult("dry-run", "dry run")
         nc_out.write_text(f"cube for {sif.name}", encoding="utf-8")
         return ExportResult("exported")
 
@@ -187,6 +191,34 @@ def test_a_nested_skip_is_reported_at_the_folder_that_was_actually_dropped(
     assert "Skipped:     1 calibration folder(s) not searched" in header
     assert "sources" not in header
     assert _run_manifest(tmp_path / "runs")["pruned_dirs"] == ["20190207"]
+
+
+def test_a_dry_run_lists_the_files_it_found_without_being_asked_to_be_verbose(
+    tmp_path: Path, fake_spectrocube, capsys
+) -> None:
+    """The documented step says to inspect the listed sources; so list them.
+
+    ``--dry-run`` printed a count and, behind ``--verbose``, the names. The
+    guide's "start with --dry-run and inspect the listed sources" therefore
+    described a listing the plain command never produced.
+    """
+
+    source = tmp_path / "drive"
+    _shots(source / "20190206", "193778")
+    _shots(source / "20190207", "193780")
+    _shots(_snapshot_marker(source / "20190208"), "193790")
+
+    assert _process([*_batch_argv(tmp_path, source), "--dry-run"]) == 0
+
+    out = capsys.readouterr().out
+    assert "Files:       2 (DRY RUN)" in out
+    assert "Would convert:" in out
+    assert "  20190206/193778_Echelle.SIF" in out
+    assert "  20190207/193780_Echelle.SIF" in out
+    # A pruned day is skipped, not silently listed as convertible.
+    assert "193790" not in out.split("Would convert:")[1]
+    # And a dry run still writes no receipt at all.
+    assert not (tmp_path / "runs").exists()
 
 
 def test_an_operators_own_path_pattern_prunes_nothing_and_reports_nothing(

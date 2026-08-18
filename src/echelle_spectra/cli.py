@@ -6,6 +6,7 @@ import argparse
 import sys
 from pathlib import Path
 
+from . import __version__
 from .calibration_registry import CalibrationRegistryError, load_calibration_registry
 from .campaign_run import GATE_UNRECORDED, latest_run_summaries, list_run_summaries
 from .snapshot import SnapshotValidationError, load_snapshot
@@ -20,6 +21,14 @@ def _build_parser() -> argparse.ArgumentParser:
             "'echelle snapshot'. Convert SIF files with 'echelle process'."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    # A campaign report starts with which build produced it, and the answer used
+    # to require importing the package by hand from a Python prompt.
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"echelle {__version__}",
+        help="Print the installed echelle_spectra version and exit.",
     )
     commands = parser.add_subparsers(dest="command", metavar="COMMAND")
     status = commands.add_parser("status", help="Summarize calibration snapshots and registry.")
@@ -183,6 +192,11 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if arguments[0] in {"-h", "--help"}:
         parser.print_help()
+        return 0
+    # Dispatch is by hand rather than by parse_args, so the umbrella's own flags
+    # are answered here; argparse only carries them into --help.
+    if arguments[0] == "--version":
+        print(f"echelle {__version__}")
         return 0
     command, remainder = arguments[0], arguments[1:]
     if command == "status":

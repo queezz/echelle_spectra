@@ -114,14 +114,15 @@ developer tools cannot be assumed.
 | --- | --- | --- |
 | `echelle_spectra [--calibration DIR]` | Single-SIF viewer: open one shot, see the image, the extracted orders, the calibrated spectrum, and the known-line overlays (`--calibration` points it at a saved snapshot folder, so old files are read through their own era's tables) | Yes, for looking at a shot |
 | `echelle-calib [FOLDER]` | Separate live calibration bench; drag SIFs onto it (FOLDER sets where the file dialog opens, where the two output folders are derived, and the acquisition date the snapshot identity is prefilled from; `--watch` adds folder polling), triages every exposure, takes hand-assigned roles for any lamp, fits alignment, compares sphere response, and builds configuration/snapshot evidence | Yes, during calibration |
+| `echelle --version` | Prints the installed version, so a report says which build produced it | Yes; harmless anywhere |
 | `echelle status` | Summarizes snapshots, registry presence, and durable processing receipts | Yes; safest first command |
 | `echelle snapshot create` | Copies role-named calibration inputs into one immutable, digested snapshot | Yes, usually through the bench |
 | `echelle snapshot validate DIR` | Rechecks snapshot schema, paths, sizes, and SHA-256 digests | Yes |
 | `echelle snapshot show DIR` | Prints a compact snapshot summary | Yes |
 | `echelle snapshot import-historical ID --calibrations DIR` | Converts a bundled 2019/2024/2025 binder into a registrable snapshot; `--artifact-root` supplies campaign folders too large to package | Once per historical epoch |
-| `echelle process INPUT -o OUTPUT` | Converts one SIF, a folder, or several drives to SpectroCube NetCDF and records resumable receipts; a plain filename pattern (default `*.SIF`) walks the whole source tree, pruning `calibrations/` folders and any folder holding `snapshot.toml` and naming every pruned folder in the header and the receipt | Yes; a registry run needs `--sample N`/`--sample auto` or `--drift-verdict` |
-| `echelle catalog build/merge` | Writes per-drive catalogs keyed on stable drive ids and merges them by recency into an all-years index | Candidate; audit/catalog work |
-| `echelle txt CUBE OUTPUT` / `echelle-cube2txt` | Writes LHD text at the frozen legacy header; refuses a cube missing `trigger_delay_s`, `frame_interval_s` or `exposure_s` | Candidate; no raw SIF needed |
+| `echelle process INPUT -o OUTPUT` | Converts one SIF, a folder, or several drives to SpectroCube NetCDF and records resumable receipts; a plain filename pattern (default `*.SIF`) walks the whole source tree, pruning `calibrations/` folders and any folder holding `snapshot.toml` and naming every pruned folder in the header and the receipt; `--dry-run` names every file it would convert | Yes; a registry run needs `--sample N`/`--sample auto` or `--drift-verdict` |
+| `echelle catalog build/merge` | Writes per-drive catalogs keyed on stable drive ids and merges them by recency into an all-years index; `--receipt-dir` takes the runs root or one receipt folder, and is what supplies the drive id and the gate | Candidate; audit/catalog work |
+| `echelle txt CUBE OUTPUT` / `echelle-cube2txt` | Writes LHD text at the frozen legacy header; refuses a cube missing `trigger_delay_s`, `frame_interval_s` or `exposure_s`, so the run that wrote the cube must have carried timing (see [Getting to `echelle txt`](#getting-to-echelle-txt)) | Candidate; no raw SIF needed |
 | `echelle recal-cube CUBE --new-snapshot DIR` | Applies safe wavelength/factor snapshot deltas and refuses geometry changes | Candidate; reviewed repair only |
 | `echelle drift audit/refine` | Samples Balmer/Fulcher centroids, solves one rigid detector shift in pixels, emits a four-state verdict, and accepts immutable `-rN` refinements. `-o` is optional — omitted, the evidence lands beside the audited cubes as the next free `drift-evidence-NNN.json`; `--every` is optional too, derived so roughly 20 cubes get measured; with `--from`/`--to` the derivation counts only the cubes inside the window, because the audit filters by date before it samples. Each Balmer window is judged against both the H and D references and assigned to the nearer one, so a deuterium shot is tagged `D` and read as aligned instead of condemned by the 0.178 nm isotope offset; a `D` shot drops the H2 Fulcher anchors, and a tag that disagrees with the bundled LHD deuterium calendar is flagged in the evidence, never silently resolved | Candidate; required before any registry run |
 | `echelle web [--open]` | Builds the static read-only campaign page and always prints its absolute `index.html` path; `--open` also opens it in the default browser. Four tabs: Now (a per-drive stepper saying what to do first), Drives (catalog with a local Find), Calibration (one record per saved snapshot — where its folder is, which lamps and spheres went into it, and the bench numbers: dx/dy/theta/RMS, lines used and worst residual, the vetted lineage, and the sphere comparison against its named reference — then epochs and drift verdicts) and the packaged reading room. `--home DIR-or-campaign.toml`, or a `campaign.toml` in the current directory, supplies `--catalog`/`--output`/`--registry`/`--calibrations`/`--drift` defaults that explicit flags always override; `--registry` and `--drift` are what let the stepper place the campaign | Candidate; never controls workers |
@@ -189,15 +190,20 @@ $Data = "D:\NIFS"
 
 # 7. Process the whole drive under that verdict. Name the evidence file the
 #    audit just printed, e.g. drift-evidence-001.json beside the cubes.
+#    --config carries the trigger timing no calibration measures; without it
+#    step 9 cannot write LHD text. See "Getting to echelle txt" below.
 .\echelle.ps1 process "$Data\shots" `
   -o "$Data\cubes" `
   --runs-dir "$Data\runs" `
   --registry "$Data\calibration_registry.toml" `
   --calibrations "$Data\calibrations" `
+  --config "$Data\export-timing.toml" `
   --volume-label NIFS-A `
   --drift-verdict "$Data\cubes\drift-evidence-001.json"
 
 # 8. Index what this drive now holds, and fold it into the all-years index.
+#    --receipt-dir takes the runs root itself: the receipt for these cubes is
+#    found inside it, and with it the drive's stable id and the run's gate.
 .\echelle.ps1 catalog build "$Data\cubes" `
   --volume-label NIFS-A `
   --receipt-dir "$Data\runs" `
@@ -206,7 +212,11 @@ $Data = "D:\NIFS"
 .\echelle.ps1 catalog merge "$Data\cubes\catalog.json" `
   -o "$Data\all-years.json"
 
-# 9. Build and open the campaign page in one step.
+# 9. Write the LHD deliverable for one shot. Repeat per cube as needed.
+.\echelle.ps1 txt "$Data\cubes\193778_Echelle_spectrocube.nc" `
+  "$Data\text\193778.txt"
+
+# 10. Build and open the campaign page in one step.
 .\echelle.ps1 web `
   --catalog "$Data\all-years.json" `
   --output "$Data\campaign-page" `
@@ -263,15 +273,20 @@ data="/Volumes/NIFS"
 
 # 7. Process the whole drive under that verdict. Name the evidence file the
 #    audit just printed, e.g. drift-evidence-001.json beside the cubes.
+#    --config carries the trigger timing no calibration measures; without it
+#    step 9 cannot write LHD text. See "Getting to echelle txt" below.
 ./echelle process "$data/shots" \
   -o "$data/cubes" \
   --runs-dir "$data/runs" \
   --registry "$data/calibration_registry.toml" \
   --calibrations "$data/calibrations" \
+  --config "$data/export-timing.toml" \
   --volume-label NIFS-A \
   --drift-verdict "$data/cubes/drift-evidence-001.json"
 
 # 8. Index what this drive now holds, and fold it into the all-years index.
+#    --receipt-dir takes the runs root itself: the receipt for these cubes is
+#    found inside it, and with it the drive's stable id and the run's gate.
 ./echelle catalog build "$data/cubes" \
   --volume-label NIFS-A \
   --receipt-dir "$data/runs" \
@@ -280,7 +295,11 @@ data="/Volumes/NIFS"
 ./echelle catalog merge "$data/cubes/catalog.json" \
   -o "$data/all-years.json"
 
-# 9. Build and open the campaign page in one step.
+# 9. Write the LHD deliverable for one shot. Repeat per cube as needed.
+./echelle txt "$data/cubes/193778_Echelle_spectrocube.nc" \
+  "$data/text/193778.txt"
+
+# 10. Build and open the campaign page in one step.
 ./echelle web \
   --catalog "$data/all-years.json" \
   --output "$data/campaign-page" \
@@ -293,6 +312,57 @@ data="/Volumes/NIFS"
 Put every accepted snapshot ID into the ordered registry and verify its
 inclusive bounds with `echelle status` before processing. Use one
 `--volume-label` for each input folder when processing several drives.
+
+## Getting to `echelle txt`
+
+`echelle txt` writes the frozen LHD header, which needs three timing numbers.
+Two of them — `frame_interval_s` and `exposure_s` — come out of the detector
+header and are recorded for you. The third, `trigger_delay_s`, is measured by
+nothing: no calibration produces it, no snapshot carries it, and no processing
+flag supplies it. It reaches a cube only through an export config's `[metadata]`
+block. Without that config, step 9 refuses every cube the loop just wrote.
+
+So the loop's step 7 names one small file, and this is the whole of it. Save it
+as `D:\NIFS\export-timing.toml` (`/Volumes/NIFS/export-timing.toml`):
+
+```toml
+# Minimal export config: timing only, safe to use with --registry.
+# It deliberately names no camera, calibration folder or calibration file --
+# the registry owns all of those, and a config that also named them would be
+# refused as two authorities for one run.
+
+[metadata]
+# Seconds between the LHD discharge trigger and the first frame. This is the
+# one number the calibration bench cannot measure; take it from the machine's
+# timing, or carry forward the value the previous campaign used.
+trigger_delay_s = 2.5
+time_axis_reference = "LHD discharge time"
+frame_time_formula = "trigger_delay_s + frame * frame_interval_s"
+```
+
+The live bench already writes these three lines: they are the `[metadata]` block
+at the top of `calibrations\configs\<snapshot-id>\export.toml`, carried forward
+from the previous campaign and marked as inherited. That file cannot be passed
+to a registry-backed run as it stands, because it also names the camera and the
+calibration files — copy its `[metadata]` block into `export-timing.toml` and
+edit the delay if this campaign's timing differs. A run **without** `--registry`
+can use the bench's `export.toml` whole, with `--config`.
+
+### `--calibration-source` on absolute runs
+
+The trip loop above exports counts. A run that asks for an absolute scale
+instead — `--units wm`, `wmsr` or `phmsr` — should also say what that scale was
+traced to:
+
+```powershell
+--units wmsr --calibration-source "snapshot 20260814_cmos integrating sphere"
+```
+
+It is free text and it becomes the cube's `calibration_source` attribute, the
+only record of which sphere standard stands behind the numbers. An absolute run
+that omits it warns and then writes cubes carrying no such record at all. The
+bench's generated `export.toml` sets it under `[export]` alongside `units`, so a
+non-registry run driven by that file already has it.
 
 Steps 4–7 are the whole gate: a registry-backed run needs either `--sample N`
 or `--sample auto`, which processes at most N (or the derived count) resolved
@@ -399,6 +469,7 @@ These commands do not intentionally create campaign artifacts:
 
 ```text
 echelle --help
+echelle --version
 echelle status
 echelle snapshot show DIR
 echelle snapshot validate DIR
@@ -492,7 +563,8 @@ so shots several levels down are still found. It prunes any folder named
 never swept up as science shots; junctions and symbolic links are matched
 where they sit but never descended into. For lowercase acquisition filenames,
 add `--pattern "*.sif"` (also tried automatically as a fallback). Start with
-`--dry-run` and inspect the listed sources before allowing writes.
+`--dry-run`, which prints a `Would convert:` block naming every file it found
+relative to the source root, and inspect that list before allowing writes.
 
 ### Fewer files than the drive holds
 
@@ -515,7 +587,15 @@ path pattern with `--pattern`, and rerun.
 
 ## Version check
 
-Run this inside the active source environment:
+Ask the command itself:
+
+```powershell
+.\echelle.ps1 --version
+```
+
+The fallbacks below answer the same question without the umbrella command, for
+a kit whose install has not finished or an environment where only the library
+imports. Inside the active source environment:
 
 ```bash
 python -c "import echelle_spectra; print(echelle_spectra.__version__)"

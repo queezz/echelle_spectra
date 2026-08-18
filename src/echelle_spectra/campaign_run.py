@@ -65,6 +65,30 @@ def _slug(value: str) -> str:
     return cleaned[:40] or "run"
 
 
+def _target_slug(source_root: Path, volume_label: str | None = None) -> str:
+    """Name a receipt folder by the drive it belongs to as well as its folder.
+
+    A campaign meets several drives whose shots sit in an identically named
+    folder -- ``\\data`` is the usual one -- and naming receipts from that
+    basename alone produced two folders both ending ``-data``, which is exactly
+    the pair an operator has to tell apart at the end of a trip.  The volume
+    label the run already declares goes in front, and is dropped when it would
+    only repeat the folder name.
+
+    The label participates in the name, so a target processed under a different
+    ``--volume-label`` is a differently named tree.  That is deliberate: the
+    label is the operator's statement of *which drive this is*, and two
+    statements that disagree are not one target's history.
+    """
+
+    label = re.sub(r"[^A-Za-z0-9]+", "-", str(volume_label or "")).strip("-").lower()
+    name = re.sub(r"[^A-Za-z0-9]+", "-", source_root.name).strip("-").lower()
+    parts = [part for part in (label, name) if part]
+    if len(parts) == 2 and parts[0] == parts[1]:
+        parts = parts[:1]
+    return _slug("-".join(parts))
+
+
 def _relative_or_absolute(path: Path, root: Path) -> str:
     try:
         return path.resolve().relative_to(root.resolve()).as_posix()
@@ -205,10 +229,12 @@ def ensure_drive_identity(root: Path, *, label: str | None = None) -> DriveIdent
     )
 
 
-def new_run_directory(runs_root: Path, source_root: Path) -> Path:
+def new_run_directory(
+    runs_root: Path, source_root: Path, *, volume_label: str | None = None
+) -> Path:
     """Reserve a dated run directory without replacing an existing receipt."""
     stamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    base = runs_root / f"{stamp}-{_slug(source_root.name)}"
+    base = runs_root / f"{stamp}-{_target_slug(source_root, volume_label)}"
     candidate = base
     revision = 2
     while candidate.exists():
@@ -217,11 +243,13 @@ def new_run_directory(runs_root: Path, source_root: Path) -> Path:
     return candidate
 
 
-def target_runs_root(runs_root: Path, source_root: Path) -> Path:
+def target_runs_root(
+    runs_root: Path, source_root: Path, *, volume_label: str | None = None
+) -> Path:
     """Return a stable isolated receipt root for one multi-target source."""
     resolved = str(source_root.resolve()).encode("utf-8")
     path_digest = hashlib.sha256(resolved).hexdigest()[:8]
-    return runs_root / f"{_slug(source_root.name)}-{path_digest}"
+    return runs_root / f"{_target_slug(source_root, volume_label)}-{path_digest}"
 
 
 @dataclass(frozen=True)
@@ -566,6 +594,89 @@ def find_resumable_run(
             continue
         matches.append(manifest.parent)
     return max(matches, key=lambda item: item.name) if matches else None
+
+
+class ReceiptLookupError(Exception):
+    """No single run receipt could be identified from the folder that was named."""
+
+
+@dataclass(frozen=True)
+class ReceiptSelection:
+    """Which receipt describes a run, and every receipt that published its cubes.
+
+    ``directory`` is the newest matching receipt: the one whose state, counts and
+    gate describe the run an operator just finished.  ``published_by`` is that
+    receipt together with the earlier ones that wrote into the same output root
+    -- the sampling run before the full one, most often -- because the cube a
+    sample exported is identified by the sample's receipt and by no other.
+    """
+
+    directory: Path
+    published_by: tuple[Path, ...] = ()
+
+
+def _receipt_order(receipt: RunReceipt) -> tuple[str, str]:
+    """Sort receipts oldest first without trusting filesystem timestamps."""
+
+    return (receipt.created_at, receipt.directory.name)
+
+
+def resolve_receipt_directory(
+    candidate: str | Path, *, output_root: str | Path | None = None
+) -> ReceiptSelection:
+    """Return the receipt folder *candidate* names, resolving a runs root.
+
+    Operators type the runs root -- the folder ``--runs-dir`` was given -- far
+    more often than the dated receipt inside it, and the runs root holds no
+    ``run.toml`` of its own.  Accepting it silently is what produced a catalog
+    saying ``run: null`` with every cube ``unrecorded (pre-gate receipt)`` while
+    ``echelle status``, reading that same tree, reported the run completed.  So
+    the runs root is *resolved* rather than half-accepted: the receipts under it
+    that published *output_root* are the candidates, newest last.  Anything that
+    cannot be resolved raises :class:`ReceiptLookupError` naming the folder that
+    would have worked.
+    """
+
+    root = Path(candidate)
+    if (root / "run.toml").is_file():
+        return ReceiptSelection(directory=root.resolve(), published_by=(root.resolve(),))
+    if not root.is_dir():
+        raise ReceiptLookupError(
+            f"run receipt folder not found: {root} -- name the runs root passed to "
+            "`echelle process --runs-dir`, or one dated receipt folder inside it"
+        )
+    receipts: list[RunReceipt] = []
+    for manifest in sorted(root.rglob("run.toml")):
+        try:
+            receipts.append(RunReceipt.load(manifest.parent))
+        except (OSError, ValueError, KeyError):
+            continue
+    if not receipts:
+        raise ReceiptLookupError(
+            f"no run receipt under {root.resolve()}: no readable run.toml there or "
+            "anywhere below it -- name the runs root passed to "
+            "`echelle process --runs-dir`, or one dated receipt folder inside it"
+        )
+    matching = receipts
+    if output_root is not None:
+        wanted = Path(output_root).resolve()
+        normalized = os.path.normcase(str(wanted))
+        matching = [
+            receipt
+            for receipt in receipts
+            if os.path.normcase(str(receipt.output_root.resolve())) == normalized
+        ]
+        if not matching:
+            written = sorted({str(receipt.output_root) for receipt in receipts})
+            raise ReceiptLookupError(
+                f"{root.resolve()} holds {len(receipts)} run receipt(s), none of which "
+                f"wrote cubes to {wanted} -- those receipts wrote to {'; '.join(written)}"
+            )
+    ordered = sorted(matching, key=_receipt_order)
+    return ReceiptSelection(
+        directory=ordered[-1].directory,
+        published_by=tuple(receipt.directory for receipt in ordered),
+    )
 
 
 def list_run_summaries(runs_root: Path) -> list[dict[str, Any]]:

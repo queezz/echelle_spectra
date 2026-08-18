@@ -205,6 +205,7 @@ def txt_main(argv: list[str] | None = None, *, prog: str = "echelle-cube2txt") -
 
 
 def catalog_main(argv: list[str] | None = None, *, prog: str = "echelle catalog") -> int:
+    from .campaign_run import ReceiptLookupError
     from .catalog import build_drive_catalog, merge_catalogs
 
     parser = argparse.ArgumentParser(prog=prog, description="Build and merge portable cube catalogs.")
@@ -216,11 +217,20 @@ def catalog_main(argv: list[str] | None = None, *, prog: str = "echelle catalog"
         "--drive-id",
         metavar="ID",
         help=(
-            "Stable drive identity for this catalog. Default: the id announced by "
+            "Stable drive identity for this catalog. Default: the id the run "
+            "receipt recorded (see --receipt-dir), falling back to any "
             "echelle-drive-id.toml at or above the cube folder."
         ),
     )
-    build.add_argument("--receipt-dir")
+    build.add_argument(
+        "--receipt-dir",
+        metavar="DIR",
+        help=(
+            "Run receipts identifying these cubes: the runs root given to "
+            "'echelle process --runs-dir', or one dated receipt folder inside it. "
+            "Supplies the run's state, gate and stable drive id."
+        ),
+    )
     build.add_argument("--output")
     merge = commands.add_parser("merge", help="Write an all-years index.")
     merge.add_argument("catalogs", nargs="+")
@@ -253,13 +263,16 @@ def catalog_main(argv: list[str] | None = None, *, prog: str = "echelle catalog"
                 if args.output
                 else None
             )
-            path = build_drive_catalog(
-                cubes,
-                volume_label=args.volume_label,
-                drive_id=args.drive_id,
-                receipt_dir=receipts,
-                output=output,
-            )
+            try:
+                path = build_drive_catalog(
+                    cubes,
+                    volume_label=args.volume_label,
+                    drive_id=args.drive_id,
+                    receipt_dir=receipts,
+                    output=output,
+                )
+            except ReceiptLookupError as exc:
+                raise CommandError(f"{exc} {_from('--receipt-dir')}") from None
         else:
             inputs = []
             for raw in args.catalogs:

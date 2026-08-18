@@ -14,6 +14,7 @@ from .campaign_run import (
     GATE_UNRECORDED,
     RunReceipt,
     read_drive_identity,
+    resolve_receipt_directory,
     sha256_file,
 )
 
@@ -109,16 +110,36 @@ def build_drive_catalog(
     receipt_dir: str | Path | None = None,
     output: str | Path | None = None,
 ) -> Path:
-    """Write a deterministic catalog beside one drive's cubes."""
+    """Write a deterministic catalog beside one drive's cubes.
+
+    Identity crosses the input/output seam through the *receipt*, never through
+    the cube folder.  The drive announces itself with ``echelle-drive-id.toml``
+    at the root of the tree that was **read**, and cubes are written somewhere
+    else entirely, so searching around the cubes found nothing and the first
+    real end-to-end run produced a catalog with an empty ``drive_id``.  The
+    receipt already carries the id the run stored, so it is asked first; the
+    search around the cubes stays only as the answer for a catalog built with no
+    receipt at all.
+
+    *receipt_dir* may be the runs root or one dated receipt folder; see
+    :func:`~echelle_spectra.campaign_run.resolve_receipt_directory`.  It raises
+    rather than quietly cataloguing an unidentified run.
+    """
 
     root = Path(cubes_root).resolve()
     run: dict[str, Any] | None = None
-    gate = ""
-    exported: set[str] = set()
-    if receipt_dir is not None and (Path(receipt_dir) / "run.toml").is_file():
-        receipt = RunReceipt.load(Path(receipt_dir))
-        gate = receipt.gate
-        exported = receipt.exported_outputs()
+    receipt_drive_id = ""
+    # Every cube this drive's receipts published, mapped to the gate the run
+    # that published it earned.  A sampled first run and the full run behind it
+    # are different receipts, and a cube is identified by the one that wrote it.
+    gates: dict[str, str] = {}
+    if receipt_dir is not None:
+        selection = resolve_receipt_directory(receipt_dir, output_root=root)
+        receipts = [RunReceipt.load(directory) for directory in selection.published_by]
+        for published in receipts:
+            gates.update(dict.fromkeys(published.exported_outputs(), published.gate))
+        receipt = receipts[-1]
+        receipt_drive_id = receipt.drive_id
         run = {
             "id": receipt.directory.name,
             "state": receipt.state,
@@ -141,16 +162,16 @@ def build_drive_catalog(
     for path in sorted(root.rglob("*.nc")):
         relative = path.relative_to(root).as_posix()
         try:
-            records.append(
-                _cube_record(path, root, gate=gate if relative in exported else "")
-            )
+            records.append(_cube_record(path, root, gate=gates.get(relative, "")))
         except (OSError, ValueError, KeyError) as exc:
             errors.append({"path": relative, "reason": str(exc)})
+    if drive_id is None:
+        drive_id = receipt_drive_id or discover_drive_id(root)
     payload = {
         "schema": DRIVE_CATALOG_SCHEMA,
         "generated_at": datetime.now(timezone.utc).isoformat(timespec="milliseconds"),
         "volume_label": str(volume_label),
-        "drive_id": str(discover_drive_id(root) if drive_id is None else drive_id),
+        "drive_id": str(drive_id),
         "cube_root": ".",
         "run": run,
         "cubes": records,

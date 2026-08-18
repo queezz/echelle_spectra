@@ -86,7 +86,7 @@ The following fields from `Spectrum` are automatically written to SpectroCube at
 | `calibration_order_pattern_file` | order-pattern file used for extraction |
 | `wavelength_calibration_file` | wavelength lookup table used for extraction |
 | `dropped_nonfinite_wavelength_columns` | count of invalid wavelength columns dropped before export |
-| `calibration_source` | `"integrating sphere (echelle_spectra)"` (absolute modes only) |
+| `calibration_source` | absolute modes only; the library default is `"integrating sphere (echelle_spectra)"`, but the CLI writes it only when `--calibration-source` or the config's `[export] calibration_source` supplies one, and warns when an absolute run supplies neither |
 
 Registry-backed exports replace machine-local calibration paths with complete
 immutable snapshot provenance and add the four independently optional
@@ -269,8 +269,8 @@ echelle-spectrocube "$Data\shots" --units wm
 # Save to a separate output directory
 echelle-spectrocube "$Data\shots" --units wmsr -o "$Data\nc"
 
-# Preview what would happen (no files written)
-echelle-spectrocube "$Data\shots" --dry-run --verbose
+# Preview what would happen (no files written); the files found are listed
+echelle-spectrocube "$Data\shots" --dry-run
 ```
 
 ### Full option reference
@@ -295,12 +295,12 @@ echelle-spectrocube "$Data\shots" --dry-run --verbose
 | `--wavelength-medium` | `air` | Wavelength convention stored in SpectroCube metadata: `air` or `vacuum` |
 | `--wavelength-min-nm` | config/default | Inclusive low-wavelength crop bound |
 | `--wavelength-max-nm` | config/default | Inclusive high-wavelength crop bound |
-| `--calibration-source` | config/default | Absolute calibration source metadata |
+| `--calibration-source` | config/default | Free text naming the flux standard behind an absolute export; an absolute run without one warns and records no such provenance |
 | `--no-drop-nonfinite-columns` | drop enabled | Keep non-finite wavelength columns instead of dropping them |
 | `--output-suffix` | `_spectrocube` | Batch output suffix before `.nc` |
 | `--pattern` | `*.SIF` | Batch discovery glob. A plain filename pattern searches the whole source tree, skipping calibration folders (any `calibrations/`, or any folder holding a `snapshot.toml`) — every skipped folder is named in the batch header's `Skipped:` line and recorded under `pruned_dirs` in the run receipt. Junctions and symbolic links are matched where they sit but never descended into. A pattern containing `/` or `**` is used exactly as typed. Also tries `*.sif` as fallback. |
 | `--overwrite` | *(skip existing)* | Replace existing output files |
-| `--dry-run` | — | Print plan without writing |
+| `--dry-run` | — | Print the plan without writing, naming every discovered file under `Would convert:` |
 | `--verbose` | — | Per-file current-progress output |
 
 ### Output filename convention

@@ -10,7 +10,13 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from echelle_spectra import cli
-from echelle_spectra.campaign_run import RUN_SCHEMA, RunReceipt, sha256_file
+from echelle_spectra.campaign_run import (
+    RUN_SCHEMA,
+    RunReceipt,
+    new_run_directory,
+    sha256_file,
+    target_runs_root,
+)
 from echelle_spectra.snapshot import ROLE_FILENAMES, create_snapshot
 from echelle_spectra.spectrocube_cli import ExportResult, _export_one, main
 
@@ -317,6 +323,73 @@ def test_multi_drive_workers_run_concurrently_and_reconcile_status(
     assert "combined:  4/4" in shown
     assert "NIFS-A: 2/2 [completed]" in shown
     assert "NIFS-B: 2/2 [partial]" in shown
+
+
+def test_two_drives_sharing_a_folder_name_get_receipt_dirs_that_tell_them_apart(
+    tmp_path: Path,
+) -> None:
+    """`\\data` is the folder name every drive uses, so it cannot be the name."""
+
+    runs = tmp_path / "runs"
+    first = tmp_path / "drive-a" / "data"
+    second = tmp_path / "drive-b" / "data"
+    for source in (first, second):
+        source.mkdir(parents=True)
+
+    dated_a = new_run_directory(runs, first, volume_label="NIFS-A")
+    dated_b = new_run_directory(runs, second, volume_label="NIFS-B")
+    assert dated_a.name.endswith("-nifs-a-data")
+    assert dated_b.name.endswith("-nifs-b-data")
+
+    tree_a = target_runs_root(runs, first, volume_label="NIFS-A")
+    tree_b = target_runs_root(runs, second, volume_label="NIFS-B")
+    assert tree_a.name.startswith("nifs-a-data-")
+    assert tree_b.name.startswith("nifs-b-data-")
+    assert tree_a != tree_b
+
+    # A label that only repeats the folder is not doubled into `data-data`, and
+    # a target with no label at all keeps the name it always had.
+    assert new_run_directory(runs, first, volume_label="data").name.endswith("-data")
+    assert target_runs_root(runs, first).name.startswith("data-")
+
+
+def test_multi_drive_receipt_trees_are_named_for_the_drive_that_was_processed(
+    tmp_path: Path, fake_spectrocube
+) -> None:
+    drives = [tmp_path / "drive-a" / "data", tmp_path / "drive-b" / "data"]
+    for source in drives:
+        source.mkdir(parents=True)
+        _files(source, "a.SIF")
+    runs = tmp_path / "runs"
+    calls: list[str] = []
+
+    with (
+        patch("echelle_spectra.tools.loader.build_calibration", return_value=object()),
+        patch(
+            "echelle_spectra.spectrocube_cli._export_one",
+            side_effect=_successful_export(calls),
+        ),
+        pytest.raises(SystemExit) as result,
+    ):
+        main(
+            [
+                *(str(source) for source in drives),
+                "-o",
+                str(tmp_path / "cubes"),
+                "--runs-dir",
+                str(runs),
+                "--volume-label",
+                "NIFS-A",
+                "--volume-label",
+                "NIFS-B",
+            ]
+        )
+
+    assert result.value.code == 0
+    trees = sorted(path.name for path in runs.iterdir())
+    assert len(trees) == 2
+    assert trees[0].startswith("nifs-a-data-")
+    assert trees[1].startswith("nifs-b-data-")
 
 
 def test_changed_output_is_not_accepted_as_completed(tmp_path: Path) -> None:

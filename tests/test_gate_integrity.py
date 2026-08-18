@@ -34,8 +34,10 @@ from echelle_spectra.drift import (
     require_sampled_verdict,
     write_drift_evidence,
 )
+from echelle_spectra.lhd_text import TIMING_ATTR_SOURCES
 from echelle_spectra.snapshot import ROLE_FILENAMES, create_snapshot
 from echelle_spectra.spectrocube_cli import ExportResult, main
+from echelle_spectra.spectrocube_config import export_config_from_toml
 
 BASE_ID = "20250101_cmos"
 REFINED_ID = "20250101_cmos-r1"
@@ -458,7 +460,13 @@ def test_every_documented_command_parses_against_the_shipped_cli(capsys) -> None
     for guide in DOC_GUIDES:
         for command in _documented_commands((docs / guide).read_text(encoding="utf-8")):
             tokens = command.split()
-            if tokens[0] in {"-h", "--help"}:
+            if tokens[0].startswith("-"):
+                # The umbrella's own flags, answered by `echelle` itself rather
+                # than by a subcommand. They are still documented invocations,
+                # so they are run rather than skipped.
+                assert cli.main(tokens) == 0, f"{guide}: 'echelle {command}' failed"
+                capsys.readouterr()
+                checked += 1
                 continue
             assert tokens[0] in UMBRELLA_COMMANDS, f"{guide}: unknown command '{command}'"
             parts = [tokens[0]]
@@ -472,6 +480,58 @@ def test_every_documented_command_parses_against_the_shipped_cli(capsys) -> None
                 assert flag in rendered, f"{guide}: 'echelle {' '.join(parts)}' has no {flag}"
             checked += 1
     assert checked >= 15
+
+
+def test_the_documented_timing_config_reaches_a_cube_through_a_registry_run(
+    tmp_path: Path, fake_spectrocube
+) -> None:
+    """The documented loop can reach `echelle txt`, using only a file it prints.
+
+    ``trigger_delay_s`` is produced by nothing else in the loop -- no snapshot
+    carries it, no audit derives it, no processing flag supplies it -- so until
+    the guide printed this file the documented trip could not produce a cube
+    ``echelle txt`` would accept, and the missing file was one the docs never
+    mentioned.
+    """
+
+    guide = Path(__file__).resolve().parents[1] / "docs" / "operator-cheat-sheet.md"
+    blocks = [
+        block
+        for block in re.findall(r"```toml\n(.*?)```", guide.read_text(encoding="utf-8"), re.S)
+        if "trigger_delay_s" in block
+    ]
+    assert len(blocks) == 1, "the guide must print exactly one export-timing example"
+    config = tmp_path / "export-timing.toml"
+    config.write_text(blocks[0], encoding="utf-8")
+
+    # It may name nothing the registry owns, or the run refuses it as a second
+    # authority over one export.
+    settings = export_config_from_toml(config)
+    assert settings["camera"] is None
+    assert settings["calibration_dir"] is None
+    assert not settings["calibration_files"]
+    assert "trigger_delay_s" in settings["extra_attrs"]
+
+    registry, snapshots = _epoch_registry(tmp_path)
+    source = _shots(tmp_path / "shots", 1)
+
+    code = _process(
+        [
+            *_registry_argv(tmp_path, source, registry, snapshots),
+            "--config",
+            str(config),
+            "--sample",
+            "1",
+        ]
+    )
+
+    assert code == 0
+    cube = next((tmp_path / "cubes").glob("*.nc"))
+    with xr.open_dataset(cube) as opened:
+        assert float(opened.attrs["trigger_delay_s"]) > 0.0
+        assert opened.attrs["frame_time_formula"] == "trigger_delay_s + frame * frame_interval_s"
+    # And this really is the attribute the frozen header has no other source for.
+    assert "[metadata] trigger_delay_s" in TIMING_ATTR_SOURCES["trigger_delay_s"]
 
 
 def test_receipt_written_before_the_gate_still_loads_and_reports_its_silence(

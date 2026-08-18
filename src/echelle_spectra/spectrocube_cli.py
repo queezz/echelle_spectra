@@ -12,9 +12,9 @@ Batch folder (all .SIF files)::
 
     echelle-spectrocube D:\NIFS\shots --units wm -o D:\NIFS\cubes
 
-Dry run to preview what would happen::
+Dry run to preview what would happen, naming every file it found::
 
-    echelle-spectrocube D:\NIFS\shots --dry-run --verbose
+    echelle-spectrocube D:\NIFS\shots --dry-run
 
 The examples name a campaign drive the way the guides do: ``D:\NIFS`` on
 Windows, ``/Volumes/NIFS`` on macOS with forward slashes.
@@ -33,6 +33,7 @@ import os
 import sys
 import threading
 import time
+from collections.abc import Sequence
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
@@ -65,6 +66,11 @@ _DEFAULTS = {
     "wavelength_medium": "air",
     "drop_nonfinite_columns": True,
 }
+
+# Units whose cubes claim an absolute flux scale, and therefore owe a named
+# standard. Mirrors the "absolute" rows of tools.spectrocube_export._UNIT_INFO,
+# which is imported lazily because it reaches for the optional exporter.
+ABSOLUTE_UNITS = frozenset({"wm", "wmsr", "phmsr"})
 
 _ExportStatus = Literal["exported", "skipped", "dry-run", "failed"]
 _PRINT_LOCK = threading.Lock()
@@ -454,12 +460,6 @@ def _science_tree(root: Path) -> tuple[list[Path], list[Path]]:
     return searched, pruned
 
 
-def _science_directories(root: Path) -> list[Path]:
-    """List ``root`` and every folder under it that is not a calibration folder."""
-
-    return _science_tree(root)[0]
-
-
 def _pattern_is_recursive(pattern: str) -> bool:
     """Say whether a pattern is a plain filename pattern this command may walk."""
 
@@ -542,6 +542,23 @@ def _pruned_lines(pruned: tuple[Path, ...], root: Path) -> list[str]:
     return lines
 
 
+def _discovered_lines(files: Sequence[Path], root: Path) -> list[str]:
+    """Name every file a dry run would convert.
+
+    Naming them is the whole point of a dry run -- the documented step says to
+    "inspect the listed sources before allowing writes" -- yet the listing sat
+    behind ``--verbose``, so ``--dry-run`` alone printed a count and nothing to
+    inspect.  The paths are relative to the source root because a recursive walk
+    finds shots several day folders down, and the folder is what identifies
+    them.
+    """
+
+    return [
+        "Would convert:",
+        *(f"  {_display_path(path, root)}" for path in files),
+    ]
+
+
 def _no_files_message(input_path: Path, pattern: str) -> str:
     """Explain an empty discovery, including what it deliberately skipped."""
 
@@ -604,6 +621,29 @@ def _batch_header(
             ]
         ),
         target_label=target_label,
+    )
+
+
+def _warn_unattributed_absolute(settings: dict, target_label: str | None = None) -> None:
+    """Say when an absolute export is about to record no flux standard at all.
+
+    ``calibration_source`` is the one attribute naming what the absolute scale
+    was traced to, and it is written only when something supplies it.  Nothing
+    used to say so, so a whole drive could be exported in W/m2/nm/sr with the
+    provenance field simply absent, discovered only by reading a finished cube.
+    """
+
+    if str(settings.get("units", "")).lower() not in ABSOLUTE_UNITS:
+        return
+    if settings.get("calibration_source"):
+        return
+    _emit_target(
+        f"WARNING: units '{settings['units']}' are absolute but no calibration source "
+        "is named, so the cubes will not record what the absolute scale was traced "
+        "to. Pass --calibration-source, or set [export] calibration_source in the "
+        "export config.",
+        target_label=target_label,
+        stream=sys.stderr,
     )
 
 
@@ -1057,19 +1097,15 @@ def _run_batch_target(
         pruned=discovery.pruned,
         target_label=target_label,
     )
+    if args.dry_run:
+        _emit_target(
+            "\n".join(_discovered_lines(sif_files, input_path)), target_label=target_label
+        )
+    _warn_unattributed_absolute(settings, target_label)
 
     receipt = None
     if not args.dry_run:
         receipt_root = runs_root or Path(args.runs_dir)
-        if args.run_dir:
-            receipt_dir = Path(args.run_dir)
-        elif not args.new_run:
-            receipt_dir = find_resumable_run(receipt_root, input_path, out_dir, args.pattern)
-            if receipt_dir is None:
-                receipt_dir = new_run_directory(receipt_root, input_path)
-        else:
-            receipt_dir = new_run_directory(receipt_root, input_path)
-
         # First processing of this target announces the drive's stable id at its
         # root, so a later reconnection under another letter or mount point stays
         # one drive in every catalog. A resumed receipt written before the id
@@ -1081,6 +1117,23 @@ def _run_batch_target(
                 target_label=target_label,
                 stream=sys.stderr,
             )
+        # The receipt folder is named for the drive as well as the folder, so
+        # two drives whose shots both live in `\data` do not produce two
+        # receipts that read alike.
+        receipt_name_label = volume_label or identity.label
+        if args.run_dir:
+            receipt_dir = Path(args.run_dir)
+        elif not args.new_run:
+            receipt_dir = find_resumable_run(receipt_root, input_path, out_dir, args.pattern)
+            if receipt_dir is None:
+                receipt_dir = new_run_directory(
+                    receipt_root, input_path, volume_label=receipt_name_label
+                )
+        else:
+            receipt_dir = new_run_directory(
+                receipt_root, input_path, volume_label=receipt_name_label
+            )
+
         resuming = (receipt_dir / "run.toml").is_file()
         if resuming:
             receipt = RunReceipt.load(receipt_dir)
@@ -1444,7 +1497,12 @@ def _run_multi_targets(
 ) -> int:
     outputs = _multi_output_dirs(inputs, args.output)
     shared_runs_root = Path(args.runs_dir)
-    display_labels = [label or default_volume_label(source) for source, label in zip(inputs, labels)]
+    # The drive each target declares itself to be. It names that target's
+    # receipt tree, so two drives whose shots both sit in `\data` no longer get
+    # two receipt roots that read alike; the console label may be decorated
+    # further below, and must not follow it onto disk.
+    drive_labels = [label or default_volume_label(source) for source, label in zip(inputs, labels)]
+    display_labels = list(drive_labels)
     if len(set(display_labels)) != len(display_labels):
         display_labels = [
             f"{label}/{target_runs_root(Path(), source).name or index}"
@@ -1461,11 +1519,13 @@ def _run_multi_targets(
             source,
             output,
             volume_label=label,
-            runs_root=target_runs_root(shared_runs_root, source),
+            runs_root=target_runs_root(shared_runs_root, source, volume_label=drive),
             target_label=display,
             stop_event=stop_event,
         ): display
-        for source, output, label, display in zip(inputs, outputs, labels, display_labels)
+        for source, output, label, drive, display in zip(
+            inputs, outputs, labels, drive_labels, display_labels
+        )
     }
     codes: list[int] = []
     interrupted = False
@@ -1521,6 +1581,7 @@ def _run_single_file(
             input_path, input_path.parent, settings.get("output_suffix")
         )
 
+    _warn_unattributed_absolute(settings)
     cal_dir = Path(settings["calibration_dir"]) if settings.get("calibration_dir") else None
     registry: CalibrationEpochRegistry | None = settings.get("epoch_registry")
     snapshot = None

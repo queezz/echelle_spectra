@@ -161,6 +161,16 @@ all workers stop before taking another source.
 
 ## What is recorded
 
+A run directory is named for the moment it started, the drive it belongs to, and
+the folder it read: `2026-08-13_12-00-00-nifs-a-shots`. The drive is part of the
+name because the folder alone is not distinguishing — every drive keeps its
+shots in a folder with the same name, `data` most often — and two receipts both
+ending `-data` are exactly the pair that has to be told apart at the end of a
+trip. The drive part is the run's `--volume-label`, or the drive/root identity
+when no label was given, and is dropped when it would only repeat the folder
+name. In the multi-drive form the same name identifies each target's own receipt
+tree under `--runs-dir`.
+
 Each run directory contains:
 
 - `run.toml` — atomic summary containing run state, roots, volume label,
@@ -198,7 +208,7 @@ printed at interruption:
 
 ```powershell
 echelle process D:\NIFS\shots -o D:\NIFS\spectrocubes `
-  --run-dir local\runs\2026-08-13_12-00-00-shots
+  --run-dir local\runs\2026-08-13_12-00-00-nifs-a-shots
 ```
 
 Use `--new-run` when you intentionally want a separate receipt. Use
@@ -243,13 +253,25 @@ verified one. Write or refresh one by hand with the same command the run uses:
 ```powershell
 echelle catalog build D:\NIFS\spectrocubes `
   --volume-label NIFS-A `
-  --receipt-dir local\runs\2026-08-13_12-00-00-shots
+  --receipt-dir local\runs
 ```
 
 `--receipt-dir` is optional and adds the run's state, counts, calibration
-authority, and gate to the catalog. `--drive-id` is optional too: by default the
-catalog uses the id announced by the nearest `echelle-drive-id.toml` at or above
-the cube folder.
+authority, gate, and stable drive id to the catalog. It takes either the runs
+root — the folder `--runs-dir` was given, which is what an operator has at hand
+— or one dated receipt folder such as
+`local\runs\2026-08-13_12-00-00-nifs-a-shots`. Given the root, the receipts that
+wrote *these* cubes are found inside it and the newest describes the run; every
+receipt that published a cube identifies that cube, so a drive sampled before it
+was fully processed keeps the sample's gate on the cubes the sample wrote. A
+folder holding no receipt for these cubes is refused by name rather than
+producing a catalog with `run: null`.
+
+`--drive-id` is optional too. The id comes from the receipt, which is the only
+place it crosses the input/output seam: a drive announces itself with
+`echelle-drive-id.toml` at the root of the tree that is **read**, and the cubes
+are written elsewhere, so searching around the cubes finds nothing. That search
+remains only as the answer for a catalog built with no receipt at all.
 
 Merge per-drive catalogs into a durable all-years index with
 `echelle catalog merge CATALOG [CATALOG ...] -o all-years.json`. Two rules make
