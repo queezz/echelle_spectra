@@ -14,7 +14,11 @@ from __future__ import annotations
 
 import http.client
 import json
+import os
+import subprocess
+import sys
 import threading
+import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -25,7 +29,7 @@ from urllib.request import Request, urlopen
 
 import pytest
 
-from echelle_spectra import campaign_server
+from echelle_spectra import campaign_server, reading_room
 
 CATALOG_NAME = "all-years.json"
 
@@ -590,6 +594,423 @@ def test_serve_main_announces_one_real_url_and_stops_cleanly(capsys) -> None:
     runner.join(timeout=10)
     assert finished == [0]
     assert f"serving the campaign page at http://127.0.0.1:{port}" in capsys.readouterr().out
+
+
+# ---------------------------------------------------------------------------
+# Running a campaign verb from the page
+# ---------------------------------------------------------------------------
+#
+# The owner's requirement, in his words: "We can run stuff from WebUI, I want
+# that. But I don't want to corrupt data or hang the process and loose the
+# progress."  Every test below is one half of that sentence.  What is launched
+# is the same CLI verb a terminal would run, derived here and never sent by the
+# page; it is launched detached, so nothing this server does can take a night's
+# progress with it; and what the page then SAYS about it is read back off the
+# files the run leaves, never off anything this process remembers.
+
+#: A stand-in for a campaign verb: it records the argument list it was actually
+#: handed, waits for the test to let it finish, and prints on both sides of the
+#: wait so the log has something to show.
+_STUB = '''\
+import json
+import pathlib
+import sys
+import time
+
+root = pathlib.Path(__file__).with_name("stub-out")
+root.mkdir(exist_ok=True)
+(root / "argv.json").write_text(json.dumps(sys.argv[1:]), encoding="utf-8")
+print("stub is running", flush=True)
+gate = root / "go.txt"
+for _ in range(2400):
+    if gate.is_file():
+        break
+    time.sleep(0.05)
+(root / "done.txt").write_text("done", encoding="utf-8")
+print("stub has finished", flush=True)
+'''
+
+
+def _campaign(tmp_path: Path) -> Path:
+    """A campaign home with a catalog in it, ready to launch from."""
+
+    root = tmp_path / "campaign"
+    root.mkdir()
+    _catalog(root)
+    home = root / "campaign.toml"
+    home.write_text(f'catalog = "{CATALOG_NAME}"\noutput = "campaign-page"\n', encoding="utf-8")
+    return home
+
+
+def _shots(tmp_path: Path) -> Path:
+    """A data folder that exists, which is all the endpoint asks of one."""
+
+    folder = tmp_path / "shots"
+    folder.mkdir()
+    (folder / "one.SIF").write_bytes(b"")
+    return folder
+
+
+def _install_stub(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Point the launcher at the stub and return where the stub reports."""
+
+    stub = tmp_path / "stub_verb.py"
+    stub.write_text(_STUB, encoding="utf-8")
+    monkeypatch.setattr(campaign_server, "LAUNCH_PREFIX", (sys.executable, str(stub)))
+    return stub.with_name("stub-out")
+
+
+def _wait_for(predicate: Any, seconds: float = 30.0) -> bool:
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        if predicate():
+            return True
+        time.sleep(0.05)
+    return predicate()
+
+
+def _expected_argv(home: Path, verb: str, folder: Path, epoch: str = "") -> tuple[list[str], str]:
+    """Derive the argument list the page's own composer would, independently."""
+
+    values = dict(campaign_server.home_values(home))
+    composition = reading_room.campaign_composition(
+        values["catalog"], **campaign_server.campaign_keywords(values)
+    )
+    composed = reading_room.with_answers(
+        composition["values"],
+        folder=str(folder.resolve()),
+        epoch=epoch,
+        evidence_name=composition["evidence_name"],
+    )
+    return reading_room.run_argv(verb, composed), reading_room.run_command(verb, composed)
+
+
+def test_a_run_launches_the_derived_argument_list_and_nothing_else(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The whole safety property in one test: the page names a verb, and this
+    machine composes the command from the campaign's own files."""
+
+    home = _campaign(tmp_path)
+    shots = _shots(tmp_path)
+    out = _install_stub(tmp_path, monkeypatch)
+    out.mkdir(exist_ok=True)
+    (out / "go.txt").write_text("go", encoding="utf-8")
+
+    with _serve(home) as client:
+        answer = client.post("/api/run", {"verb": "sample", "folder": str(shots), "epoch": ""})
+    marker = answer["launched"]
+
+    argv, command = _expected_argv(home, "sample", shots)
+    assert marker["argv"] == argv
+    assert marker["command"] == command
+    assert marker["verb"] == "sample"
+    assert marker["args_sha256"] and marker["pid"] > 0 and marker["started_at"]
+
+    # The child really was handed that list -- not a shell string, not a copy.
+    assert _wait_for(lambda: (out / "argv.json").is_file())
+    assert json.loads((out / "argv.json").read_text(encoding="utf-8")) == argv
+
+    # The marker and the log sit in the campaign's runs area, beside the
+    # receipts, and the marker on disk is the one that was answered with.
+    launches = campaign_server.launches_root(home)
+    assert launches == home.parent / "local" / "runs" / "launches"
+    on_disk = campaign_server.read_marker(campaign_server.marker_path(home, "sample", shots))
+    assert on_disk == marker
+    assert Path(marker["log"]).parent == launches
+    assert _wait_for(lambda: "stub is running" in Path(marker["log"]).read_text(encoding="utf-8"))
+
+
+def test_the_run_endpoint_reads_a_verb_name_and_never_a_command(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An endpoint that reads a flag list runs whatever another tab decided."""
+
+    home = _campaign(tmp_path)
+    shots = _shots(tmp_path)
+    _install_stub(tmp_path, monkeypatch)
+
+    with _serve(home) as client:
+        for payload, expected in (
+            ({"verb": "frobnicate", "folder": str(shots)}, "is not a verb this page can run"),
+            ({"verb": "", "folder": str(shots)}, "is not a verb this page can run"),
+            ({"verb": ["sample"], "folder": str(shots)}, "is not a verb this page can run"),
+            (
+                {"verb": "sample", "folder": str(shots), "args": ["--force"]},
+                "never args",
+            ),
+            (
+                {"verb": "sample", "folder": str(shots), "command": "del /s /q C:\\"},
+                "never command",
+            ),
+            ({"verb": "sample"}, "no data folder was named"),
+            ({"verb": "sample", "folder": str(tmp_path / "gone")}, "not a readable folder"),
+            (
+                {"verb": "sample", "folder": str(shots), "epoch": "never-saved"},
+                "knows no calibration named never-saved",
+            ),
+        ):
+            with pytest.raises(HTTPError) as raised:
+                client.post("/api/run", payload)
+            assert raised.value.code == 400
+            message = _error_of(raised.value)["error"]
+            assert expected in message and "\n" not in message
+        # The refused verb list is stated once, and it is the allowlist itself.
+        with pytest.raises(HTTPError) as raised:
+            client.post("/api/run", {"verb": "nope", "folder": str(shots)})
+        assert "audit, bulk, sample" in _error_of(raised.value)["error"]
+
+    assert not campaign_server.launches_root(home).exists(), "a refused request launched something"
+
+
+def test_running_needs_a_campaign_home_to_launch_into(
+    client: _Client, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    shots = _shots(tmp_path)
+    _install_stub(tmp_path, monkeypatch)
+    with pytest.raises(HTTPError) as raised:
+        client.post("/api/run", {"verb": "sample", "folder": str(shots)})
+    assert raised.value.code == 400
+    assert "no campaign home yet" in _error_of(raised.value)["error"]
+
+
+def test_a_run_from_a_foreign_origin_is_refused_and_starts_nothing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The same boundary the write side has: loopback stops a second machine,
+    the Host and Origin check stops a second tab."""
+
+    home = _campaign(tmp_path)
+    shots = _shots(tmp_path)
+    _install_stub(tmp_path, monkeypatch)
+
+    with _serve(home) as client:
+        status, body = client.raw(
+            "POST",
+            "/api/run",
+            headers={
+                "Host": f"127.0.0.1:{client.server.port}",
+                "Origin": "http://evil.example",
+                "Content-Type": "application/json",
+            },
+            body=_post_bytes({"verb": "sample", "folder": str(shots)}),
+        )
+        assert status == 403
+        assert "127.0.0.1" in json.loads(body)["error"]
+        status, _ = client.raw(
+            "POST",
+            "/api/run",
+            headers={"Host": "campaign.evil.example", "Content-Type": "application/json"},
+            body=_post_bytes({"verb": "sample", "folder": str(shots)}),
+        )
+        assert status == 403
+    assert not campaign_server.launches_root(home).exists()
+
+
+def test_two_clicks_do_not_double_launch_and_the_refusal_names_the_running_one(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    home = _campaign(tmp_path)
+    shots = _shots(tmp_path)
+    out = _install_stub(tmp_path, monkeypatch)
+
+    with _serve(home) as client:
+        first = client.post("/api/run", {"verb": "sample", "folder": str(shots)})["launched"]
+        assert _wait_for(lambda: (out / "argv.json").is_file())
+
+        with pytest.raises(HTTPError) as raised:
+            client.post("/api/run", {"verb": "sample", "folder": str(shots)})
+        assert raised.value.code == 409
+        line = _error_of(raised.value)["error"]
+        assert line.startswith("sample is already running on")
+        assert f"pid {first['pid']}" in line and "\n" not in line
+
+        # A different verb on the same folder is a different run, not a clash.
+        second = client.post("/api/run", {"verb": "audit", "folder": str(shots)})["launched"]
+        assert second["pid"] != first["pid"]
+
+        # Once it is gone, the same verb may run again.
+        (out / "go.txt").write_text("go", encoding="utf-8")
+        assert _wait_for(lambda: not campaign_server.pid_alive(int(first["pid"])))
+        again = client.post("/api/run", {"verb": "sample", "folder": str(shots)})["launched"]
+        assert again["pid"] != first["pid"]
+
+
+def test_a_launched_run_outlives_the_server_that_started_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The owner's actual fear, tested: the page and the server going away must
+    not take the run -- or the night's progress -- with them."""
+
+    home = _campaign(tmp_path)
+    shots = _shots(tmp_path)
+    out = _install_stub(tmp_path, monkeypatch)
+
+    with _serve(home) as client:
+        marker = client.post("/api/run", {"verb": "sample", "folder": str(shots)})["launched"]
+        assert _wait_for(lambda: (out / "argv.json").is_file())
+        assert campaign_server.pid_alive(int(marker["pid"]))
+    # _serve has now shut the server down and closed its socket; the child was
+    # still waiting when it did, and is released only afterwards.
+    assert campaign_server.pid_alive(int(marker["pid"])), "the server took its run with it"
+    (out / "go.txt").write_text("go", encoding="utf-8")
+    assert _wait_for(lambda: (out / "done.txt").is_file()), "the run never finished"
+
+
+def test_a_fresh_server_reads_the_run_state_off_the_files_alone(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """No state is held here, so a restarted server -- or a second tab, or a run
+    started in a terminal -- reads exactly the same."""
+
+    home = _campaign(tmp_path)
+    shots = _shots(tmp_path)
+    out = _install_stub(tmp_path, monkeypatch)
+
+    with _serve(home) as client:
+        marker = client.post("/api/run", {"verb": "sample", "folder": str(shots)})["launched"]
+        assert _wait_for(lambda: (out / "argv.json").is_file())
+
+    with _serve(home) as client:
+        page = client.get("/")[1]
+        assert f"pid {marker['pid']}" in page
+        assert 'data-run="sample" disabled' in page
+    (out / "go.txt").write_text("go", encoding="utf-8")
+    assert _wait_for(lambda: not campaign_server.pid_alive(int(marker["pid"])))
+
+
+def test_the_card_states_running_finished_and_failed_from_the_files(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Four states, none inferred from a neighbour: a process that is gone
+    without a receipt is failed and shows its log, never a quiet finished."""
+
+    from echelle_spectra.campaign_run import RunReceipt
+
+    home = _campaign(tmp_path)
+    shots = _shots(tmp_path)
+    out = _install_stub(tmp_path, monkeypatch)
+
+    idle = campaign_server.run_states(home, plan=home.parent / "campaign-plan.toml")
+    assert idle["sample"]["state"] == "idle"
+    # The bulk step states the one fact that decides whether it can run at all.
+    assert "campaign-plan.toml is not saved" in idle["bulk"]["line"]
+
+    with _serve(home) as client:
+        marker = client.post("/api/run", {"verb": "sample", "folder": str(shots)})["launched"]
+        assert _wait_for(lambda: (out / "argv.json").is_file())
+        running = campaign_server.run_states(home)["sample"]
+        assert running["state"] == "running"
+        assert str(shots) in running["line"] and f"pid {marker['pid']}" in running["line"]
+
+        (out / "go.txt").write_text("go", encoding="utf-8")
+        assert _wait_for(lambda: not campaign_server.pid_alive(int(marker["pid"])))
+
+        # Gone, and it left no receipt: that is failed, with the log to read.
+        failed = campaign_server.run_states(home)["sample"]
+        assert failed["state"] == "failed"
+        assert "left no receipt" in failed["line"]
+        assert "stub is running" in failed["tail"]
+
+        # The receipt the real verb would have written turns it into finished.
+        receipt = RunReceipt.create(
+            campaign_server.runs_root(home) / "2026-08-19_00-00-00-shots",
+            source_root=shots,
+            output_root=shots,
+            pattern="*.SIF",
+            volume_label="shots",
+            snapshot_id="20250926_cmos",
+            expected_files=1,
+        )
+        receipt.finish("completed")
+        finished = campaign_server.run_states(home)["sample"]
+        assert finished["state"] == "finished"
+        assert "receipt 2026-08-19_00-00-00-shots [completed]" in finished["line"]
+        assert finished["tail"] == ""
+
+
+def test_an_audit_reports_the_immutable_evidence_it_named(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An audit's durable receipt is the verdict file, so that is what is read."""
+
+    home = _campaign(tmp_path)
+    shots = _shots(tmp_path)
+    out = _install_stub(tmp_path, monkeypatch)
+    out.mkdir(exist_ok=True)
+    (out / "go.txt").write_text("go", encoding="utf-8")
+
+    with _serve(home) as client:
+        marker = client.post("/api/run", {"verb": "audit", "folder": str(shots)})["launched"]
+    assert _wait_for(lambda: not campaign_server.pid_alive(int(marker["pid"])))
+
+    evidence = Path(marker["evidence"])
+    assert evidence.name == "drift-evidence-001.json"
+    assert campaign_server.run_states(home)["audit"]["state"] == "failed"
+    evidence.write_text(json.dumps({"verdict": "aligned"}), encoding="utf-8")
+    state = campaign_server.run_states(home)["audit"]
+    assert state["state"] == "finished"
+    assert "verdict aligned in drift-evidence-001.json" in state["line"]
+
+
+def test_the_launch_is_detached_with_no_console_and_nothing_to_answer(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seen: dict[str, Any] = {}
+
+    class _Recorded:
+        def __init__(self, argv: list[str], **keywords: Any) -> None:
+            seen["argv"] = argv
+            seen["keywords"] = keywords
+            self.pid = 4242
+
+    monkeypatch.setattr(campaign_server.subprocess, "Popen", _Recorded)
+    log = tmp_path / "local" / "runs" / "launches" / "sample-1234.log"
+    assert campaign_server.spawn_detached(["a", "b"], cwd=tmp_path, log=log) == 4242
+
+    keywords = seen["keywords"]
+    assert seen["argv"] == ["a", "b"]
+    assert keywords["cwd"] == str(tmp_path)
+    # A batch run that stops to ask a question nobody can answer is a hang.
+    assert keywords["stdin"] == subprocess.DEVNULL
+    assert keywords["stderr"] == subprocess.STDOUT
+    if os.name == "nt":
+        flags = keywords["creationflags"]
+        assert flags & subprocess.DETACHED_PROCESS
+        assert flags & subprocess.CREATE_NEW_PROCESS_GROUP
+    else:  # pragma: no cover - this campaign runs on Windows
+        assert keywords["start_new_session"] is True
+    # The log is appended to, and says what was launched into it.
+    assert "launching: a b" in log.read_text(encoding="utf-8")
+
+
+def test_asking_whether_a_run_is_alive_never_ends_it() -> None:
+    """On Windows ``os.kill`` terminates rather than probes; a liveness check
+    that can end the run it asks about would be the exact failure to avoid."""
+
+    child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+    try:
+        for _ in range(3):
+            assert campaign_server.pid_alive(child.pid)
+        assert child.poll() is None, "asking cost the run its life"
+    finally:
+        child.terminate()
+        child.wait(timeout=30)
+    assert not campaign_server.pid_alive(child.pid)
+    assert not campaign_server.pid_alive(0) and not campaign_server.pid_alive(-1)
+
+
+def test_the_page_offers_no_way_to_stop_a_run(tmp_path: Path) -> None:
+    """Launching is the whole grant: a page that can end a terabyte conversion
+    halfway is a page that can lose a night's progress."""
+
+    home = _campaign(tmp_path)
+    with _serve(home) as client:
+        with pytest.raises(HTTPError) as raised:
+            client.post("/api/stop", {"pid": 1})
+        assert raised.value.code == 404
+    assert not hasattr(campaign_server, "stop_run")
+    assert not hasattr(campaign_server, "kill_run")
 
 
 def test_the_cli_dispatches_serve(monkeypatch: pytest.MonkeyPatch) -> None:

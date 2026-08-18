@@ -361,10 +361,17 @@ central_index = "{{catalog}}"
 """
 
 #: The sequence in campaign order: sample, check the alignment, then convert in
-#: bulk.  The order the rows are read in is the order the work runs in, and the
-#: bench stays after them as the calibration aside rather than a fourth step.
-COMMAND_TEMPLATES = (
+#: bulk.  Each is written as the ARGUMENT LIST ``echelle`` is handed, never as a
+#: command string: a list has no shell to quote for, no place for a second
+#: command to hide, and it is the same thing whether it is rendered into a
+#: command row for a person to copy or handed straight to the operating system
+#: by the served page's Run control.  One table, so the two can never drift.
+#:
+#: A token holding ``{{...}}`` is a value the composer derives; every other
+#: token is a literal this file fixes and no request may supply.
+RUN_VERBS = (
     {
+        "verb": "sample",
         "id": "cmd-sample",
         "title": "1. Sample this data folder",
         "meaning": (
@@ -373,18 +380,25 @@ COMMAND_TEMPLATES = (
             "derived from what the folder holds, and every cube it writes is marked an "
             "unverified sample."
         ),
-        "powershell": (
-            'echelle process "{{input}}" -o "{{output}}" --registry "{{registry}}" '
-            '--calibrations "{{calibrations}}" --sample auto --volume-label "{{label}}" '
-            '--central-index "{{catalog}}"'
-        ),
-        "posix": (
-            'echelle process "{{input}}" -o "{{output}}" --registry "{{registry}}" '
-            '--calibrations "{{calibrations}}" --sample auto --volume-label "{{label}}" '
-            '--central-index "{{catalog}}"'
+        "argv": (
+            "process",
+            "{{input}}",
+            "-o",
+            "{{output}}",
+            "--registry",
+            "{{registry}}",
+            "--calibrations",
+            "{{calibrations}}",
+            "--sample",
+            "auto",
+            "--volume-label",
+            "{{label}}",
+            "--central-index",
+            "{{catalog}}",
         ),
     },
     {
+        "verb": "audit",
         "id": "cmd-audit",
         "title": "2. Check the wavelength alignment",
         "meaning": (
@@ -393,16 +407,20 @@ COMMAND_TEMPLATES = (
             "file. The name is the next free one, so an audit never overwrites evidence "
             "already on the drive."
         ),
-        "powershell": (
-            'echelle drift audit "{{output}}" --catalog "{{catalog}}" '
-            '--calibrations "{{calibrations}}" -o "{{verdict}}"'
-        ),
-        "posix": (
-            'echelle drift audit "{{output}}" --catalog "{{catalog}}" '
-            '--calibrations "{{calibrations}}" -o "{{verdict}}"'
+        "argv": (
+            "drift",
+            "audit",
+            "{{output}}",
+            "--catalog",
+            "{{catalog}}",
+            "--calibrations",
+            "{{calibrations}}",
+            "-o",
+            "{{verdict}}",
         ),
     },
     {
+        "verb": "bulk",
         "id": "cmd-process",
         "title": "3. Generate cubes from the whole folder",
         "meaning": (
@@ -411,10 +429,45 @@ COMMAND_TEMPLATES = (
             "file names it beside the input, the output, the registry and the snapshot "
             "root, so one resumable receipt records what authorized the run."
         ),
-        "powershell": 'echelle process --plan "{{plan}}"',
-        "posix": 'echelle process --plan "{{plan}}"',
+        "argv": ("process", "--plan", "{{plan}}"),
     },
+)
+
+#: One verb name to its argument list, and one to the command row it is shown
+#: beside.  A verb absent from these is not launchable, which is the whole
+#: allowlist: there is no other way in.
+RUN_ARGV = {str(spec["verb"]): tuple(spec["argv"]) for spec in RUN_VERBS}
+RUN_ROWS = {str(spec["verb"]): str(spec["id"]) for spec in RUN_VERBS}
+
+
+def _command_text(argv: tuple[str, ...]) -> str:
+    """Write one argument list back as the command row a person copies.
+
+    A derived value is quoted because a real path holds spaces; a literal flag
+    is not, because quoting one would only make the row harder to read.
+    """
+
+    return "echelle " + " ".join(
+        f'"{token}"' if "{{" in token else token for token in argv
+    )
+
+
+COMMAND_TEMPLATES = (
+    *(
+        {
+            "id": spec["id"],
+            "title": spec["title"],
+            "meaning": spec["meaning"],
+            # Both shells read the same command; only the paths inside it are
+            # written differently, and _fill does that per shell.
+            "powershell": _command_text(tuple(spec["argv"])),
+            "posix": _command_text(tuple(spec["argv"])),
+        }
+        for spec in RUN_VERBS
+    ),
     {
+        # The bench is a second program and a window a person watches, never a
+        # batch verb, so it carries no Run control and stays a literal row.
         "id": "cmd-bench",
         "title": "Calibration aside — check the snapshot by eye",
         "meaning": (
@@ -430,10 +483,18 @@ COMMAND_TEMPLATES = (
 SHELL_NAMES = (("powershell", "PowerShell"), ("posix", "POSIX shell"))
 
 
+#: The third "shell": no shell at all.  An argv element is handed to the
+#: operating system exactly as it was derived, so nothing rewrites a separator
+#: on the one path that is about to be opened for real.
+NATIVE = "native"
+
+
 def _shell_path(shell: str, value: str) -> str:
     """Write one value in the path shape the named shell reads."""
 
     text = str(value)
+    if shell == NATIVE:
+        return text
     return text.replace("/", "\\") if shell == "powershell" else text.replace("\\", "/")
 
 
@@ -453,6 +514,10 @@ def _posix(path: str | Path) -> str:
 #: from it renders as this marker: visibly unfilled, never an invented path and
 #: never a drive letter this build has not seen.
 UNFILLED_FOLDER = "<data folder>"
+
+#: The plan file the bulk step reads, named relative to the campaign home so a
+#: launch and a pasted command resolve it to the same file.
+PLAN_NAME = "campaign-plan.toml"
 
 _EVIDENCE_NUMBER = re.compile(r"drift-evidence-(\d+)\.json$", re.IGNORECASE)
 
@@ -537,10 +602,59 @@ def _composer_values(
         "registry": registry.get("path") or "calibration_registry.toml",
         "calibrations": registry.get("calibrations") or "calibrations",
         "catalog": _posix(catalog_path),
-        "plan": "campaign-plan.toml",
+        "plan": PLAN_NAME,
         "epoch": epoch,
         "epoch_clause": _epoch_clause(epoch),
     }
+
+
+def with_answers(
+    values: dict[str, str], *, folder: str, epoch: str, evidence_name: str
+) -> dict[str, str]:
+    """Fold the page's two answers into one composed value set.
+
+    This is the Python half of ``composerValues()`` in the page's own
+    JavaScript, minus the Advanced fold: the data folder and the calibration are
+    the only two facts a person holds, and everything else follows from them
+    through :func:`_derived_from_folder` and :func:`_epoch_clause` -- the same
+    two functions the page build and the browser already share.
+
+    The served Run control composes through here rather than through the
+    browser, so what a request can decide is exactly those two answers; every
+    other value stays the campaign's own.
+    """
+
+    filled = dict(values)
+    filled.update(_derived_from_folder(folder, evidence_name))
+    # The page's own last line before it fills a template, kept here too: the
+    # cubes a step reads are the cubes the previous step wrote.
+    filled["cubes"] = filled["output"]
+    chosen = str(epoch or "").strip()
+    filled["epoch"] = chosen
+    filled["epoch_clause"] = _epoch_clause(chosen)
+    return filled
+
+
+def run_argv(verb: str, values: dict[str, str]) -> list[str]:
+    """The argument list one allowlisted verb runs as, filled from *values*.
+
+    ``KeyError`` for anything not in :data:`RUN_ARGV` is the allowlist itself:
+    there is no path from a name to a command except through that table, so a
+    verb nobody wrote down cannot be spelled into existence by a request.
+    """
+
+    return [_fill(token, values, NATIVE) for token in RUN_ARGV[verb]]
+
+
+def run_command(verb: str, values: dict[str, str], shell: str = "posix") -> str:
+    """The command row this verb's Run control sits beside, filled the same way.
+
+    The page renders that row from ``COMMAND_TEMPLATES``, which is itself built
+    out of :data:`RUN_ARGV` by :func:`_command_text`, so this is the same string
+    the reader can copy -- not a second rendering of it.
+    """
+
+    return _fill(_command_text(RUN_ARGV[verb]), values, shell)
 
 
 # ---------------------------------------------------------------------------
@@ -1447,7 +1561,9 @@ def _command_block(identifier: str, shell: str, name: str, command: str) -> str:
     )
 
 
-def _command_row(identifier: str, title: str, meaning: str, shapes: dict[str, str]) -> str:
+def _command_row(
+    identifier: str, title: str, meaning: str, shapes: dict[str, str], *, extra: str = ""
+) -> str:
     blocks = "".join(
         _command_block(identifier, shell, name, shapes[shell])
         for shell, name in SHELL_NAMES
@@ -1456,16 +1572,79 @@ def _command_row(identifier: str, title: str, meaning: str, shapes: dict[str, st
     return (
         f'<article class="cmd" id="{_e(identifier)}">'
         f'<p class="cmd-meaning"><strong>{_e(title)}</strong> — {_e(meaning)}</p>'
-        f"{blocks}</article>"
+        f"{blocks}{extra}</article>"
     )
 
 
-def _composed_commands(values: dict[str, str]) -> str:
+#: Which command row each launchable verb is shown beside.  Copying the command
+#: stays the first control in the row; the Run button joins it rather than
+#: replacing it, because the terminal is still the documented way to spend a
+#: night converting a terabyte.
+_VERB_OF_ROW = {identifier: verb for verb, identifier in RUN_ROWS.items()}
+
+RUN_RUNNING = "running"
+RUN_FINISHED = "finished"
+RUN_FAILED = "failed"
+RUN_IDLE = "idle"
+
+_RUN_CLASSES = {
+    RUN_RUNNING: "run-state--running",
+    RUN_FINISHED: "run-state--finished",
+    RUN_FAILED: "run-state--failed",
+    RUN_IDLE: "run-state--idle",
+}
+
+
+def _run_control(verb: str, launch: dict[str, Any] | None) -> str:
+    """One Run button and the one line the files on disk record beside it.
+
+    Nothing here is remembered between page builds: the state rendered is read
+    back out of the launch marker, the receipt and the log every time the page
+    is served, so a run started from a terminal, from another tab, or before
+    this server was last restarted reads the same.
+    """
+
+    record = launch or {}
+    state = str(record.get("state") or RUN_IDLE)
+    line = str(record.get("line") or "Nothing in flight.")
+    tail = str(record.get("tail") or "")
+    # A button that would be refused the moment it is pressed does not look
+    # pressable; the server still refuses, because this page reflects and the
+    # CLI decides.
+    disabled = " disabled" if state == RUN_RUNNING else ""
+    rendered = (
+        '<p class="run-row">'
+        f'<button type="button" class="run" data-run="{_e(verb)}"{disabled}>'
+        "Run on this machine</button>"
+        f'<span class="run-state {_RUN_CLASSES.get(state, _RUN_CLASSES[RUN_IDLE])}">'
+        f"{_e(line)}</span></p>"
+    )
+    if tail:
+        rendered += f'<pre class="run-tail">{_e(tail)}</pre>'
+    return rendered
+
+
+def _composed_commands(
+    values: dict[str, str], launches: dict[str, Any] | None = None
+) -> str:
     rows = []
     for template in COMMAND_TEMPLATES:
         shapes = {shell: _fill(template[shell], values, shell) for shell, _ in SHELL_NAMES}
+        identifier = str(template["id"])
+        verb = _VERB_OF_ROW.get(identifier, "")
+        extra = (
+            _run_control(verb, launches.get(verb))
+            if launches is not None and verb
+            else ""
+        )
         rows.append(
-            _command_row(str(template["id"]), str(template["title"]), str(template["meaning"]), shapes)
+            _command_row(
+                identifier,
+                str(template["title"]),
+                str(template["meaning"]),
+                shapes,
+                extra=extra,
+            )
         )
     return "".join(rows)
 
@@ -2868,6 +3047,11 @@ BROWSE_ENDPOINT = "/api/browse?path="
 #: The one relative endpoint that writes a campaign home.
 HOME_ENDPOINT = "/api/home"
 
+#: The one relative endpoint that launches a campaign verb.  What crosses it is
+#: a verb NAME out of :data:`RUN_ARGV` and the composer's two answers -- never a
+#: command, a flag, or an argument list this page assembled.
+RUN_ENDPOINT = "/api/run"
+
 _PICKER_CSS = """
 /* Served only. A stable gutter is declared before anything can lock the page,
    so opening the dialog cannot shift the layout -- or a rail -- sideways. */
@@ -3095,6 +3279,77 @@ document.addEventListener('click', function (event) {
 });
 """
 
+#: Served only, and only where a campaign home exists to launch into.  The Run
+#: control joins the copy row instead of replacing it -- the terminal stays the
+#: documented way to spend a night converting a terabyte -- and keeps one
+#: position whether a run is in flight or not.
+_RUN_CSS = """
+.run-row { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap;
+           margin: .45rem 0 .2rem; }
+.run-state { font-size: .9rem; overflow-wrap: anywhere; }
+.run-state--idle { color: var(--muted); }
+.run-state--running { color: var(--accent); }
+.run-state--finished { color: var(--good); }
+.run-state--failed { color: var(--bad); }
+.run-tail { margin: .2rem 0 .5rem; padding: .5rem .6rem; background: var(--raised);
+            border: 1px solid var(--line); border-radius: .35rem; overflow-x: auto;
+            white-space: pre-wrap; font-size: .82rem;
+            font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+"""
+
+#: The Run control's own wiring: a verb name and the composer's two answers go
+#: out, and the page reloads so what it shows is what the files say -- there is
+#: no stream to watch, and no state held anywhere but on disk.
+_RUN_JS = (
+    """
+var RUN_POST = '"""
+    + RUN_ENDPOINT
+    + """';
+
+function runSay(button, message) {
+  var box = button.parentNode ? button.parentNode.querySelector('.run-state') : null;
+  if (box) { box.textContent = message; }
+}
+
+function runVerb(button) {
+  var folder = byId('f-input');
+  var epoch = byId('f-epoch');
+  button.disabled = true;
+  runSay(button, 'launching …');
+  fetch(RUN_POST, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      verb: button.getAttribute('data-run'),
+      folder: folder ? folder.value.trim() : '',
+      epoch: epoch ? epoch.value : ''
+    })
+  }).then(function (response) {
+    return response.json().then(function (payload) {
+      return { ok: response.ok, payload: payload };
+    });
+  }).then(function (answer) {
+    if (!answer.ok || answer.payload.error) {
+      /* One plain line, where the press was, and the button comes back. */
+      runSay(button, String(answer.payload.error || 'This machine refused the run.'));
+      button.disabled = false;
+      return;
+    }
+    window.location.reload();
+  }, function () {
+    runSay(button, 'This machine did not answer, so nothing was launched.');
+    button.disabled = false;
+  });
+}
+
+document.addEventListener('click', function (event) {
+  if (!event.target || !event.target.closest) { return; }
+  var run = event.target.closest('.run');
+  if (run && !run.disabled) { runVerb(run); }
+});
+"""
+)
+
 #: The setup page's own wiring: the chosen folder becomes the campaign home.
 _SETUP_JS = (
     """
@@ -3194,7 +3449,16 @@ def _now_view(context: dict[str, Any]) -> str:
             "<h3>Plan TOML</h3>",
             f'<textarea class="plan-out" id="plan-out" spellcheck="false">{_e(plan_text)}</textarea>',
             "<h3>Commands, in campaign order</h3>",
-            _composed_commands(context["data"]["values"]),
+            # The one place the Run control is explained, for all three of them:
+            # a sentence repeated on every card is a textbook, not a page.
+            (
+                '<p class="note">Run launches this same command as its own process — it '
+                "survives this tab and this server — composed from the data folder and the "
+                "calibration alone, never from the Advanced fold.</p>"
+                if context.get("launches") is not None
+                else ""
+            ),
+            _composed_commands(context["data"]["values"], context.get("launches")),
             "</section>",
         ]
     )
@@ -3309,16 +3573,28 @@ def _page(context: dict[str, Any]) -> str:
     # piece below is the empty string and the file is the static build's own
     # bytes, down to the banner sentence.
     served = bool(context.get("served"))
-    picker_css = _PICKER_CSS if served else ""
+    # The run surface is narrower than the served surface: it needs a campaign
+    # home to launch into, so a served build handed none simply has no Run
+    # control and says nothing about running.
+    runnable = context.get("launches") is not None
+    picker_css = _PICKER_CSS + (_RUN_CSS if runnable else "") if served else ""
     picker_markup = _PICKER_MARKUP if served else ""
-    served_js = (_PICKER_JS + _SERVED_JS) if served else ""
-    tagline = (
-        "Served from this machine. This page never executes commands and never starts a "
-        "worker; Browse asks this local server which folders exist."
-        if served
-        else "Read-only. This page never executes commands, never starts a "
-        "worker, and fetches nothing."
-    )
+    served_js = (_PICKER_JS + _SERVED_JS + (_RUN_JS if runnable else "")) if served else ""
+    if runnable:
+        tagline = (
+            "Served from this machine. Run starts one of these same commands as its own "
+            "process here; nothing is processed inside this page."
+        )
+    elif served:
+        tagline = (
+            "Served from this machine. This page never executes commands and never starts a "
+            "worker; Browse asks this local server which folders exist."
+        )
+    else:
+        tagline = (
+            "Read-only. This page never executes commands, never starts a "
+            "worker, and fetches nothing."
+        )
     return (
         "<!doctype html>\n"
         '<html lang="en"><head><meta charset="utf-8">'
@@ -3618,6 +3894,59 @@ def _registry_context(
     }
 
 
+def campaign_composition(
+    catalog_path: str | Path,
+    *,
+    drift_paths: tuple[str | Path, ...] | list[str | Path] = (),
+    registry_path: str | Path | None = None,
+    calibrations_root: str | Path | None = None,
+    compose_catalog_path: str | Path | None = None,
+) -> dict[str, Any]:
+    """Read one campaign's files once and return everything composed from them.
+
+    :func:`build_reading_room` fills the page's rail, plan and command rows from
+    this; the served Run control fills the argument list it launches from the
+    same call, over the same files, read in the same order.  That is the whole
+    reason it is a function rather than a paragraph inside the builder: the
+    command a person copies and the command this machine launches have exactly
+    one derivation between them.
+    """
+
+    composed_catalog = catalog_path if compose_catalog_path is None else compose_catalog_path
+    loaded = load_catalog(catalog_path)
+    catalog = _refresh_availability(loaded)
+    sources = catalog.get("sources", [])
+    drift = [
+        {"path": _posix(path), "evidence": json.loads(Path(path).read_text(encoding="utf-8"))}
+        for path in drift_paths
+    ]
+    registry = _registry_context(registry_path, calibrations_root)
+    rows = _rows_from(sources)
+    epochs = list(
+        dict.fromkeys(
+            [*registry["epochs"], *[str(row.get("snapshot_id") or "") for row in rows]]
+        )
+    )
+    epochs = [epoch for epoch in epochs if epoch]
+    evidence_name = _next_evidence_name(drift)
+    return {
+        "catalog_path": _posix(composed_catalog),
+        "merged": loaded.get("schema") == "echelle-merged-catalog/v1",
+        "sources": sources,
+        "rows": rows,
+        "drift": drift,
+        "registry": registry,
+        "epochs": epochs,
+        "evidence_name": evidence_name,
+        "values": _composer_values(
+            catalog_path=composed_catalog,
+            registry=registry,
+            evidence_name=evidence_name,
+            epochs=epochs,
+        ),
+    }
+
+
 def build_reading_room(
     catalog_path: str | Path,
     output_dir: str | Path,
@@ -3628,6 +3957,7 @@ def build_reading_room(
     calibrations_root: str | Path | None = None,
     served: bool = False,
     compose_catalog_path: str | Path | None = None,
+    launches: dict[str, Any] | None = None,
 ) -> Path:
     """Build one page; no worker or command execution surface exists either way.
 
@@ -3651,32 +3981,30 @@ def build_reading_room(
     Composing against that scaffolding would hand the operator a first command
     that writes the campaign's central index into a temporary folder the
     campaign then never reads, so composition names the configured path.
+
+    ``launches`` is what the campaign's own launch markers, receipts and logs
+    say about each runnable verb right now, keyed by verb name.  Supplying it
+    (served only) is what puts a Run control beside each command row; the state
+    it renders is read off those files on every build and remembered nowhere, so
+    a run started from a terminal reads exactly like a run started from here.
     """
 
-    composed_catalog = catalog_path if compose_catalog_path is None else compose_catalog_path
-    loaded = load_catalog(catalog_path)
-    merged = loaded.get("schema") == "echelle-merged-catalog/v1"
-    catalog = _refresh_availability(loaded)
-    sources = catalog.get("sources", [])
-    drift = [
-        {"path": _posix(path), "evidence": json.loads(Path(path).read_text(encoding="utf-8"))}
-        for path in drift_paths
-    ]
-    registry = _registry_context(registry_path, calibrations_root)
-    rows = _rows_from(sources)
-    epochs = list(
-        dict.fromkeys(
-            [*registry["epochs"], *[str(row.get("snapshot_id") or "") for row in rows]]
-        )
+    composition = campaign_composition(
+        catalog_path,
+        drift_paths=drift_paths,
+        registry_path=registry_path,
+        calibrations_root=calibrations_root,
+        compose_catalog_path=compose_catalog_path,
     )
-    epochs = [epoch for epoch in epochs if epoch]
-    evidence_name = _next_evidence_name(drift)
-    values = _composer_values(
-        catalog_path=composed_catalog,
-        registry=registry,
-        evidence_name=evidence_name,
-        epochs=epochs,
-    )
+    composed_catalog = composition["catalog_path"]
+    merged = composition["merged"]
+    sources = composition["sources"]
+    drift = composition["drift"]
+    registry = composition["registry"]
+    rows = composition["rows"]
+    epochs = composition["epochs"]
+    evidence_name = composition["evidence_name"]
+    values = composition["values"]
     generated_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
     drive_rows = []
     for position, source in enumerate(sources, start=1):
@@ -3721,6 +4049,10 @@ def build_reading_room(
     every_step = [*calibrate_steps, *(step for row in drive_rows for step in row["steps"])]
     context = {
         "served": served,
+        # Run controls exist only where a server both serves the page and knows
+        # the campaign home their launches belong to; anything less renders the
+        # page it always rendered.
+        "launches": dict(launches) if served and launches is not None else None,
         "catalog_path": _posix(composed_catalog),
         "generated_at": generated_at,
         "sources": sources,

@@ -22,9 +22,16 @@ import pytest
 
 from echelle_spectra.reading_room import (
     BROWSE_ENDPOINT,
+    COMMAND_TEMPLATES,
     HOME_ENDPOINT,
+    RUN_ARGV,
+    RUN_ENDPOINT,
+    RUN_ROWS,
+    SHELL_NAMES,
     build_reading_room,
     render_setup_page,
+    run_argv,
+    run_command,
 )
 
 #: The build stamps itself with the moment it ran, so two builds a second apart
@@ -32,7 +39,7 @@ from echelle_spectra.reading_room import (
 _STAMP = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\+00:00")
 
 #: Every ``/api/`` string the served half is allowed to carry.
-_ENDPOINTS = (BROWSE_ENDPOINT, HOME_ENDPOINT)
+_ENDPOINTS = (BROWSE_ENDPOINT, HOME_ENDPOINT, RUN_ENDPOINT)
 
 
 def _catalog(tmp_path: Path) -> Path:
@@ -85,6 +92,29 @@ def served_page(tmp_path: Path) -> str:
     return build_reading_room(
         _catalog(tmp_path), tmp_path / "web-served", served=True
     ).read_text(encoding="utf-8")
+
+
+def _idle() -> dict[str, dict[str, str]]:
+    return {verb: {"state": "idle", "line": "Nothing in flight.", "tail": ""} for verb in RUN_ARGV}
+
+
+def _runnable_page(tmp_path: Path, launches: dict[str, dict[str, str]] | None = None) -> str:
+    """The page a server with a campaign home serves: Browse, and Run."""
+
+    return build_reading_room(
+        _catalog(tmp_path),
+        tmp_path / "web-runnable",
+        served=True,
+        launches=_idle() if launches is None else launches,
+    ).read_text(encoding="utf-8")
+
+
+def _row(page: str, identifier: str) -> str:
+    """One command row's own markup, from its id to the next article."""
+
+    start = page.index(f'id="{identifier}"')
+    end = page.find("</article>", start)
+    return page[start:end]
 
 
 # ---------------------------------------------------------------------------
@@ -211,6 +241,163 @@ def test_the_served_banner_does_not_claim_to_reach_nothing(served_page: str) -> 
     assert "reaches nothing outside itself" not in served_page
     assert "never executes commands" in served_page
     assert served_page.count("never executes commands") == 1
+
+
+# ---------------------------------------------------------------------------
+# The Run control: served only, and only with a campaign to launch into
+# ---------------------------------------------------------------------------
+
+
+def test_the_static_build_carries_no_run_control(static_page: str) -> None:
+    """The one-shot file is handed to people who are not at this machine."""
+
+    for forbidden in ("data-run", RUN_ENDPOINT, "Run on this machine", "run-state"):
+        assert forbidden not in static_page
+
+
+def test_a_served_build_with_no_campaign_to_launch_into_offers_no_run(
+    served_page: str,
+) -> None:
+    """A served page is not by itself a launcher: the home is what makes it one."""
+
+    assert "data-run" not in served_page
+    assert RUN_ENDPOINT not in served_page
+    assert "never executes commands" in served_page
+
+
+def test_the_run_control_sits_beside_the_command_row_it_mirrors(tmp_path: Path) -> None:
+    page = _runnable_page(tmp_path)
+    for verb, identifier in RUN_ROWS.items():
+        row = _row(page, identifier)
+        assert f'data-run="{verb}"' in row
+        # Copy stays first-class and first: the terminal is still the documented
+        # way to spend a night converting a terabyte.
+        assert row.index('class="copy"') < row.index('class="run"')
+    # The bench is a window a person watches, not a batch verb.
+    assert "data-run" not in _row(page, "cmd-bench")
+    assert page.count("data-run=") == len(RUN_ARGV)
+
+
+def test_the_run_control_is_explained_once_and_not_on_every_card(tmp_path: Path) -> None:
+    """Counted on the page as loaded, which is where a textbook shows up."""
+
+    page = _runnable_page(tmp_path)
+    assert page.count("Run launches this same command as its own process") == 1
+    assert page.count("survives this tab and this server") == 1
+
+
+def test_the_page_states_the_four_states_the_files_record(tmp_path: Path) -> None:
+    page = _runnable_page(
+        tmp_path,
+        {
+            "sample": {
+                "state": "running",
+                "line": "Running on D:/shots since 2026-08-19T00:00:00+00:00 (pid 4242).",
+                "tail": "",
+            },
+            "audit": {
+                "state": "finished",
+                "line": "Finished on D:/shots: verdict aligned in drift-evidence-001.json.",
+                "tail": "",
+            },
+            "bulk": {
+                "state": "failed",
+                "line": "Started 2026-08-19T00:00:00+00:00 on D:/shots; the process is gone.",
+                "tail": "ERROR: no such plan file",
+            },
+        },
+    )
+    sample = _row(page, "cmd-sample")
+    assert "run-state--running" in sample and "pid 4242" in sample
+    # A button that would only be refused does not look pressable; the server
+    # is still the one that refuses.
+    assert 'data-run="sample" disabled' in sample
+    audit = _row(page, "cmd-audit")
+    assert "run-state--finished" in audit and "verdict aligned" in audit
+    assert "disabled" not in audit
+    bulk = _row(page, "cmd-process")
+    assert "run-state--failed" in bulk
+    assert '<pre class="run-tail">ERROR: no such plan file</pre>' in bulk
+
+
+def test_the_runnable_page_reaches_only_the_three_endpoints(tmp_path: Path) -> None:
+    page = _runnable_page(tmp_path)
+    assert RUN_ENDPOINT in page
+    for found in _api_strings(page):
+        assert found in _ENDPOINTS, f"the runnable page reaches an endpoint it should not: {found}"
+    # The page names a verb and reloads; it never streams, polls, or opens a
+    # socket to watch a run it cannot control.
+    assert "WebSocket" not in page and "EventSource" not in page
+    assert "setInterval" not in page
+    assert "window.location.reload();" in page
+
+
+def test_the_runnable_banner_says_what_run_does_and_what_it_does_not(
+    tmp_path: Path,
+) -> None:
+    page = _runnable_page(tmp_path)
+    assert "Run starts one of these same commands as its own process here" in page
+    assert "nothing is processed inside this page" in page
+    # No control surface for a run in flight: no stop, no pause, no kill.
+    for absent in ("Stop", "Cancel", "Kill", "Pause"):
+        assert f">{absent}" not in page
+
+
+# ---------------------------------------------------------------------------
+# One derivation behind both the copied command and the launched one
+# ---------------------------------------------------------------------------
+
+
+def test_the_launched_argument_list_is_the_command_row_itself(tmp_path: Path) -> None:
+    """The pin: the row a person copies is rendered FROM the argument list that
+    is launched, so the two cannot be edited apart."""
+
+    values = {
+        "input": "D:/shots",
+        "output": "D:/shots",
+        "cubes": "D:/shots",
+        "label": "shots",
+        "verdict": "D:/shots/drift-evidence-001.json",
+        "registry": "calibration_registry.toml",
+        "calibrations": "calibrations",
+        "catalog": "D:/campaign/all-years.json",
+        "plan": "campaign-plan.toml",
+        "pattern": "*.SIF",
+    }
+    rows = {str(template["id"]): template for template in COMMAND_TEMPLATES}
+    for verb, identifier in RUN_ROWS.items():
+        argv = run_argv(verb, values)
+        # Nothing unfilled survives into a command that is about to be run.
+        assert not any("{{" in token for token in argv)
+        # Every derived token is quoted in the row and bare in the list; every
+        # literal flag is the same in both.  Nothing else differs between them.
+        quoted = " ".join(
+            f'"{token}"' if "{{" in spelled else token
+            for spelled, token in zip(RUN_ARGV[verb], argv, strict=True)
+        )
+        assert run_command(verb, values) == f"echelle {quoted}"
+        for shell, _name in SHELL_NAMES:
+            template = str(rows[identifier][shell])
+            assert run_command(verb, values, shell) == _fill_like_page(template, values, shell)
+
+
+def _fill_like_page(template: str, values: dict[str, str], shell: str) -> str:
+    """Fill a template the way the page's own renderer fills it."""
+
+    from echelle_spectra.reading_room import _fill
+
+    return _fill(template, values, shell)
+
+
+def test_no_verb_outside_the_table_can_be_spelled_into_a_command() -> None:
+    assert set(RUN_ARGV) == {"sample", "audit", "bulk"}
+    for verb in RUN_ARGV:
+        # Every literal token is fixed here; only {{...}} tokens are derived.
+        literals = [token for token in RUN_ARGV[verb] if "{{" not in token]
+        assert all(token.strip() == token and token for token in literals)
+    for absent in ("del", "rm", "format", "shutdown"):
+        with pytest.raises(KeyError):
+            run_argv(absent, {})
 
 
 # ---------------------------------------------------------------------------
