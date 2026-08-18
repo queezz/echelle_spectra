@@ -122,12 +122,25 @@ MINIMUM_SNR = 4.0
 
 # --- Plasma-presence frame selection ---------------------------------------
 #
-# Cube intensities are already background-subtracted, so a frame without plasma
-# hovers about zero and the median of the per-frame totals is the background
-# level.  A frame counts as plasma-bright when its total stands PLASMA_FRAME_-
-# SIGMA robust deviations above that level, which is the same 5-sigma spirit
-# ``Spectrum`` uses to recognise its dark frames.  A median over all frames
-# instead would dilute every line with the dark frames beside it.
+# A frame counts as plasma-bright when its total stands PLASMA_FRAME_SIGMA
+# robust deviations above the *background* level, which is the same 5-sigma
+# spirit ``Spectrum`` uses to recognise its dark frames.  A median over all
+# frames instead would dilute every line with the dark frames beside it.
+#
+# The background is read off the darker of two clusters, never off the median
+# of every frame.  The median is only the background when most frames are dark,
+# and long shots break that assumption: on a real 40-frame shot with plasma up
+# for 30 of them the median lands *inside* the plasma cluster, the threshold
+# tops the brightest frame, and the audit reports insufficient-data on a shot
+# that is three-quarters lit.  Splitting the sorted totals at the split that
+# separates them best makes no assumption about which side holds the majority,
+# so a 2-of-20 shot and a 36-of-40 shot are read the same way.
+#
+# A split alone would find two clusters in pure noise as well, so the 5-sigma
+# rule survives as the guard on it: the dimmest frame above the split must
+# still clear the dark cluster's own level by PLASMA_FRAME_SIGMA of that
+# cluster's robust deviation.  A shot with no plasma in it fails that guard and
+# stays honestly unmeasured rather than being handed a verdict.
 PLASMA_FRAME_SIGMA = 5.0
 
 # --- Isotopologues ----------------------------------------------------------
@@ -423,6 +436,45 @@ def _isotope_flag(prior: dict[str, Any], *, shows_deuterium: bool) -> str:
 # ---------------------------------------------------------------------------
 
 
+def _robust_deviation(values: np.ndarray) -> float:
+    """Return a robust standard deviation, or 0.0 when the sample carries none."""
+
+    if values.size == 0:
+        return 0.0
+    deviation = 1.4826 * float(np.median(np.abs(values - np.median(values))))
+    if not np.isfinite(deviation) or deviation <= 0.0:
+        deviation = float(np.std(values))
+    return deviation if np.isfinite(deviation) and deviation > 0.0 else 0.0
+
+
+def _dark_cluster_size(ordered: np.ndarray) -> int:
+    """Return how many of the ascending totals form the darker of two clusters.
+
+    The split maximises the separation between the two sides, weighted by how
+    many frames each holds -- the classic two-class threshold.  It is looked for
+    at every boundary, so it is indifferent to whether the dark frames are the
+    majority or the minority.  A boundary inside a run of equal totals would not
+    separate anything and is skipped; when no boundary separates at all (one
+    frame, or every total identical) the answer is 0 and there is no dark
+    cluster to measure a background from.
+    """
+
+    count = ordered.size
+    if count < 2:
+        return 0
+    cumulative = np.cumsum(ordered)
+    best_size, best_score = 0, -np.inf
+    for size in range(1, count):
+        if ordered[size] <= ordered[size - 1]:
+            continue
+        dark_mean = cumulative[size - 1] / size
+        bright_mean = (cumulative[-1] - cumulative[size - 1]) / (count - size)
+        score = size * (count - size) * (bright_mean - dark_mean) ** 2
+        if score > best_score:
+            best_size, best_score = size, score
+    return best_size
+
+
 def select_plasma_frames(intensity_2d: np.ndarray) -> tuple[np.ndarray, dict[str, Any]]:
     """Return the plasma-bright frame indices and the evidence for the choice."""
 
@@ -433,16 +485,29 @@ def select_plasma_frames(intensity_2d: np.ndarray) -> tuple[np.ndarray, dict[str
             "frames": 1,
             "selected_frames": 1,
         }
-    background = float(np.median(totals))
-    deviation = 1.4826 * float(np.median(np.abs(totals - background)))
-    if not np.isfinite(deviation) or deviation <= 0.0:
-        deviation = float(np.std(totals))
+    finite = np.isfinite(totals)
+    ordered = np.sort(totals[finite])
+    dark_size = _dark_cluster_size(ordered)
+    # With no split to find, every frame reads as background and none is bright.
+    dark = ordered[:dark_size] if dark_size else ordered
+    background = float(np.median(dark)) if dark.size else 0.0
+    deviation = _robust_deviation(dark)
+    if deviation <= 0.0:
+        # A one-frame dark cluster cannot state its own noise; borrow the scatter
+        # of the whole shot, which is never smaller and so never over-selects.
+        deviation = _robust_deviation(ordered)
     threshold = background + PLASMA_FRAME_SIGMA * deviation
-    selected = np.flatnonzero(np.isfinite(totals) & (totals > threshold))
+    selected = np.array([], dtype=int)
+    if dark_size > 0 and float(ordered[dark_size]) > threshold:
+        selected = np.flatnonzero(finite & (totals >= ordered[dark_size]))
     return selected, {
-        "rule": f"frame total > background + {PLASMA_FRAME_SIGMA:g} sigma",
+        "rule": (
+            "frame total in the brighter of two clusters, whose dimmest frame "
+            f"clears the darker cluster by {PLASMA_FRAME_SIGMA:g} sigma"
+        ),
         "frames": int(totals.size),
         "selected_frames": int(selected.size),
+        "dark_frames": int(dark.size),
         "background_total": background,
         "sigma_total": float(deviation),
         "threshold_total": float(threshold),

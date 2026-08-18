@@ -25,6 +25,7 @@ from echelle_spectra.drift import (
     DriftError,
     audit_cubes,
     create_refinement_snapshot,
+    select_plasma_frames,
     select_sample_paths,
     write_drift_evidence,
 )
@@ -595,6 +596,98 @@ def test_a_cube_without_plasma_frames_is_insufficient_and_counted(tmp_path: Path
     assert payload["summary"]["skipped_cubes"] == 1
     assert payload["skipped_cubes"][0]["reason"] == "no plasma-bright frames"
     assert any(item.get("reason") == "no plasma-bright frames" for item in payload["lines"])
+
+
+# ---------------------------------------------------------------------------
+# Majority-lit shots
+# ---------------------------------------------------------------------------
+
+# The per-frame totals of LHD shot 151953: 40 frames, plasma up for the middle
+# 30 of them.  Because most frames are lit, the median of these totals sits
+# inside the plasma cluster rather than on the background, which is what made
+# the earlier median-based background top every frame and report a shot that is
+# three-quarters lit as insufficient-data.
+SHOT_151953_FRAME_TOTALS: tuple[float, ...] = (
+    647871552.0, 655067392.0, 657950976.0, 671084416.0, 672208128.0,
+    670074880.0, 668661120.0, 667305216.0, 667698688.0, 668331072.0,
+    668520192.0, 669712512.0, 671562816.0, 671518080.0, 671458816.0,
+    671662336.0, 670854592.0, 670535296.0, 670767616.0, 670646272.0,
+    670903552.0, 670692608.0, 670648320.0, 670581312.0, 670635648.0,
+    670787072.0, 670963520.0, 671269248.0, 670355584.0, 670608896.0,
+    670489472.0, 670293248.0, 665058688.0, 656980992.0, 655326528.0,
+    655091648.0, 654739968.0, 654954240.0, 654841984.0, 655207552.0,
+)  # fmt: skip
+
+#: The lit run of shot 151953, as the frame totals above resolve it.
+SHOT_151953_LIT_FRAMES: tuple[int, ...] = tuple(range(3, 33))
+
+
+def _totals_only(totals: Sequence[float]) -> np.ndarray:
+    """Return a frames-by-one cube whose row sums are exactly ``totals``."""
+
+    return np.asarray(totals, dtype=float).reshape(-1, 1)
+
+
+def test_a_real_majority_lit_shot_selects_its_lit_frames() -> None:
+    selected, evidence = select_plasma_frames(_totals_only(SHOT_151953_FRAME_TOTALS))
+
+    assert tuple(int(frame) for frame in selected) == SHOT_151953_LIT_FRAMES
+    assert evidence["frames"] == 40
+    assert evidence["selected_frames"] == 30
+    # The background is read off the ten dark frames, so it lands well below the
+    # median of all forty -- which is itself a plasma frame on this shot.
+    assert evidence["dark_frames"] == 10
+    assert evidence["background_total"] < float(np.median(SHOT_151953_FRAME_TOTALS))
+    assert evidence["threshold_total"] < min(
+        SHOT_151953_FRAME_TOTALS[frame] for frame in SHOT_151953_LIT_FRAMES
+    )
+
+
+def test_a_real_majority_lit_shot_reaches_a_verdict(tmp_path: Path) -> None:
+    # One cube carrying shot 151953's own brightness profile: each frame is as
+    # bright, above the dark level, as that shot's frame was.  The point is the
+    # profile, so the lines below it are the fixture's, shifted five pixels.
+    profile = np.asarray(SHOT_151953_FRAME_TOTALS, dtype=float)
+    dark = [value for frame, value in enumerate(profile) if frame not in SHOT_151953_LIT_FRAMES]
+    brightness = np.clip(profile - float(np.median(dark)), 0.0, None)
+    brightness *= 400.0 / brightness.max()
+
+    payload = audit_cubes(
+        [
+            _cube(
+                tmp_path / "cubes" / "151953.nc",
+                frame_specs=[(5.0, float(value)) for value in brightness],
+                shot_number="151953",
+            )
+        ]
+    )
+
+    selection = payload["sampled_cubes"][0]["frame_selection"]
+    assert selection["selected_frames"] >= len(SHOT_151953_LIT_FRAMES)
+    assert payload["verdict"] == "shifted"
+    assert payload["summary"]["median_shift_px"] == pytest.approx(5.0, abs=0.2)
+    assert payload["skipped_cubes"] == []
+
+
+def test_a_synthetic_majority_lit_shot_selects_its_lit_frames() -> None:
+    rng = np.random.default_rng(151953)
+    totals = np.r_[rng.normal(0.0, 2.0, size=10), rng.normal(9000.0, 300.0, size=30)]
+
+    selected, evidence = select_plasma_frames(_totals_only(totals))
+
+    assert tuple(int(frame) for frame in selected) == tuple(range(10, 40))
+    assert evidence["selected_frames"] == 30
+
+
+def test_a_shot_with_no_plasma_selects_nothing_however_it_is_split() -> None:
+    # Twenty dark frames and nothing else.  Two clusters can always be found in
+    # noise; the 5-sigma guard is what stops one being called plasma.
+    rng = np.random.default_rng(4)
+    for totals in (rng.normal(0.0, 1.92, size=20), np.zeros(20), np.full(20, 12.5)):
+        selected, evidence = select_plasma_frames(_totals_only(totals))
+
+        assert selected.size == 0
+        assert evidence["selected_frames"] == 0
 
 
 # ---------------------------------------------------------------------------
