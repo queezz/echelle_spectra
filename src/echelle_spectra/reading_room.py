@@ -648,17 +648,24 @@ def _calibrate_steps(
     rows = list(registry.get("epoch_rows") or [])
     named = [str(row["snapshot_id"]) for row in rows]
     saved = [item for item in snapshot_ids if item and item != "unassigned"]
+    on_disk = [str(item) for item in (registry.get("saved") or []) if item]
     unreadable = registry["status"] == "unreadable"
     absent = registry["status"] == "not supplied"
     # One fact decides the first three steps, because no file records the
-    # physical session between them: the snapshot is the only trace it leaves.
-    trace = named or saved
+    # physical session between them: the snapshot is the only trace it leaves —
+    # and a snapshot folder on the calibrations root is exactly such a trace,
+    # registry or not.
+    trace = named or saved or on_disk
     if trace:
-        origin = (
-            f"{len(named)} registry epoch(s): {', '.join(named)}"
-            if named
-            else f"cubes name snapshot(s) {', '.join(sorted(set(saved)))}"
-        )
+        if named:
+            origin = f"{len(named)} registry epoch(s): {', '.join(named)}"
+        elif saved:
+            origin = f"cubes name snapshot(s) {', '.join(sorted(set(saved)))}"
+        else:
+            origin = (
+                f"saved snapshot folder(s) on the calibrations root: "
+                f"{', '.join(on_disk)} — not yet in any registry"
+            )
         lamps = _step("lamps", "Sphere + lamps", STEP_DONE, origin)
         fit = _step("fit", "Bench fit", STEP_DONE, "the saved snapshot is the fit")
         snapshot = _step("snapshot", "Snapshot saved", STEP_DONE, origin)
@@ -1660,6 +1667,14 @@ def _epoch_options(epochs: list[str], registry: dict[str, Any]) -> str:
 
     if epochs:
         return "".join(f'<option value="{_e(item)}">{_e(item)}</option>' for item in epochs)
+    saved = [item for item in (registry.get("saved") or []) if item]
+    if saved:
+        # A saved snapshot is real without a registry; it is only not yet
+        # registered, and the label says exactly that much and no more.
+        return "".join(
+            f'<option value="{_e(item)}">{_e(item)} — saved, not in any registry</option>'
+            for item in saved
+        )
     stated = {
         "not supplied": "no registry supplied to this build",
         "unreadable": "registry unreadable — the commands name it unread",
@@ -3168,6 +3183,40 @@ def _documents(document_paths: tuple[str | Path, ...] | list[str | Path]) -> lis
     return documents
 
 
+def _saved_snapshots(calibrations_root: str | Path | None, *, depth: int = 3) -> list[str]:
+    """The snapshot folders a calibrations root actually holds, registry or not.
+
+    A saved snapshot is real the moment the bench writes it; a page that only
+    believes the registry tells an operator with years of snapshots that "no
+    snapshot is in reach", which is false (owner, 2026-08-18: "my WEBUI still
+    sees no calibration").  The walk is shallow and bounded because snapshots
+    sit at most a couple of levels down whatever folder shape the campaign
+    grew (``calibrations/<id>/``, ``calibrations/<day>/calibrations/<id>/``).
+    """
+
+    if not calibrations_root:
+        return []
+    found: set[str] = set()
+
+    def walk(folder: Path, budget: int) -> None:
+        try:
+            entries = [entry for entry in folder.iterdir() if entry.is_dir()]
+        except OSError:
+            return
+        for entry in entries:
+            try:
+                is_snapshot = (entry / "snapshot.toml").is_file()
+            except OSError:  # pragma: no cover - unreadable mount points
+                continue
+            if is_snapshot:
+                found.add(entry.name)
+            elif budget > 1:
+                walk(entry, budget - 1)
+
+    walk(Path(calibrations_root), depth)
+    return sorted(found)
+
+
 def _registry_context(
     registry_path: str | Path | None, calibrations_root: str | Path | None
 ) -> dict[str, Any]:
@@ -3180,6 +3229,7 @@ def _registry_context(
             "detail": "",
             "epochs": [],
             "epoch_rows": [],
+            "saved": _saved_snapshots(calibrations_root),
             "calibrations": _posix(calibrations_root) if calibrations_root else "",
         }
     from .calibration_registry import CalibrationRegistryError, load_calibration_registry
@@ -3195,12 +3245,14 @@ def _registry_context(
             "detail": str(exc),
             "epochs": [],
             "epoch_rows": [],
+            "saved": _saved_snapshots(root),
             "calibrations": _posix(root),
         }
     return {
         "status": "read",
         "path": _posix(path),
         "detail": "",
+        "saved": _saved_snapshots(root),
         "epochs": [epoch.snapshot_id for epoch in registry.epochs],
         # The bounds each epoch already declares, carried through so the page
         # can say whether one covers today rather than only counting them.

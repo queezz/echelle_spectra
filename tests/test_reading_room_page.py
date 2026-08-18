@@ -95,6 +95,41 @@ def _catalog(tmp_path: Path) -> Path:
     return path
 
 
+def test_saved_snapshots_are_seen_without_a_registry(tmp_path: Path) -> None:
+    """A snapshot the bench wrote is real before any registry names it.
+
+    The owner's field case, 2026-08-18: a NAS calibrations root holding years
+    of snapshots, no registry yet — and the page said "no snapshot is in
+    reach", which was false.
+    """
+
+    bare = tmp_path / "bare.json"
+    bare.write_text(
+        json.dumps(
+            {
+                "schema": "echelle-merged-catalog/v1",
+                "generated_at": "2026-08-18T00:00:00.000+00:00",
+                "sources": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    root = tmp_path / "cal"
+    # The owner's real shape: the snapshot sits a couple of levels down.
+    nested = root / "calibrations" / "20190314_cmos"
+    nested.mkdir(parents=True)
+    (nested / "snapshot.toml").write_text('id = "20190314_cmos"\n', encoding="utf-8")
+
+    page = build_reading_room(
+        bare, tmp_path / "web-saved", calibrations_root=root
+    ).read_text(encoding="utf-8")
+
+    assert "20190314_cmos — saved, not in any registry" in page
+    assert "saved snapshot folder(s) on the calibrations root" in page
+    # The registry epoch step still honestly wants a registry.
+    assert "--registry" in page
+
+
 def _shifted_evidence(tmp_path: Path) -> Path:
     payload = {
         "schema": DRIFT_SCHEMA,
