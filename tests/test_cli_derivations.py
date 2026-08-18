@@ -10,6 +10,11 @@ folders with the drive's own lamp frames sitting beside them, so the flat
 ``*.SIF`` search found nothing at all, and the hand-written ``**/*.SIF`` an
 operator reached for instead quietly exported the calibration lamps as science
 shots.
+
+The last section pins ``--practice``: the page learned with empty hands.  The
+tool that composes CLI commands must not need a CLI command composed before it
+can help, so practice invents its own campaign and builds the same page a real
+one would, into a fresh system-temp folder nothing else reads.
 """
 
 from __future__ import annotations
@@ -444,3 +449,90 @@ def test_a_build_without_open_touches_no_browser(tmp_path: Path, monkeypatch) ->
     )
 
     assert opened == []
+
+
+# ---------------------------------------------------------------------------
+# 5. --practice: the page learned with empty hands
+# ---------------------------------------------------------------------------
+
+
+def _shown(capsys) -> str:
+    captured = capsys.readouterr()
+    return captured.out + captured.err
+
+
+def test_practice_builds_an_invented_campaign(capsys) -> None:
+    assert web_main(["--practice"]) == 0
+
+    shown = _shown(capsys)
+    assert "Traceback" not in shown
+    lines = [line for line in shown.splitlines() if line.strip()]
+    assert lines[0] == "practice campaign: every fact on this page is invented"
+
+    index_path = Path(lines[1])
+    assert index_path.is_absolute()
+    assert index_path.is_file()
+    assert index_path.name == "index.html"
+
+    text = index_path.read_text(encoding="utf-8")
+    assert "PRACTICE-A" in text
+    assert "PRACTICE-B" in text
+    assert "PRACTICE-C" in text
+    assert "PRACTICE-D" in text
+    # A real verdict card, and the composer derives the NEXT free evidence
+    # name from the invented drift-evidence-001.json it was handed.
+    assert "shifted" in text
+    assert "drift-evidence-002.json" in text
+
+
+def test_practice_refuses_combination_with_catalog(capsys) -> None:
+    assert web_main(["--practice", "--catalog", "all-years.json"]) == 1
+
+    shown = _shown(capsys)
+    assert "Traceback" not in shown
+    assert "--catalog" in shown
+    assert "--practice" in shown
+    assert len([line for line in shown.splitlines() if line.strip()]) == 1
+
+
+def test_practice_refuses_combination_with_home(tmp_path: Path, capsys) -> None:
+    assert web_main(["--practice", "--home", str(tmp_path)]) == 1
+
+    shown = _shown(capsys)
+    assert "Traceback" not in shown
+    assert "--home" in shown
+    assert "--practice" in shown
+    assert len([line for line in shown.splitlines() if line.strip()]) == 1
+
+
+def test_practice_writes_nothing_outside_its_temp_folder(tmp_path, monkeypatch, capsys) -> None:
+    practice_root = tmp_path / "practice-root"
+
+    def fake_mkdtemp(*args, **kwargs) -> str:
+        practice_root.mkdir(parents=True, exist_ok=True)
+        return str(practice_root)
+
+    monkeypatch.setattr(campaign_tools_cli.tempfile, "mkdtemp", fake_mkdtemp)
+
+    assert web_main(["--practice"]) == 0
+
+    outside = [
+        path
+        for path in tmp_path.rglob("*")
+        if path != practice_root and practice_root not in path.parents
+    ]
+    assert outside == [], f"practice wrote outside its temp folder: {outside}"
+
+    shown = _shown(capsys)
+    lines = [line for line in shown.splitlines() if line.strip()]
+    index_path = Path(lines[1])
+    assert practice_root in index_path.parents
+
+
+def test_the_cold_start_refusal_offers_practice(tmp_path: Path, monkeypatch, capsys) -> None:
+    monkeypatch.chdir(tmp_path)
+
+    with pytest.raises(SystemExit):
+        web_main([])
+
+    assert "echelle web --practice --open" in capsys.readouterr().err

@@ -383,6 +383,9 @@ The page is a snapshot of the moment it was built. After processing more shots,
 rebuild the catalog and rerun `echelle web` over the same `--output` folder to
 refresh it. The page never controls a worker and never writes campaign data.
 
+Learn the page with nothing: `echelle web --practice --open` — an invented campaign
+built to a temp folder, labels say PRACTICE.
+
 ## Safe inspection versus writing
 
 These commands do not intentionally create campaign artifacts:

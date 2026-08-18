@@ -7,6 +7,7 @@ import json
 import os
 import re
 import sys
+import tempfile
 import webbrowser
 from collections.abc import Callable
 from pathlib import Path
@@ -670,6 +671,212 @@ def _web_home(args: argparse.Namespace) -> tuple[dict[str, Any], str]:
     return home, flag
 
 
+# ---------------------------------------------------------------------------
+# ``echelle web --practice`` -- learn the page with empty hands
+#
+# An operator checking out the page before the drives are in hand has no
+# catalog to point at, and the tool that composes CLI commands needs a CLI
+# command composed before it can help compose one.  Practice mode breaks that
+# circularity: it invents its own campaign, four drives wide, one honesty
+# state each, and builds the very same page a real one would -- into a fresh
+# system-temp folder that nothing outside this run ever reads.
+# ---------------------------------------------------------------------------
+
+_PRACTICE_SNAPSHOT_ID = "20990101_practice"
+
+
+def _practice_cube(path: str, shot_number: str) -> dict[str, Any]:
+    return {
+        "path": path,
+        "shot_number": shot_number,
+        "year": 2099,
+        "snapshot_id": _PRACTICE_SNAPSHOT_ID,
+        "wavelength_min_nm": 400.0,
+        "wavelength_max_nm": 700.0,
+    }
+
+
+def _write_practice_campaign(root: Path) -> tuple[Path, list[Path]]:
+    """Fabricate one invented campaign so ``--practice`` needs no real input.
+
+    Every id, label and shot number here is obviously invented, and the one
+    drive folder this build reads lives under *root* -- never the CWD, never
+    this repo.  The shape mirrors the four honesty states pinned in
+    ``tests/test_reading_room_page.py``: a drive with completed cubes, a
+    drive that does not answer, a drive nothing has measured yet, and a
+    drive that was measured and published nothing.
+    """
+
+    drive = root / "practice-drive"
+    drive.mkdir(parents=True, exist_ok=True)
+    (drive / "echelle-catalog.json").write_text("{}", encoding="utf-8")
+
+    catalog = {
+        "schema": "echelle-merged-catalog/v1",
+        "generated_at": "2099-01-01T00:00:00.000+00:00",
+        "sources": [
+            {
+                "drive_id": "practice-a",
+                "volume_label": "PRACTICE-A",
+                "drive_root": drive.as_posix(),
+                "catalog_path": "echelle-catalog.json",
+                "run": {
+                    "id": "practice-run-1",
+                    "state": "completed",
+                    "counts": {"exported": 2},
+                    "gate": "verdict",
+                },
+                "cubes": [
+                    {**_practice_cube("a.nc", "900001"), "gate": "verdict"},
+                    {**_practice_cube("b.nc", "900002"), "gate": "sample"},
+                ],
+            },
+            {
+                # Missing drive: the row survives, the files did not answer.
+                "drive_id": "practice-b",
+                "volume_label": "PRACTICE-B",
+                "drive_root": (root / "practice-gone").as_posix(),
+                "catalog_path": "echelle-catalog.json",
+                "run": {
+                    "id": "practice-run-0",
+                    "state": "completed",
+                    "counts": {},
+                    "gate": "verdict",
+                },
+                "cubes": [
+                    {
+                        **_practice_cube("c.nc", "900003"),
+                        "gate": "unrecorded (pre-gate receipt)",
+                    }
+                ],
+            },
+            {
+                # Unmeasured: reachable, but no receipt ever described it.
+                "drive_id": "practice-c",
+                "volume_label": "PRACTICE-C",
+                "drive_root": drive.as_posix(),
+                "catalog_path": "echelle-catalog.json",
+                "run": None,
+                "cubes": [],
+            },
+            {
+                # Empty: measured, and it published nothing.
+                "drive_id": "practice-d",
+                "volume_label": "PRACTICE-D",
+                "drive_root": drive.as_posix(),
+                "catalog_path": "echelle-catalog.json",
+                "run": {
+                    "id": "practice-run-2",
+                    "state": "completed",
+                    "counts": {},
+                    "gate": "ungated (no registry)",
+                },
+                "cubes": [],
+            },
+        ],
+    }
+    catalog_path = root / "practice-catalog.json"
+    catalog_path.write_text(json.dumps(catalog), encoding="utf-8")
+
+    evidence = {
+        "schema": "echelle-drift-evidence/v1",
+        "created_at": "2099-01-01T01:00:00+00:00",
+        "verdict": "shifted",
+        "snapshot_ids": [_PRACTICE_SNAPSHOT_ID],
+        "sampled_cubes": [{"cube": "a.nc"}, {"cube": "b.nc"}],
+        "skipped_cubes": [
+            {"cube": "c.nc", "shot_number": "900003", "reason": "no plasma-bright frames"}
+        ],
+        "interval_warning": "residuals form two groups (invented practice data)",
+        "thresholds_px": {"alignment_maximum_residual": 0.5, "repair_limit": 25},
+        "summary": {
+            "median_shift_px": 8.0,
+            "maximum_absolute_pixel_residual_px": 8.4,
+            "maximum_pixel_deviation_px": 0.4,
+            "alignment_tolerance_px": 0.5,
+            "quorum": {
+                "satisfied": True,
+                "resolved_lines": 8,
+                "distinct_orders": 4,
+                "coverage_nm": [410.0, 660.0],
+            },
+        },
+        "per_shot": [
+            {
+                "shot_number": "900001",
+                "cube": "a.nc",
+                "date": "2099-01-01",
+                "lines": 4,
+                "median_shift_px": 8.0,
+                "pixel_spread_px": 0.2,
+                "group": 1,
+            }
+        ],
+        "order_corrections": [
+            {
+                "order": 6,
+                "reference_pixel": 511.5,
+                "dispersion_nm_per_px": 0.0108,
+                "predicted_shift_nm": -0.0864,
+            }
+        ],
+        "repair_commands": [
+            {
+                "shell": "any",
+                "purpose": "accept the sampled shift and emit the immutable -rN snapshot",
+                "command": 'echelle drift refine "drift-evidence-001.json" --accept-shift 8',
+            },
+            {"shell": "any", "purpose": "repoint the registry [validity] entry", "command": ""},
+            {
+                "shell": "powershell",
+                "purpose": "revise every cube already exported",
+                "command": 'Get-ChildItem "cubes\\*.nc"',
+            },
+            {
+                "shell": "posix",
+                "purpose": "revise every cube already exported",
+                "command": "for cube in cubes/*.nc; do :; done",
+            },
+        ],
+        "lines": [
+            {
+                "shot_number": "900001",
+                "line": "H-alpha",
+                "status": "measured",
+                "expected_nm": 656.279,
+                "residual_nm": 0.086,
+                "pixel_residual_px": 8.0,
+            }
+        ],
+    }
+    evidence_path = root / "drift-evidence-001.json"
+    evidence_path.write_text(json.dumps(evidence), encoding="utf-8")
+
+    return catalog_path, [evidence_path]
+
+
+def _run_practice(*, open_page: bool = False) -> int:
+    """Build the invented practice campaign and report it like a real one."""
+
+    from .reading_room import build_reading_room
+
+    root = Path(tempfile.mkdtemp(prefix="echelle-practice-"))
+    catalog_path, drift_paths = _write_practice_campaign(root)
+    try:
+        path = build_reading_room(catalog_path, root / "page", drift_paths=drift_paths)
+    except OSError as exc:  # pragma: no cover - a fresh temp folder should not fail
+        raise CommandError(str(exc)) from None
+    page = _resolved(path)
+    print("practice campaign: every fact on this page is invented")
+    print(page)
+    if open_page and not webbrowser.open(page.as_uri()):
+        print(
+            f"WARNING: no default browser answered; open {page} by hand",
+            file=sys.stderr,
+        )
+    return 0
+
+
 def _web_inputs(args: argparse.Namespace, parser: argparse.ArgumentParser) -> dict[str, Any]:
     """Resolve every path the page is built from, whoever supplied it."""
 
@@ -706,6 +913,7 @@ def _web_inputs(args: argparse.Namespace, parser: argparse.ArgumentParser) -> di
             "\n"
             "\npaths resolve against the file's own folder; any explicit --flag wins."
             "\n'echelle status' says what catalogs and calibrations exist."
+            "\njust want to see the page first? echelle web --practice --open"
         )
 
     catalog = _require_file(
@@ -821,9 +1029,37 @@ def web_main(argv: list[str] | None = None, *, prog: str = "echelle web") -> int
         metavar="DIR",
         help="Snapshot root used with --registry (default: calibrations beside the registry).",
     )
+    parser.add_argument(
+        "--practice",
+        action="store_true",
+        help=(
+            "Build an invented practice campaign in a fresh temp folder -- no "
+            "catalog, no drives, nothing real. Learn the page with empty hands."
+        ),
+    )
     args = parser.parse_args(argv)
 
     def run() -> int:
+        if args.practice:
+            conflicts = [
+                flag
+                for flag, value in (
+                    ("--catalog", args.catalog),
+                    ("--output", args.output),
+                    ("--home", args.home),
+                    ("--drift", args.drift),
+                    ("--registry", args.registry),
+                    ("--calibrations", args.calibrations),
+                    ("--document", args.document),
+                )
+                if value
+            ]
+            if conflicts:
+                raise CommandError(
+                    "practice builds an invented campaign; it takes no inputs -- "
+                    f"drop {', '.join(conflicts)} or drop --practice"
+                )
+            return _run_practice(open_page=args.open)
         resolved = _web_inputs(args, parser)
         try:
             path = build_reading_room(

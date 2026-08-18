@@ -181,6 +181,9 @@ label, evidence file name, sample size), with every derived value editable
 under an "Advanced" fold; see the
 [campaign page composer](docs/harbor-candidate.md#the-campaign-page).
 
+Learn the page with nothing: `echelle web --practice --open` — an invented
+campaign built to a temp folder, labels say PRACTICE.
+
 The current checkout also contains an **unreleased Packets 9–13 implementation
 candidate** for drive catalogs, cube-derived LHD text, post-hoc cube
 recalibration, sampled drift/refinement evidence, a read-only reading room, and
