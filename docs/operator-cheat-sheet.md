@@ -119,12 +119,12 @@ developer tools cannot be assumed.
 | `echelle snapshot validate DIR` | Rechecks snapshot schema, paths, sizes, and SHA-256 digests | Yes |
 | `echelle snapshot show DIR` | Prints a compact snapshot summary | Yes |
 | `echelle snapshot import-historical ID --calibrations DIR` | Converts a bundled 2019/2024/2025 binder into a registrable snapshot; `--artifact-root` supplies campaign folders too large to package | Once per historical epoch |
-| `echelle process INPUT -o OUTPUT` | Converts one SIF, a folder, or several drives to SpectroCube NetCDF and records resumable receipts | Yes; a registry run needs `--sample N` or `--drift-verdict` |
+| `echelle process INPUT -o OUTPUT` | Converts one SIF, a folder, or several drives to SpectroCube NetCDF and records resumable receipts; a plain filename pattern (default `*.SIF`) walks the whole source tree, pruning `calibrations/` folders and any folder holding `snapshot.toml` | Yes; a registry run needs `--sample N`/`--sample auto` or `--drift-verdict` |
 | `echelle catalog build/merge` | Writes per-drive catalogs keyed on stable drive ids and merges them by recency into an all-years index | Candidate; audit/catalog work |
 | `echelle txt CUBE OUTPUT` / `echelle-cube2txt` | Writes LHD text at the frozen legacy header; refuses a cube missing `trigger_delay_s`, `frame_interval_s` or `exposure_s` | Candidate; no raw SIF needed |
 | `echelle recal-cube CUBE --new-snapshot DIR` | Applies safe wavelength/factor snapshot deltas and refuses geometry changes | Candidate; reviewed repair only |
-| `echelle drift audit/refine` | Samples Balmer/Fulcher centroids, solves one rigid detector shift in pixels, emits a four-state verdict, and accepts immutable `-rN` refinements. Each Balmer window is judged against both the H and D references and assigned to the nearer one, so a deuterium shot is tagged `D` and read as aligned instead of condemned by the 0.178 nm isotope offset; a `D` shot drops the H2 Fulcher anchors, and a tag that disagrees with the bundled LHD deuterium calendar is flagged in the evidence, never silently resolved | Candidate; required before any registry run |
-| `echelle web --catalog INDEX --output DIR` | Builds the static read-only campaign page into `DIR/index.html`, which you open by double-clicking it — four tabs: Now (a per-drive stepper saying what to do first), Drives (catalog with a local Find), Calibration (epochs and drift verdicts) and the packaged reading room; `--registry` and `--drift` are what let the stepper place the campaign | Candidate; never controls workers |
+| `echelle drift audit/refine` | Samples Balmer/Fulcher centroids, solves one rigid detector shift in pixels, emits a four-state verdict, and accepts immutable `-rN` refinements. `-o` is optional — omitted, the evidence lands beside the audited cubes as the next free `drift-evidence-NNN.json`; `--every` is optional too, derived so roughly 20 cubes get measured. Each Balmer window is judged against both the H and D references and assigned to the nearer one, so a deuterium shot is tagged `D` and read as aligned instead of condemned by the 0.178 nm isotope offset; a `D` shot drops the H2 Fulcher anchors, and a tag that disagrees with the bundled LHD deuterium calendar is flagged in the evidence, never silently resolved | Candidate; required before any registry run |
+| `echelle web [--open]` | Builds the static read-only campaign page and always prints its absolute `index.html` path; `--open` also opens it in the default browser. Four tabs: Now (a per-drive stepper saying what to do first), Drives (catalog with a local Find), Calibration (epochs and drift verdicts) and the packaged reading room. `--home DIR-or-campaign.toml`, or a `campaign.toml` in the current directory, supplies `--catalog`/`--output`/`--registry`/`--calibrations`/`--drift` defaults that explicit flags always override; `--registry` and `--drift` are what let the stepper place the campaign | Candidate; never controls workers |
 | `echelle historical` | Validates the three thin historical calibration binders | Candidate; inspection only |
 | `echelle-pattern SPHERE BACKGROUND` | Previews or writes a detector order-pattern fit | Specialist recalibration |
 | `echelle-align SIGNAL BACKGROUND SPHERE SPHERE_BG` | Previews or saves a rigid wavelength-table alignment | Specialist recalibration |
@@ -165,32 +165,37 @@ $Data = "D:\NIFS"
 .\echelle.ps1 snapshot validate "$Data\calibrations\20260814_cmos"
 
 # 4. Preview the first sample without writing files or receipts.
+#    --sample auto derives its size from what the folder holds
+#    (max(5, min(30, ceil(files/25))), or every file when fewer than 5).
 .\echelle.ps1 process "$Data\shots" `
   -o "$Data\cubes" `
   --runs-dir "$Data\runs" `
   --registry "$Data\calibration_registry.toml" `
   --calibrations "$Data\calibrations" `
   --volume-label NIFS-A `
-  --sample 5 `
+  --sample auto `
   --dry-run
 
 # 5. Take the sample for real by repeating step 4 without --dry-run.
 #    Nothing else may run yet: these cubes are the audit's input.
 
 # 6. Audit the sample into one immutable verdict file. The audit takes the
-#    cube folder itself, so no shell glob is involved.
+#    cube folder itself, so no shell glob is involved. -o is optional: left
+#    out, the evidence is written beside the cubes as the next free
+#    drift-evidence-NNN.json, numbered from 001. --every is optional too,
+#    derived as max(1, cubes // 20) so roughly 20 cubes get measured.
 .\echelle.ps1 drift audit "$Data\cubes" `
-  --calibrations "$Data\calibrations" `
-  -o "$Data\epoch-drift.json"
+  --calibrations "$Data\calibrations"
 
-# 7. Process the whole drive under that verdict.
+# 7. Process the whole drive under that verdict. Name the evidence file the
+#    audit just printed, e.g. drift-evidence-001.json beside the cubes.
 .\echelle.ps1 process "$Data\shots" `
   -o "$Data\cubes" `
   --runs-dir "$Data\runs" `
   --registry "$Data\calibration_registry.toml" `
   --calibrations "$Data\calibrations" `
   --volume-label NIFS-A `
-  --drift-verdict "$Data\epoch-drift.json"
+  --drift-verdict "$Data\cubes\drift-evidence-001.json"
 
 # 8. Index what this drive now holds, and fold it into the all-years index.
 .\echelle.ps1 catalog build "$Data\cubes" `
@@ -201,15 +206,14 @@ $Data = "D:\NIFS"
 .\echelle.ps1 catalog merge "$Data\cubes\catalog.json" `
   -o "$Data\all-years.json"
 
-# 9. Build and open the campaign page.
+# 9. Build and open the campaign page in one step.
 .\echelle.ps1 web `
   --catalog "$Data\all-years.json" `
   --output "$Data\campaign-page" `
   --registry "$Data\calibration_registry.toml" `
   --calibrations "$Data\calibrations" `
-  --drift "$Data\epoch-drift.json"
-
-Invoke-Item "$Data\campaign-page\index.html"
+  --drift "$Data\cubes\drift-evidence-001.json" `
+  --open
 ```
 
 ### macOS Terminal
@@ -235,32 +239,37 @@ data="/Volumes/NIFS"
 ./echelle snapshot validate "$data/calibrations/20260814_cmos"
 
 # 4. Preview the first sample before writing cubes or receipts.
+#    --sample auto derives its size from what the folder holds
+#    (max(5, min(30, ceil(files/25))), or every file when fewer than 5).
 ./echelle process "$data/shots" \
   -o "$data/cubes" \
   --runs-dir "$data/runs" \
   --registry "$data/calibration_registry.toml" \
   --calibrations "$data/calibrations" \
   --volume-label NIFS-A \
-  --sample 5 \
+  --sample auto \
   --dry-run
 
 # 5. Take the sample for real by repeating step 4 without --dry-run.
 #    Nothing else may run yet: these cubes are the audit's input.
 
 # 6. Audit the sample into one immutable verdict file. The audit takes the
-#    cube folder itself, so no shell glob is involved.
+#    cube folder itself, so no shell glob is involved. -o is optional: left
+#    out, the evidence is written beside the cubes as the next free
+#    drift-evidence-NNN.json, numbered from 001. --every is optional too,
+#    derived as max(1, cubes // 20) so roughly 20 cubes get measured.
 ./echelle drift audit "$data/cubes" \
-  --calibrations "$data/calibrations" \
-  -o "$data/epoch-drift.json"
+  --calibrations "$data/calibrations"
 
-# 7. Process the whole drive under that verdict.
+# 7. Process the whole drive under that verdict. Name the evidence file the
+#    audit just printed, e.g. drift-evidence-001.json beside the cubes.
 ./echelle process "$data/shots" \
   -o "$data/cubes" \
   --runs-dir "$data/runs" \
   --registry "$data/calibration_registry.toml" \
   --calibrations "$data/calibrations" \
   --volume-label NIFS-A \
-  --drift-verdict "$data/epoch-drift.json"
+  --drift-verdict "$data/cubes/drift-evidence-001.json"
 
 # 8. Index what this drive now holds, and fold it into the all-years index.
 ./echelle catalog build "$data/cubes" \
@@ -271,26 +280,26 @@ data="/Volumes/NIFS"
 ./echelle catalog merge "$data/cubes/catalog.json" \
   -o "$data/all-years.json"
 
-# 9. Build and open the campaign page.
+# 9. Build and open the campaign page in one step.
 ./echelle web \
   --catalog "$data/all-years.json" \
   --output "$data/campaign-page" \
   --registry "$data/calibration_registry.toml" \
   --calibrations "$data/calibrations" \
-  --drift "$data/epoch-drift.json"
-
-open "$data/campaign-page/index.html"
+  --drift "$data/cubes/drift-evidence-001.json" \
+  --open
 ```
 
 Put every accepted snapshot ID into the ordered registry and verify its
 inclusive bounds with `echelle status` before processing. Use one
 `--volume-label` for each input folder when processing several drives.
 
-Steps 4–7 are the whole gate: a registry-backed run needs either `--sample N`,
-which processes at most N resolved files and marks its receipt and cubes as an
-unverified sample, or `--drift-verdict`, which spends the sampled evidence the
-audit wrote. A run with an explicit `--config` calibration and no registry stays
-legal and is recorded as `ungated (no registry)`.
+Steps 4–7 are the whole gate: a registry-backed run needs either `--sample N`
+or `--sample auto`, which processes at most N (or the derived count) resolved
+files and marks its receipt and cubes as an unverified sample, or
+`--drift-verdict`, which spends the sampled evidence the audit wrote. A run
+with an explicit `--config` calibration and no registry stays legal and is
+recorded as `ungated (no registry)`.
 
 ## Where the bench writes
 
@@ -328,8 +337,22 @@ from, is [From calibration to cube](calibration-to-cube.md).
 
 ## The campaign page
 
-`echelle web` writes one self-contained `index.html`. There is no server and
-nothing is fetched: **double-click the file** to open it in a browser.
+`echelle web` writes one self-contained `index.html` and always prints its
+absolute path. There is no server and nothing is fetched: **double-click the
+file** to open it in a browser, or pass `--open` and let the command do that
+for you.
+
+The simplest form reads a hand-editable `campaign.toml` beside the campaign —
+in the current directory, or wherever `--home DIR-or-campaign.toml` points —
+for whichever of `--catalog`/`--output`/`--registry`/`--calibrations`/`--drift`
+are missing from the command line; paths inside it resolve against the file's
+own folder, and any explicit flag still wins:
+
+```powershell
+.\echelle.ps1 web --open
+```
+
+Without a `campaign.toml`, name everything explicitly:
 
 ```powershell
 .\echelle.ps1 web `
@@ -337,16 +360,24 @@ nothing is fetched: **double-click the file** to open it in a browser.
   --output "$Data\campaign-page" `
   --registry "$Data\calibration_registry.toml" `
   --calibrations "$Data\calibrations" `
-  --drift "$Data\epoch-drift.json"
+  --drift "$Data\epoch-drift.json" `
+  --open
 ```
 
-- `--catalog` is required: the merged all-years index from `echelle catalog
-  merge`, or a single drive's catalog.
-- `--output` is required: the folder `index.html` is written into.
+- `--catalog` is required (from the command line or `campaign.toml`): the
+  merged all-years index from `echelle catalog merge`, or a single drive's
+  catalog.
+- `--output` is required (from the command line or `campaign.toml`): the
+  folder `index.html` is written into.
 - `--registry` and `--calibrations` name the epochs, and `--drift` supplies the
   verdicts; together they are what let the Now tab place the campaign and say
   what to do next. Without them the page still builds, with less to say.
 - `--document` appends one extra Markdown file after the packaged reading room.
+
+The page's own composer asks for exactly two things — the data folder and the
+calibration epoch — and derives the rest, with the derived values editable
+under an "Advanced" fold; see [the campaign page
+composer](harbor-candidate.md#the-campaign-page).
 
 The page is a snapshot of the moment it was built. After processing more shots,
 rebuild the catalog and rerun `echelle web` over the same `--output` folder to
@@ -443,9 +474,14 @@ Two related refusals:
 
 ### Processing finds no files
 
-Folder processing defaults to `*.SIF`. For lowercase acquisition filenames,
-add `--pattern "*.sif"`. Start with `--dry-run` and inspect the listed sources
-before allowing writes.
+Folder processing defaults to `*.SIF` and, because that is a plain filename
+pattern rather than one written with `/` or `**`, walks the whole source tree
+under the folder you named — real campaign drives are date-named day folders,
+so shots several levels down are still found. It prunes any folder named
+`calibrations` and any folder holding `snapshot.toml`, so lamp frames are
+never swept up as science shots. For lowercase acquisition filenames, add
+`--pattern "*.sif"` (also tried automatically as a fallback). Start with
+`--dry-run` and inspect the listed sources before allowing writes.
 
 ### The kit installer refuses to continue
 

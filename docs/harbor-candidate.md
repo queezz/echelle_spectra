@@ -74,9 +74,15 @@ SIF data. There is deliberately no approximation for changed geometry.
 ## Drift audit and refinement
 
 ```console
-echelle drift audit cubes --every 20 --shot 193778 -o epoch-drift.json
-echelle drift refine epoch-drift.json --calibrations calibrations --accept-shift 5.0
+echelle drift audit cubes --shot 193778
+echelle drift refine drift-evidence-001.json --calibrations calibrations --accept-shift 5.0
 ```
+
+`-o` is optional: left out, the evidence is written beside the audited cubes as
+the next free `drift-evidence-NNN.json`, numbered from 001 — evidence stays
+immutable, so a rerun takes the next name rather than overwriting one. `--every`
+is optional too, derived as `max(1, cubes // 20)` so roughly 20 cubes are
+measured; an explicit `--every` or `-o` always wins.
 
 The audit fits baseline-subtracted Balmer and Fulcher centroids over the
 plasma-bright frames only, then leaves wavelength for detector pixels. Each
@@ -124,12 +130,16 @@ for the gate and the authorization each receipt records.
 ## The campaign page
 
 ```console
-echelle web --catalog all-years.json --drift epoch-drift.json --registry calibration_registry.toml --output reading-room
+echelle web --catalog all-years.json --drift epoch-drift.json --registry calibration_registry.toml --output reading-room --open
 ```
 
 `echelle web` writes one self-contained `index.html` — no sidecar, no second
 file, nothing fetched at open time — organized by the work rather than by the
-data. Four tabs: **Now** (the flow), **Drives** (the catalog), **Calibration**
+data, and always prints its absolute path. `--open` additionally opens it in
+the default browser; without a `campaign.toml` supplying `--catalog`/
+`--output`/`--registry`/`--calibrations`/`--drift`, every path is named
+explicitly as above. The page also links out to the documentation site. Four
+tabs: **Now** (the flow), **Drives** (the catalog), **Calibration**
 (epochs and drift evidence in sequence position) and **Reading room** (the
 packaged canon). Pressing a tab always returns it to its own home state, even
 from inside an open fold, and lands at the top of the destination. Each rail
@@ -151,16 +161,22 @@ that did not answer keep one collapsed remembered line each. Teaching lives
 once per tab, in that tab's legend; cards carry chips, counts and one truncated
 path whose whole value stays in its title.
 
-The composer is pre-filled from the page's own data — drives and epochs from
-the catalog, epoch ids from `--registry`, verdict paths from `--drift` — and
-writes a plan TOML plus three commands: the bulk `echelle process --plan` run
-that reads that plan, the `echelle drift audit` that must precede it, and an
-`echelle-calib` bench check. It lives in the Now rail, where the ready steps'
-commands are read; the Drives rail keeps a one-press entry into it. Every
-command row leads with plain words, keeps the literal command behind a
-show/hide toggle, offers PowerShell and POSIX shapes, and copies the whole
-command whether the toggle is open or closed. The raw-SIF input folder is the
-one field the page cannot fill, and it says so rather than guessing.
+The composer asks for exactly two things: the data folder holding the SIF
+shots, and the calibration — a registry epoch. Everything else is derived —
+the cubes folder is the data folder, the volume label is the folder name, the
+evidence file is the next free `drift-evidence-NNN.json`, and the sample size
+is `--sample auto` — with every derived value editable under an "Advanced"
+fold before the commands are copied. It writes three commands, read in
+campaign order: the sample, the `echelle drift audit` wavelength-alignment
+check, and the bulk `echelle process` conversion, which stays locked until the
+audit's verdict authorizes it. It is pre-filled from the page's own data —
+drives and epochs from the catalog, epoch ids from `--registry` — and lives in
+the Now rail, where the ready steps' commands are read; the Drives rail keeps
+a one-press entry into it. Every command row leads with plain words, keeps the
+literal command behind a show/hide toggle, offers PowerShell and POSIX shapes,
+and copies the whole command whether the toggle is open or closed. The raw-SIF
+data folder and the calibration are the two things the page cannot derive and
+must ask for.
 
 Three step states have no file behind them today and are rendered as `not
 recorded` rather than guessed: the bench session itself (only the snapshot it

@@ -42,7 +42,7 @@
 | Make a new calibration at the instrument | `echelle-calib path/to/todays-calibration-folder` — the live bench | [Live calibration bench](docs/calibration-bench.md) |
 | Turn a drive full of SIFs into cubes and LHD text | `echelle` — the campaign umbrella command | [Operator cheat sheet](docs/operator-cheat-sheet.md) |
 | Look at one SIF | `echelle_spectra` — the single-SIF viewer | [Single-SIF viewer](docs/usage.md) |
-| See the campaign as a page I can read and share | `echelle web --catalog INDEX --output DIR`, then open `DIR/index.html` | [Operator cheat sheet](docs/operator-cheat-sheet.md#the-campaign-page) |
+| See the campaign as a page I can read and share | `echelle web --open`, reading a `campaign.toml` beside the campaign | [Operator cheat sheet](docs/operator-cheat-sheet.md#the-campaign-page) |
 
 The primary workflow is **snapshot → registry → process**: the bench saves an
 immutable calibration snapshot, the epoch registry says which shots it covers,
@@ -136,7 +136,29 @@ provenance into each cube.
 
 `echelle web` builds one self-contained static page from a cube catalog — the
 Now stepper, the drives, the calibration evidence, and the packaged reading
-room:
+room. It always prints the absolute path of the `index.html` it writes.
+
+The simple form reads a hand-editable `campaign.toml` sitting beside the
+campaign and opens the result in your browser in one step:
+
+```bash
+echelle web --open
+```
+
+```toml
+# campaign.toml — the defaults echelle web reads when --catalog or --output
+# is not given on the command line. Paths resolve against this file's own
+# folder; any explicit --flag on the command line wins over these.
+catalog = "all-years.json"
+output = "campaign-page"
+registry = "calibration_registry.toml"
+calibrations = "calibrations"
+drift = ["epoch-drift.json"]
+```
+
+Point `--home DIR-or-campaign.toml` at one kept elsewhere. The fully-flagged
+form remains the explicit alternative — useful before a `campaign.toml`
+exists, or to override every path from the command line:
 
 ```bash
 echelle web \
@@ -148,9 +170,16 @@ echelle web \
 ```
 
 It writes `/data/campaign-page/index.html`. **Double-click that file to open
-it** — there is no server and nothing is fetched. It is a snapshot of the moment
-it was built, so rebuild the catalog and rerun `echelle web` after further
+it**, or pass `--open` above to have the command do that for you — either way
+there is no server and nothing is fetched. It is a snapshot of the moment it
+was built, so rebuild the catalog and rerun `echelle web` after further
 processing to refresh what it shows.
+
+The campaign page's own composer asks for exactly two things — the data
+folder and the calibration epoch — and derives the rest (cubes folder, volume
+label, evidence file name, sample size), with every derived value editable
+under an "Advanced" fold; see the
+[campaign page composer](docs/harbor-candidate.md#the-campaign-page).
 
 The current checkout also contains an **unreleased Packets 9–13 implementation
 candidate** for drive catalogs, cube-derived LHD text, post-hoc cube

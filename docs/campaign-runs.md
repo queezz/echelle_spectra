@@ -4,32 +4,49 @@
 you keep the run state in your head. Every non-dry batch creates a durable run
 receipt under `local/runs/` by default.
 
+## Batch discovery
+
+A plain filename pattern — the default `*.SIF`, or anything else with no `/`
+and no `**` — walks the *whole* source tree under the folder you named, not
+just its top level: real campaign drives are date-named day folders, and a
+shot several levels down is still found. Two kinds of folder are pruned from
+that walk so lamp frames are never eaten as science shots: any folder named
+`calibrations`, and any folder holding a `snapshot.toml`. A pattern containing
+`/` or `**` is used exactly as typed, with no pruning applied. A case-
+insensitive `*.sif` fallback still runs when the primary pattern finds
+nothing, so lowercase acquisition filenames are not a separate step.
+
 A registry-backed drive takes three commands: sample the epoch, audit the
 sample, then process the drive under the verdict the audit wrote.
 
 ```powershell
-# 1. Sample the first five resolved files. No verdict is needed yet, and every
-#    produced cube is marked drift_sample.
-echelle process D:\nifs\shots `
-  -o D:\nifs\spectrocubes `
-  --registry D:\nifs\calibration_registry.toml `
-  --calibrations D:\nifs\calibrations `
+# 1. Sample the epoch. --sample auto derives the count from what the folder
+#    holds (max(5, min(30, ceil(files/25))), or every file when fewer than
+#    5); no verdict is needed yet, and every produced cube is marked
+#    drift_sample.
+echelle process D:\NIFS\shots `
+  -o D:\NIFS\spectrocubes `
+  --registry D:\NIFS\calibration_registry.toml `
+  --calibrations D:\NIFS\calibrations `
   --volume-label NIFS-A `
-  --sample 5
+  --sample auto
 
 # 2. Audit the sample into one immutable verdict file. The audit takes the
-#    cube folder itself, so the same line works in any shell.
-echelle drift audit D:\nifs\spectrocubes `
-  --calibrations D:\nifs\calibrations `
-  -o D:\nifs\epoch-drift.json
+#    cube folder itself, so the same line works in any shell. -o is optional:
+#    left out, the evidence is written beside the audited cubes as the next
+#    free drift-evidence-NNN.json, numbered from 001 (evidence is immutable,
+#    so a rerun takes the next name rather than overwriting).
+echelle drift audit D:\NIFS\spectrocubes `
+  --calibrations D:\NIFS\calibrations
 
-# 3. Process the whole drive under that verdict.
-echelle process D:\nifs\shots `
-  -o D:\nifs\spectrocubes `
-  --registry D:\nifs\calibration_registry.toml `
-  --calibrations D:\nifs\calibrations `
+# 3. Process the whole drive under that verdict, naming the file the audit
+#    printed.
+echelle process D:\NIFS\shots `
+  -o D:\NIFS\spectrocubes `
+  --registry D:\NIFS\calibration_registry.toml `
+  --calibrations D:\NIFS\calibrations `
   --volume-label NIFS-A `
-  --drift-verdict D:\nifs\epoch-drift.json
+  --drift-verdict D:\NIFS\spectrocubes\drift-evidence-001.json
 ```
 
 Step 3 resumes the receipt written by step 1: the sampled files are verified and
@@ -47,7 +64,7 @@ authorized. Every run records one of three gates in its receipt:
 | Gate | Meaning |
 | --- | --- |
 | `verdict` | `--drift-verdict` named sampled evidence that covers every snapshot this run selected. The receipt also stores the evidence path, its SHA-256, and the verdict word. |
-| `sample` | `--sample N` processed at most the first N resolved files (sorted by path) with no verdict at all. The receipt stores `sample = true` and the file count; every cube carries `drift_sample = 1`. |
+| `sample` | `--sample N` (or `--sample auto`, which derives N from the folder's file count) processed at most the first N resolved files (sorted by path) with no verdict at all. The receipt stores `sample = true` and the file count; every cube carries `drift_sample = 1`. |
 | `ungated (no registry)` | The run used an explicit `--config`/`--snapshot-id`/`--camera` calibration. That is legal, and the receipt says forever that no sampled audit stood behind it. |
 
 `--sample` and `--drift-verdict` cannot be combined: one takes unverified
@@ -79,14 +96,14 @@ Pass one source folder per drive. Echelle runs one sequential reader for each
 source and processes those sources concurrently:
 
 ```powershell
-echelle process D:\nifs-a\shots E:\nifs-b\shots `
-  -o F:\nifs-cubes `
-  --runs-dir F:\nifs-runs `
+echelle process D:\NIFS\shots E:\NIFS\shots `
+  -o F:\NIFS\spectrocubes `
+  --runs-dir F:\NIFS\runs `
   --volume-label NIFS-A `
   --volume-label NIFS-B `
-  --registry F:\nifs-calibration\calibration_registry.toml `
-  --calibrations F:\nifs-calibration\calibrations `
-  --drift-verdict F:\nifs-calibration\epoch-drift.json
+  --registry F:\NIFS\calibration_registry.toml `
+  --calibrations F:\NIFS\calibrations `
+  --drift-verdict F:\NIFS\epoch-drift.json
 ```
 
 Each target is gated on its own. `--sample 5` samples each source folder
@@ -145,7 +162,7 @@ is not accepted as completed. To name the resume explicitly, use the path
 printed at interruption:
 
 ```powershell
-echelle process D:\nifs\shots -o D:\nifs\spectrocubes `
+echelle process D:\NIFS\shots -o D:\NIFS\spectrocubes `
   --run-dir local\runs\2026-08-13_12-00-00-shots
 ```
 
@@ -171,7 +188,7 @@ created_at = "2026-08-14T09:12:04.118Z"
 ```
 
 Later runs read it instead of writing a new one, and catalogs key on the `id`.
-A USB disk that returns as `F:` on Windows and under `/Volumes/NIFS-A` on macOS
+A USB disk that returns as `D:` on Windows and under `/Volumes/NIFS` on macOS
 therefore stays one drive with one history. The `label` is display only: edit it
 freely, and never copy an `id` onto a second drive. `--volume-label` sets the
 label a run reports; it never changes an announced id.
@@ -189,7 +206,7 @@ authorized the run that produced it, so a sampled drive never reads as a
 verified one. Write or refresh one by hand with the same command the run uses:
 
 ```powershell
-echelle catalog build D:\nifs\spectrocubes `
+echelle catalog build D:\NIFS\spectrocubes `
   --volume-label NIFS-A `
   --receipt-dir local\runs\2026-08-13_12-00-00-shots
 ```
@@ -215,9 +232,9 @@ that merge safe to repeat:
 Merge automatically after every completed target by naming the index on the run:
 
 ```powershell
-echelle process D:\nifs\shots -o D:\nifs\spectrocubes `
+echelle process D:\NIFS\shots -o D:\NIFS\spectrocubes `
   --volume-label NIFS-A `
-  --central-index C:\nifs\all-years.json
+  --central-index C:\NIFS\all-years.json
 ```
 
 Only a completed target is folded in; an interrupted or partial run still writes
