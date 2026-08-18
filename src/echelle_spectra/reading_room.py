@@ -33,11 +33,17 @@ law (fleet's ``WEBUI.md`` and ``WEBUI-COOKBOOK.md``):
 When a local server serves the same page (``served=True``) it gains one power
 the file cannot have: it may ask that server which folders exist on this
 machine.  That is the whole served half — a folder picker behind a Browse
-button on the composer's data-folder field, and the two one-screen pages a cold
-campaign is served (:func:`render_setup_page` when no campaign home is recorded
-yet, :func:`render_empty_campaign_page` when a home has no catalog yet).  Every
-one of those pieces is *appended* to the static build rather than woven into
-it, so the one-shot file keeps its "fetches nothing" contract byte for byte.
+button on the composer's data-folder field, plus :func:`render_setup_page`, the
+one-screen page a machine with no campaign home yet is served.  Every one of
+those pieces is *appended* to the static build rather than woven into it, so
+the one-shot file keeps its "fetches nothing" contract byte for byte.
+
+:func:`render_empty_campaign_page` renders the other cold state — a home whose
+catalog has not been written yet — but nothing serves it: the server renders
+that campaign as the FULL page over a synthesized empty catalog instead, so
+every control exists before the first scan result does.  It is kept as the
+one-screen alternative, and it is named here as one nothing currently reaches
+rather than left to look load-bearing.
 """
 
 from __future__ import annotations
@@ -53,6 +59,11 @@ from typing import Any
 
 from .campaign_run import GATE_SAMPLE, GATE_UNGATED, GATE_UNRECORDED, GATE_VERDICT
 from .catalog import load_catalog, source_catalog_path
+
+try:  # pragma: no cover - selected by the running Python version
+    import tomllib
+except ModuleNotFoundError:  # pragma: no cover - Python 3.9/3.10
+    import tomli as tomllib
 
 #: The three documents whose canonical text lives inside the installed package.
 #: ``echelle web`` renders these from ``importlib.resources``, so a travel kit
@@ -493,6 +504,12 @@ def _composer_values(
     Two answers compose a campaign -- the data folder and the calibration --
     and every value here is derived from those two plus this build's own
     inputs.  Nothing is baked in: no example drive ships with the page.
+
+    ``catalog_path`` here is the path the campaign's commands must WRITE and
+    READ, which is not always the file this build loaded: a campaign that has
+    not been scanned yet is rendered over a scaffolding catalog, and composing
+    against that scaffolding would send the operator's first command to write
+    the central index somewhere the campaign never reads.
     """
 
     return {
@@ -502,7 +519,10 @@ def _composer_values(
         "calibrations": registry.get("calibrations") or "calibrations",
         "catalog": _posix(catalog_path),
         "plan": "campaign-plan.toml",
-        "epoch": epochs[0] if epochs else "unassigned",
+        # "unassigned" is a cube's way of saying it had no calibration identity,
+        # so it is never a calibration to seed: the select does not offer it
+        # either, and an empty seed matches the one option it does offer.
+        "epoch": next((item for item in epochs if item and item != "unassigned"), ""),
     }
 
 
@@ -1716,6 +1736,16 @@ def _composer_card(
         )
         + '<label class="field"><span>Calibration</span>'
         f'<select id="f-epoch">{_epoch_options(epochs, registry)}</select></label>'
+        # A list cut short by the scan budget says so, once and quietly, right
+        # where it is read: a short list that looks complete is the same lie as
+        # an empty one.
+        + (
+            '<p class="muted">The snapshot root holds more folders than one page '
+            "build reads, so this list is what the scan reached and not all of "
+            "it. A snapshot missing here is not missing from the root.</p>"
+            if registry.get("saved_truncated")
+            else ""
+        )
         + "</div>"
         '<details class="fold-group" id="composer-advanced">'
         "<summary>Advanced — every derived value, editable</summary>"
@@ -2220,10 +2250,15 @@ function fill(template, values, shell) {
 var derivedEdits = { output: false, label: false, verdict: false };
 var DERIVED_FIELDS = { output: 'f-output', label: 'f-label', verdict: 'f-verdict' };
 
+/* Python's _derived_from_folder trims with rstrip('/'), which keeps no
+   trailing slash at all -- not even the one of a literal root. Stopping a
+   character early here would derive '//drift-evidence-001.json' where Python
+   derives '/drift-evidence-001.json', and the two halves must answer the
+   same for the same folder. */
 function folderPath(text) {
   var trimmed = String(text === undefined || text === null ? '' : text)
     .split('\\\\').join('/');
-  while (trimmed.length > 1 && trimmed.charAt(trimmed.length - 1) === '/') {
+  while (trimmed.length > 0 && trimmed.charAt(trimmed.length - 1) === '/') {
     trimmed = trimmed.slice(0, -1);
   }
   return trimmed;
@@ -3190,38 +3225,102 @@ def _documents(document_paths: tuple[str | Path, ...] | list[str | Path]) -> lis
     return documents
 
 
-def _saved_snapshots(calibrations_root: str | Path | None, *, depth: int = 3) -> list[str]:
-    """The snapshot folders a calibrations root actually holds, registry or not.
+#: How many directories one page build may look at while hunting snapshots.
+#: The walk runs on the request thread of the served page and a calibrations
+#: root is routinely a NAS share, where every entry is a network round trip; a
+#: budget is what keeps a wide root from holding the page open indefinitely.
+SNAPSHOT_SCAN_BUDGET = 400
+
+
+def _snapshot_id_of(folder: Path) -> str:
+    """The id a snapshot folder declares, falling back to its own name.
+
+    Same rule as :func:`echelle_spectra.snapshot.read_snapshot_folder`: the
+    manifest id is the identity, and the folder name is the fallback precisely
+    for the binder whose id is missing.  Only the manifest is opened here --
+    the page needs the name, not the validation the bench runs.
+    """
+
+    try:
+        with (folder / "snapshot.toml").open("rb") as stream:
+            manifest = tomllib.load(stream)
+    except (OSError, tomllib.TOMLDecodeError):
+        return folder.name
+    declared = str(manifest.get("id", "") or "").strip()
+    return declared or folder.name
+
+
+def _snapshot_binding(entry: Path) -> tuple[bool, str]:
+    """One directory entry, read once: ``(is a folder, the id it binds or "")``.
+
+    Both answers come from the same look because both cost the same stat, and
+    the walk below needs both: an id to offer, or a folder to look inside.
+    """
+
+    try:
+        if not entry.is_dir():
+            return False, ""
+        if not (entry / "snapshot.toml").is_file():
+            return True, ""
+    except OSError:  # pragma: no cover - unreadable mount points
+        return False, ""
+    return True, _snapshot_id_of(entry)
+
+
+def _saved_snapshots(
+    calibrations_root: str | Path | None, *, depth: int = 3
+) -> tuple[list[str], bool]:
+    """The snapshots a calibrations root actually holds, registry or not.
 
     A saved snapshot is real the moment the bench writes it; a page that only
     believes the registry tells an operator with years of snapshots that "no
     snapshot is in reach", which is false (owner, 2026-08-18: "my WEBUI still
-    sees no calibration").  The walk is shallow and bounded because snapshots
-    sit at most a couple of levels down whatever folder shape the campaign
-    grew (``calibrations/<id>/``, ``calibrations/<day>/calibrations/<id>/``).
+    sees no calibration").  The walk is shallow because snapshots sit at most a
+    couple of levels down whatever folder shape the campaign grew
+    (``calibrations/<id>/``, ``calibrations/<day>/calibrations/<id>/``).
+
+    It is also bounded in breadth, which shallowness alone does not give: three
+    levels of a wide NAS root is still an unbounded number of network stats.
+    Returns ``(ids, truncated)`` -- what the budget reached, and whether it ran
+    out, because a list silently cut short would be the same lie the registry-
+    only page told.
     """
 
     if not calibrations_root:
-        return []
+        return [], False
     found: set[str] = set()
+    remaining = SNAPSHOT_SCAN_BUDGET
+    truncated = False
 
     def walk(folder: Path, budget: int) -> None:
+        nonlocal remaining, truncated
+        deeper: list[Path] = []
         try:
-            entries = [entry for entry in folder.iterdir() if entry.is_dir()]
+            # Spent per entry as the listing is read, never after building one:
+            # materialising a wide root's whole listing first is the cost this
+            # budget exists to refuse.
+            for entry in folder.iterdir():
+                if remaining <= 0:
+                    truncated = True
+                    return
+                remaining -= 1
+                is_folder, identity = _snapshot_binding(entry)
+                if identity:
+                    found.add(identity)
+                elif is_folder and budget > 1:
+                    deeper.append(entry)
         except OSError:
             return
-        for entry in entries:
-            try:
-                is_snapshot = (entry / "snapshot.toml").is_file()
-            except OSError:  # pragma: no cover - unreadable mount points
-                continue
-            if is_snapshot:
-                found.add(entry.name)
-            elif budget > 1:
-                walk(entry, budget - 1)
+        for child in deeper:
+            if remaining <= 0:
+                truncated = True
+                return
+            walk(child, budget - 1)
 
     walk(Path(calibrations_root), depth)
-    return sorted(found)
+    # Deduped by id, so two folders binding the same snapshot offer one option,
+    # and sorted, so the same root always renders the same order.
+    return sorted(found), truncated
 
 
 def _registry_context(
@@ -3230,13 +3329,15 @@ def _registry_context(
     """Read the registry for the composer, or say honestly that it was not read."""
 
     if registry_path is None:
+        saved, truncated = _saved_snapshots(calibrations_root)
         return {
             "status": "not supplied",
             "path": "",
             "detail": "",
             "epochs": [],
             "epoch_rows": [],
-            "saved": _saved_snapshots(calibrations_root),
+            "saved": saved,
+            "saved_truncated": truncated,
             "calibrations": _posix(calibrations_root) if calibrations_root else "",
         }
     from .calibration_registry import CalibrationRegistryError, load_calibration_registry
@@ -3246,20 +3347,24 @@ def _registry_context(
     try:
         registry = load_calibration_registry(path, snapshots_root=root)
     except (CalibrationRegistryError, OSError) as exc:
+        saved, truncated = _saved_snapshots(root)
         return {
             "status": "unreadable",
             "path": _posix(path),
             "detail": str(exc),
             "epochs": [],
             "epoch_rows": [],
-            "saved": _saved_snapshots(root),
+            "saved": saved,
+            "saved_truncated": truncated,
             "calibrations": _posix(root),
         }
+    saved, truncated = _saved_snapshots(root)
     return {
         "status": "read",
         "path": _posix(path),
         "detail": "",
-        "saved": _saved_snapshots(root),
+        "saved": saved,
+        "saved_truncated": truncated,
         "epochs": [epoch.snapshot_id for epoch in registry.epochs],
         # The bounds each epoch already declares, carried through so the page
         # can say whether one covers today rather than only counting them.
@@ -3286,6 +3391,7 @@ def build_reading_room(
     registry_path: str | Path | None = None,
     calibrations_root: str | Path | None = None,
     served: bool = False,
+    compose_catalog_path: str | Path | None = None,
 ) -> Path:
     """Build one page; no worker or command execution surface exists either way.
 
@@ -3299,8 +3405,19 @@ def build_reading_room(
     is the campaign home.  The composer's data-folder field then carries a
     Browse button opening the folder picker, and only that appended block
     fetches anything.
+
+    ``compose_catalog_path`` separates the two jobs ``catalog_path`` otherwise
+    does at once: the file this build READS, and the merged index the composed
+    commands must write to and read from.  They are the same file for every
+    ordinary build and this argument stays ``None``.  They differ for exactly
+    one caller — the server rendering a campaign whose catalog does not exist
+    yet, which loads a synthesized empty one so the whole page still appears.
+    Composing against that scaffolding would hand the operator a first command
+    that writes the campaign's central index into a temporary folder the
+    campaign then never reads, so composition names the configured path.
     """
 
+    composed_catalog = catalog_path if compose_catalog_path is None else compose_catalog_path
     loaded = load_catalog(catalog_path)
     merged = loaded.get("schema") == "echelle-merged-catalog/v1"
     catalog = _refresh_availability(loaded)
@@ -3319,7 +3436,7 @@ def build_reading_room(
     epochs = [epoch for epoch in epochs if epoch]
     evidence_name = _next_evidence_name(drift)
     values = _composer_values(
-        catalog_path=catalog_path,
+        catalog_path=composed_catalog,
         registry=registry,
         evidence_name=evidence_name,
         epochs=epochs,
@@ -3335,7 +3452,7 @@ def build_reading_room(
             anchor=anchor,
             values=_drive_values(values, source, evidence_name=evidence_name),
             merged=merged,
-            catalog_path=_posix(catalog_path),
+            catalog_path=_posix(composed_catalog),
         )
         drive_rows.append(
             {
@@ -3354,7 +3471,7 @@ def build_reading_room(
     every_step = [*calibrate_steps, *(step for row in drive_rows for step in row["steps"])]
     context = {
         "served": served,
-        "catalog_path": _posix(catalog_path),
+        "catalog_path": _posix(composed_catalog),
         "generated_at": generated_at,
         "sources": sources,
         "rows": rows,

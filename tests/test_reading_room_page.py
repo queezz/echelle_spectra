@@ -16,7 +16,14 @@ from pathlib import Path
 import pytest
 
 from echelle_spectra.calibration_registry import REGISTRY_SCHEMA
-from echelle_spectra.reading_room import _SOURCE_NOTES, build_reading_room, render_markdown
+from echelle_spectra.reading_room import (
+    _SOURCE_NOTES,
+    SNAPSHOT_SCAN_BUDGET,
+    _derived_from_folder,
+    _saved_snapshots,
+    build_reading_room,
+    render_markdown,
+)
 from echelle_spectra.snapshot import ROLE_FILENAMES, create_snapshot
 
 DRIFT_SCHEMA = "echelle-drift-evidence/v1"
@@ -128,6 +135,148 @@ def test_saved_snapshots_are_seen_without_a_registry(tmp_path: Path) -> None:
     assert "saved snapshot folder(s) on the calibrations root" in page
     # The registry epoch step still honestly wants a registry.
     assert "--registry" in page
+
+
+def _bare_catalog(tmp_path: Path, name: str = "bare.json") -> Path:
+    """A merged index naming no drive: the shape a fresh campaign has."""
+
+    path = tmp_path / name
+    path.write_text(
+        json.dumps(
+            {
+                "schema": "echelle-merged-catalog/v1",
+                "generated_at": "2026-08-18T00:00:00.000+00:00",
+                "sources": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    return path
+
+
+def _snapshot_folder(folder: Path, declared: str | None) -> Path:
+    folder.mkdir(parents=True, exist_ok=True)
+    body = f'id = "{declared}"\n' if declared is not None else "created_utc = \"\"\n"
+    (folder / "snapshot.toml").write_text(body, encoding="utf-8")
+    return folder
+
+
+def test_a_saved_snapshot_is_offered_under_the_id_its_manifest_declares(
+    tmp_path: Path,
+) -> None:
+    """The manifest id is the identity a registry and a cube both name.
+
+    A folder renamed on the way to a NAS still binds the same snapshot, so
+    offering the folder name would offer a calibration no registry can resolve.
+    Two folders binding one id are one choice, not two.
+    """
+
+    root = tmp_path / "cal"
+    _snapshot_folder(root / "2019-march-run", "20190314_cmos")
+    _snapshot_folder(root / "copied-from-the-nas", "20190314_cmos")
+    # The one case the folder name is the truth: a binder that declares no id.
+    _snapshot_folder(root / "20200101_cmos", None)
+
+    ids, truncated = _saved_snapshots(root)
+    assert ids == ["20190314_cmos", "20200101_cmos"]
+    assert truncated is False
+
+    page = build_reading_room(
+        _bare_catalog(tmp_path), tmp_path / "web-ids", calibrations_root=root
+    ).read_text(encoding="utf-8")
+    assert page.count('<option value="20190314_cmos">') == 1
+    assert '<option value="20200101_cmos">' in page
+    for folder in ("2019-march-run", "copied-from-the-nas"):
+        assert folder not in page, f"the folder name {folder!r} is not an identity"
+
+
+def test_the_snapshot_walk_stops_at_its_budget_and_the_page_says_so(
+    tmp_path: Path,
+) -> None:
+    """The walk runs on the served page's request thread, over what is usually a
+    NAS share.  Depth alone bounds nothing: three levels of a wide root is still
+    an unbounded number of network stats, so breadth is bounded too — and a list
+    cut short must say it was, or it is the same lie as claiming none exist."""
+
+    root = tmp_path / "cal"
+    root.mkdir()
+    for index in range(SNAPSHOT_SCAN_BUDGET + 40):
+        _snapshot_folder(root / f"{index:04d}_cmos", f"{index:04d}_cmos")
+
+    ids, truncated = _saved_snapshots(root)
+    assert truncated is True
+    assert len(ids) <= SNAPSHOT_SCAN_BUDGET
+    assert ids, "the budget returns what it reached, never nothing"
+
+    page = build_reading_room(
+        _bare_catalog(tmp_path), tmp_path / "web-wide", calibrations_root=root
+    ).read_text(encoding="utf-8")
+    assert "this list is what the scan reached and not all of it" in page
+    assert "A snapshot missing here is not missing from the root." in page
+
+    # A root the budget covers says nothing of the kind.
+    narrow = tmp_path / "narrow"
+    _snapshot_folder(narrow / "20190314_cmos", "20190314_cmos")
+    quiet = build_reading_room(
+        _bare_catalog(tmp_path, "bare-2.json"), tmp_path / "web-narrow", calibrations_root=narrow
+    ).read_text(encoding="utf-8")
+    assert "what the scan reached" not in quiet
+
+
+def test_the_composer_never_seeds_unassigned_as_a_calibration(tmp_path: Path) -> None:
+    """"unassigned" is a cube's way of saying it had no calibration identity.
+
+    The select has never offered it; seeding it into the composed plan named it
+    anyway, as the calibration the registry supposedly selects for these shots.
+    """
+
+    payload = {
+        "schema": "echelle-merged-catalog/v1",
+        "generated_at": "2026-08-18T00:00:00.000+00:00",
+        "sources": [
+            {
+                "drive_id": "id-a",
+                "volume_label": "NIFS-A",
+                "drive_root": (tmp_path / "drive-a").as_posix(),
+                "catalog_path": "echelle-catalog.json",
+                "run": None,
+                "cubes": [{"path": "a.nc", "shot_number": "1", "snapshot_id": "unassigned"}],
+            }
+        ],
+    }
+    catalog = tmp_path / "unassigned.json"
+    catalog.write_text(json.dumps(payload), encoding="utf-8")
+
+    page = build_reading_room(catalog, tmp_path / "web-unassigned").read_text(encoding="utf-8")
+    data = json.loads(re.search(r"^const DATA=(.*);$", page, re.M).group(1))
+    assert data["values"]["epoch"] == ""
+    assert "that is unassigned." not in html.unescape(page)
+    # The composer's own select does not offer it either.  The catalog FILTER
+    # still does, and rightly: a cube that carries no identity is something a
+    # reader looks for.
+    chooser = re.search(r'<select id="f-epoch">(.*?)</select>', page, re.S).group(1)
+    assert "unassigned" not in chooser
+
+
+def test_the_two_halves_of_the_folder_derivation_agree_at_a_bare_root() -> None:
+    """``derivedFrom`` in the page's JavaScript is the other half of
+    ``_derived_from_folder``, and the two must answer the same for the same
+    folder.  A bare root is where they used to disagree: JavaScript stopped one
+    character early and kept the slash Python's ``rstrip`` removes, deriving
+    ``//drift-evidence-001.json`` against Python's ``/drift-evidence-001.json``.
+
+    No JavaScript runs here, so the JavaScript half is pinned as the text it
+    is; the Python half is pinned by calling it.
+    """
+
+    from echelle_spectra import reading_room
+
+    assert _derived_from_folder("/", "drift-evidence-001.json")["verdict"] == (
+        "/drift-evidence-001.json"
+    )
+    source = Path(reading_room.__file__).read_text(encoding="utf-8")
+    assert "while (trimmed.length > 0 && trimmed.charAt(trimmed.length - 1) === '/')" in source
+    assert "trimmed.length > 1" not in source
 
 
 def _shifted_evidence(tmp_path: Path) -> Path:

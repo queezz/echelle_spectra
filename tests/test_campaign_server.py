@@ -12,6 +12,7 @@ adopt the file byte for byte, because the operator's hand edits live in it.
 
 from __future__ import annotations
 
+import http.client
 import json
 import threading
 from collections.abc import Iterator
@@ -96,6 +97,33 @@ class _Client:
         )
         with urlopen(request, timeout=10) as response:
             return json.loads(response.read().decode("utf-8"))
+
+    def raw(
+        self,
+        method: str,
+        route: str,
+        *,
+        headers: dict[str, str],
+        body: bytes | None = None,
+    ) -> tuple[int, str]:
+        """One request with the headers spelled by hand, Host included.
+
+        The boundary being tested is made of headers a browser fills in and a
+        client library also fills in, so the test writes them itself rather
+        than accepting whatever ``urlopen`` would have chosen.
+        """
+
+        connection = http.client.HTTPConnection("127.0.0.1", self.server.port, timeout=10)
+        try:
+            connection.putrequest(method, route, skip_host=True, skip_accept_encoding=True)
+            for name, value in headers.items():
+                connection.putheader(name, value)
+            connection.putheader("Content-Length", str(len(body or b"")))
+            connection.endheaders(body or None)
+            answer = connection.getresponse()
+            return answer.status, answer.read().decode("utf-8")
+        finally:
+            connection.close()
 
 
 @contextmanager
@@ -350,6 +378,156 @@ def test_a_home_naming_an_absent_catalog_is_empty_not_broken(tmp_path: Path) -> 
             "campaign.toml",
         ]
         assert (tmp_path / "campaign-page" / "index.html").is_file()
+
+
+def test_the_zero_state_composes_against_the_home_and_never_the_stand_in(
+    tmp_path: Path,
+) -> None:
+    """A fresh operator's very first copied command must land in the campaign.
+
+    The page a not-yet-scanned campaign is served renders over a synthesized
+    empty catalog, because zero drives is a state of the full page.  What that
+    stand-in must never do is get composed INTO the commands: the first command
+    the operator copies is the one that writes the central index, and writing it
+    into the system temp leaves the campaign reading an empty file forever.
+    """
+
+    home = tmp_path / "campaign.toml"
+    home.write_text(f'catalog = "{CATALOG_NAME}"\noutput = "campaign-page"\n', encoding="utf-8")
+    with _serve(home) as client:
+        body = client.get("/")[1]
+
+    wanted = (tmp_path / CATALOG_NAME).resolve().as_posix()
+    windows = wanted.replace("/", "\\")
+    # The catalog-writing command names the home's own file, in both shells.
+    assert f"--central-index &quot;{wanted}&quot;" in body
+    assert f"--central-index &quot;{windows}&quot;" in body
+    # So does the field it is composed from, and the plan's central_index.
+    assert f'<input type="text" id="f-catalog" value="{wanted}">' in body
+    assert f"central_index = &quot;{wanted}&quot;" in body
+    # And the drift audit reads the same file it will have been written to.
+    assert f"--catalog &quot;{wanted}&quot;" in body
+    # Nothing anywhere on the page points at the stand-in.
+    assert "empty-catalog.json" not in body
+    assert "echelle-serve-" not in body
+
+
+# ---------------------------------------------------------------------------
+# The boundary: loopback is where it starts, not where it ends
+# ---------------------------------------------------------------------------
+
+
+def _post_bytes(payload: dict[str, Any]) -> bytes:
+    return json.dumps(payload).encode("utf-8")
+
+
+def test_a_post_from_a_foreign_origin_is_refused_and_writes_nothing(
+    client: _Client, tmp_path: Path
+) -> None:
+    """Loopback stops a second machine; it does not stop a second tab.
+
+    Any page on any site can post to a loopback port, and a simple request does
+    it with no preflight to refuse.  Unguarded, that page could write a
+    campaign.toml into any folder on this machine and repoint the server at it.
+    """
+
+    target = tmp_path / "campaign"
+    target.mkdir()
+    status, body = client.raw(
+        "POST",
+        "/api/home",
+        headers={
+            "Host": f"127.0.0.1:{client.server.port}",
+            "Origin": "http://evil.example",
+            "Content-Type": "application/json",
+        },
+        body=_post_bytes({"folder": str(target)}),
+    )
+    assert status == 403
+    assert "127.0.0.1" in json.loads(body)["error"]
+    assert list(target.iterdir()) == [], "a refused request must not have written"
+    assert client.server.home is None, "a refused request must not have moved the home"
+
+
+def test_a_post_addressed_to_a_foreign_host_is_refused(client: _Client, tmp_path: Path) -> None:
+    """A name that merely resolves here is the shape DNS rebinding has."""
+
+    target = tmp_path / "campaign"
+    target.mkdir()
+    status, _ = client.raw(
+        "POST",
+        "/api/home",
+        headers={
+            "Host": "campaign.evil.example",
+            "Content-Type": "application/json",
+        },
+        body=_post_bytes({"folder": str(target)}),
+    )
+    assert status == 403
+    assert list(target.iterdir()) == []
+    assert client.server.home is None
+
+
+def test_browsing_the_owner_folders_is_refused_from_a_foreign_host(client: _Client) -> None:
+    """The read side is worth as much as the write side: it maps the machine."""
+
+    status, _ = client.raw(
+        "GET", "/api/browse", headers={"Host": "campaign.evil.example"}
+    )
+    assert status == 403
+    status, _ = client.raw(
+        "GET",
+        "/api/browse",
+        headers={"Host": f"127.0.0.1:{client.server.port}", "Origin": "null"},
+    )
+    assert status == 403
+
+
+def test_a_simple_cross_site_body_shape_is_refused_before_it_is_read(
+    client: _Client, tmp_path: Path
+) -> None:
+    """``text/plain`` is the content type that needs no preflight, so it is the
+    one a cross-site form or fetch would arrive as."""
+
+    target = tmp_path / "campaign"
+    target.mkdir()
+    status, body = client.raw(
+        "POST",
+        "/api/home",
+        headers={
+            "Host": f"127.0.0.1:{client.server.port}",
+            "Content-Type": "text/plain;charset=UTF-8",
+        },
+        body=_post_bytes({"folder": str(target)}),
+    )
+    assert status == 400
+    assert "application/json" in json.loads(body)["error"]
+    assert list(target.iterdir()) == []
+
+
+def test_the_ordinary_same_origin_flow_still_works(client: _Client, tmp_path: Path) -> None:
+    """The guard must cost the operator nothing: localhost and 127.0.0.1, with
+    the page's own Origin or with none at all, all still answer."""
+
+    target = tmp_path / "campaign"
+    target.mkdir()
+    port = client.server.port
+    status, body = client.raw(
+        "POST",
+        "/api/home",
+        headers={
+            "Host": f"127.0.0.1:{port}",
+            "Origin": f"http://127.0.0.1:{port}",
+            "Content-Type": "application/json",
+        },
+        body=_post_bytes({"folder": str(target)}),
+    )
+    assert status == 200
+    assert Path(json.loads(body)["written"]) == (target / "campaign.toml").resolve()
+
+    assert client.raw("GET", "/api/state", headers={"Host": f"localhost:{port}"})[0] == 200
+    assert client.raw("GET", "/api/state", headers={"Host": "127.0.0.1"})[0] == 200
+    assert client.get("/api/state")[0] == 200
 
 
 # ---------------------------------------------------------------------------

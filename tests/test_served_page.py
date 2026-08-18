@@ -255,15 +255,39 @@ def test_the_setup_page_bakes_in_no_example_drive_path() -> None:
 # ---------------------------------------------------------------------------
 # The empty campaign page: empty is not broken
 # ---------------------------------------------------------------------------
+#
+# Nothing serves this renderer.  ``campaign_server`` answers a home with no
+# catalog yet by building the FULL page over a synthesized empty one, so every
+# control exists before the first scan result does, and the wrapper that used to
+# stand between the two was deleted along with the key mismatch it carried: it
+# would have handed this renderer ``home_values()``, whose "home" is the
+# campaign.toml FILE where this renderer wants the folder.  These tests call it
+# directly and claim only what it renders, never that a server reaches it.
 
 
 def _home() -> dict[str, str]:
+    """The shape this renderer reads — a folder and the paths beside it."""
+
     return {
         "folder": "E:/2026-campaign",
         "registry": "E:/2026-campaign/calibration_registry.toml",
         "calibrations": "E:/2026-campaign/calibrations",
         "catalog": "E:/2026-campaign/echelle-catalog.json",
     }
+
+
+def test_no_server_route_reaches_the_empty_campaign_page() -> None:
+    """The wrapper is gone, and with it the flag that tracked whether it ran."""
+
+    from echelle_spectra import campaign_server
+
+    assert not hasattr(campaign_server, "render_empty")
+    assert not hasattr(campaign_server, "EMPTY_PLACEHOLDER")
+    server = campaign_server.make_server(home=None, port=0)
+    try:
+        assert not hasattr(server, "empty_page_rendered")
+    finally:
+        server.server_close()
 
 
 def test_the_empty_campaign_page_states_empty_rather_than_broken() -> None:
