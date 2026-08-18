@@ -94,6 +94,7 @@ __all__ = [
     "SaveState",
     "TomlState",
     "WavelengthCorrection",
+    "background_sibling",
     "catalog_family_for_lamp",
     "catalog_lines_for_order",
     "catalog_mismatch_warning",
@@ -103,9 +104,12 @@ __all__ = [
     "evaluate_exposure",
     "expected_lines_for_order",
     "lamp_reference_set",
+    "lamp_saturation_hint",
     "measure_saturation_clusters",
     "normalize_lamp_name",
+    "saturated_reshoot_action",
     "suggest_file_roles",
+    "suggest_unsaturated_exposure_s",
     "triage_exposure",
     "triage_for_role",
     "write_corrected_pattern_table",
@@ -302,6 +306,11 @@ class SaturationClusters:
     peak_counts: float | None
     clean_peak_counts: float | None
     finite_pixels: int
+    #: The brightest pixel that is still *below* the clip, and therefore the
+    #: brightest height this frame actually reports rather than truncates.  A
+    #: clipped pixel says "at least this much" and nothing more, so any honest
+    #: arithmetic about a saturated frame has to stand on this number instead.
+    unsaturated_peak_counts: float | None = None
 
     @property
     def is_saturated(self) -> bool:
@@ -789,6 +798,44 @@ def suggest_file_roles(path: str | Path) -> FileRoleSuggestion:
     )
 
 
+#: How a background is named beside the signal it belongs to, in the order the
+#: house writes them.  The same vocabulary :func:`suggest_file_roles` reads,
+#: used the other way round: from a signal's name to its partner's.
+_BACKGROUND_SUFFIXES = ("-bg", "_bg", "-background", "_background", "-bkg", "_bkg", "-dark")
+
+
+def background_sibling(signal: str | Path) -> Path | None:
+    """The background frame shot beside *signal*, by the house naming, or None.
+
+    Two readings, in order.  First the operator's own habit — the background is
+    the signal's name with ``-bg`` on it — which is exact and needs no
+    guessing.  Failing that, the folder is asked whether it holds exactly one
+    file the filename convention already calls a sphere background, which is
+    the 2019 case where ``IS-1s.sif`` is partnered by ``IS_bg.sif`` and no
+    suffix rule connects the two.
+
+    Ambiguity is answered with ``None`` rather than with a guess: a suggestion
+    nobody can check is worse than a second file dialog.
+    """
+
+    source = Path(signal)
+    folder = source.parent
+    for suffix in _BACKGROUND_SUFFIXES:
+        candidate = folder / f"{source.stem}{suffix}{source.suffix}"
+        if candidate.is_file():
+            return candidate
+    if not folder.is_dir():
+        return None
+    siblings = [
+        path
+        for path in sorted(folder.glob(f"*{source.suffix}"))
+        if path != source
+        and path.is_file()
+        and suggest_file_roles(path).roles == (MeasurementRole.SPHERE_BACKGROUND,)
+    ]
+    return siblings[0] if len(siblings) == 1 else None
+
+
 def _metadata_exposure_s(metadata: Mapping[str, object]) -> float | None:
     for key in ("ExposureTime", "exposure_time", "exposure_s"):
         value = metadata.get(key)
@@ -836,6 +883,7 @@ def measure_saturation_clusters(
     finite_pixels = 0
     peak: float | None = None
     clean_peak: float | None = None
+    unsaturated_peak: float | None = None
     cluster_count = 0
     cluster_pixels = 0
     largest_cluster = 0
@@ -847,6 +895,9 @@ def measure_saturation_clusters(
             continue
         peak = _maximum(peak, float(np.max(frame[finite])))
         saturated = finite & (frame >= level)
+        below = finite & ~saturated
+        if below.any():
+            unsaturated_peak = _maximum(unsaturated_peak, float(np.max(frame[below])))
         if not saturated.any():
             clean_peak = _maximum(clean_peak, float(np.max(frame[finite])))
             continue
@@ -871,6 +922,7 @@ def measure_saturation_clusters(
         peak,
         clean_peak,
         finite_pixels,
+        unsaturated_peak,
     )
 
 
@@ -1060,6 +1112,45 @@ def _triage_details(
     )
 
 
+#: The honesty clause every saturated suggestion carries.  A clipped pixel
+#: reports "at least full scale" and nothing more, so the number is a place to
+#: start from rather than a computed answer, and it is said in the sentence
+#: rather than left for the operator to discover on the reshoot.
+SATURATED_SUGGESTION_CAVEAT = "a clipped peak hides its own height, so re-triage the result"
+
+
+def suggest_unsaturated_exposure_s(
+    triage: ExposureTriage,
+    exposure_s: float | None,
+    *,
+    target_fraction: float = 0.70,
+) -> float | None:
+    """The exposure to try next after a frame clipped, in seconds.
+
+    The dim path can do this exactly: it knows how tall its peak is, so it
+    scales the exposure until that peak would sit at *target_fraction* of full
+    scale.  A saturated frame cannot — the clipped peak's true height is the
+    one number the detector refused to record.  So the arithmetic is the same
+    family, run on the brightest structure the frame is still telling the truth
+    about: the brightest pixel below the clip, scaled until *it* would sit at
+    the target.
+
+    When nothing unsaturated stands high enough to scale against — a lone tall
+    spike over a dark field — the only honest reference left is the clip
+    itself, which the true peak is at least equal to.  Either way the answer is
+    a reduction, never an invitation to expose a clipped frame for longer.
+    """
+
+    if exposure_s is None or not float(exposure_s) > 0.0:
+        return None
+    full_scale = float(triage.full_scale)
+    target = target_fraction * full_scale
+    reference = triage.saturation.unsaturated_peak_counts
+    if reference is None or float(reference) <= target:
+        reference = triage.saturation.saturation_level
+    return float(exposure_s) * target / max(float(reference), np.finfo(float).eps)
+
+
 def evaluate_exposure(
     frame: BenchFrame,
     *,
@@ -1092,9 +1183,17 @@ def evaluate_exposure(
         clusters.cluster_pixels / clusters.finite_pixels if clusters.finite_pixels else 0.0
     )
     if triage.state is ExposureState.SATURATED:
+        # Not from ``peak``: on this frame the peak IS the clip, so scaling
+        # against it is arithmetic on a number the detector never measured.
+        suggested = suggest_unsaturated_exposure_s(
+            triage, exposure_s, target_fraction=target_fraction
+        )
         action = "Lower exposure and reacquire; do not accept anchors from this frame."
         if suggested is not None:
-            action = f"Lower exposure to about {suggested:.4g} s and reacquire."
+            action = (
+                f"Lower exposure to about {suggested:.4g} s and reacquire — "
+                f"{SATURATED_SUGGESTION_CAVEAT}."
+            )
     elif triage.state is ExposureState.DIM:
         action = "Increase exposure, then reacquire for stronger unsaturated lines."
         if suggested is not None:
@@ -1192,10 +1291,43 @@ def _background_verdict(
     )
 
 
+def lamp_saturation_hint(suggested_s: float | None) -> str:
+    """What a frame shot to clip is offered, without being told it failed.
+
+    A dim-series lamp exposure is *supposed* to saturate; nothing here asks the
+    operator to reshoot it.  What the owner wanted is the other half of the
+    pair spelled out as a number — the shorter exposure that would catch those
+    same strong lines unsaturated — so the practical suggestion the dim frames
+    already carried now reaches the bright end of the series too.
+    """
+
+    if suggested_s is None:
+        return (
+            "Nothing to change here: these lines are meant to clip. To catch "
+            "them unsaturated, shoot the shorter companion exposure of the pair."
+        )
+    return (
+        f"To catch the strong lines unsaturated, try about {suggested_s:.4g} s "
+        f"for the companion frame — {SATURATED_SUGGESTION_CAVEAT}."
+    )
+
+
+def saturated_reshoot_action(suggested_s: float | None) -> str:
+    """What a frame that must NOT clip is told, with the number to try."""
+
+    if suggested_s is None:
+        return "Lower exposure and reshoot this frame."
+    return (
+        f"Lower exposure to about {suggested_s:.4g} s and reshoot — "
+        f"{SATURATED_SUGGESTION_CAVEAT}."
+    )
+
+
 def triage_for_role(
     triage: ExposureTriage,
     role: MeasurementRole | None,
     partner_peak: float | None = None,
+    exposure_s: float | None = None,
 ) -> RoleTriageVerdict:
     """Read one already-triaged frame again, in the light of its role.
 
@@ -1207,6 +1339,12 @@ def triage_for_role(
     get wrong is being bright, which is why ``partner_peak`` is read against
     it: a dark frame carrying a third of the signal it will be subtracted from
     is a leak or the wrong file, and that gets loud.
+
+    ``exposure_s`` is the frame's own exposure time, read from its header by
+    the guidance beside it.  Given it, every saturated reading carries a number
+    to try next — worded for what the frame is *for*, since telling a lamp shot
+    to clip to "lower the exposure" is the same misreading of physics the
+    verdict itself was written to stop.
     """
 
     clusters = triage.saturation
@@ -1226,6 +1364,10 @@ def triage_for_role(
             f"{clusters.cluster_pixels} full-scale pixel(s) in "
             f"{clusters.cluster_count} connected cluster(s), largest "
             f"{clusters.largest_cluster_pixels}. {LAMP_SATURATION_ADVICE}",
+            # Written here rather than left empty, so the role-blind guidance —
+            # which would say "lower exposure and reacquire" about a frame shot
+            # to clip — can never reach the panel underneath this verdict.
+            lamp_saturation_hint(suggest_unsaturated_exposure_s(triage, exposure_s)),
         )
     if triage.state is ExposureState.SATURATED:
         return RoleTriageVerdict(
@@ -1237,6 +1379,7 @@ def triage_for_role(
             f"{triage.headline} {SPHERE_SATURATION_ADVICE}"
             if role in {MeasurementRole.SPHERE, MeasurementRole.SPHERE_BACKGROUND}
             else triage.headline,
+            saturated_reshoot_action(suggest_unsaturated_exposure_s(triage, exposure_s)),
         )
     return RoleTriageVerdict(
         role,
@@ -1667,6 +1810,52 @@ class CalibrationCampaignSession:
             None if background is None else background.path,
         )
 
+    @property
+    def previous_pair_name(self) -> str:
+        """The previous pair this campaign will compare against, by filename.
+
+        The comparison names the pair it *ran* against; this names the pair it
+        would run against, which is the reading an operator needs before he
+        presses Recompute rather than after.
+        """
+
+        if self.previous_sphere is None or self.previous_sphere_background is None:
+            return ""
+        return f"{self.previous_sphere.name} + {self.previous_sphere_background.name}"
+
+    def adopt_previous_pair(
+        self,
+        previous_sphere: str | Path,
+        previous_sphere_background: str | Path,
+    ) -> tuple[Path, Path]:
+        """Compare against a different previous campaign, without relaunching.
+
+        The pair arrived as ``--previous-sphere`` command-line flags, and a
+        flag is a launch convenience: an input the bench consumes has to be
+        changeable from inside the bench (owner, 2026-08-18: "CLI OR GUI. Not
+        both").  The flags still win at launch; this changes the session.
+
+        The swap goes through the same ``_invalidate_outputs`` every other
+        input change uses, so the comparison falls back to NOT RUN · inputs
+        changed and Recompute becomes the next natural press — rather than
+        leaving a ratio on screen that was measured against a pair no longer
+        selected.
+        """
+
+        signal = Path(previous_sphere)
+        background = Path(previous_sphere_background)
+        for path in (signal, background):
+            if not path.is_file():
+                raise FileNotFoundError(f"previous sphere frame not found: {path}")
+        if signal == background:
+            raise ValueError(
+                "the previous sphere signal and its background cannot be the same file"
+            )
+        self.previous_sphere = signal
+        self.previous_sphere_background = background
+        self._invalidate_outputs()
+        return (signal, background)
+
     def adopt_pattern(
         self,
         pattern_source: str | Path,
@@ -1765,7 +1954,12 @@ class CalibrationCampaignSession:
             return None
         measurement = self.measurements.get(source)
         role = measurement.role if measurement is not None else None
-        return triage_for_role(record.triage, role, self.partner_peak(source, role))
+        return triage_for_role(
+            record.triage,
+            role,
+            self.partner_peak(source, role),
+            record.exposure.exposure_s if record.exposure is not None else None,
+        )
 
     def partner_peak(
         self, path: str | Path, role: MeasurementRole | None
@@ -2034,7 +2228,12 @@ class CalibrationCampaignSession:
             action = (
                 "Saturated strong lines are expected on a dim-series lamp frame; "
                 "fit the unsaturated lines only. Every anchor is saturation-checked "
-                "on its own detector window."
+                "on its own detector window. "
+                + lamp_saturation_hint(
+                    suggest_unsaturated_exposure_s(loaded.triage, exposure.exposure_s)
+                    if loaded is not None
+                    else None
+                )
             )
         if action:
             assert exposure is not None

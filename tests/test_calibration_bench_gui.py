@@ -17,6 +17,7 @@ import pytest
 from PyQt5 import QtCore, QtGui, QtWidgets
 
 from echelle_spectra import calibration_bench_gui as bench_gui
+from echelle_spectra import calibration_campaign as campaign_module
 from echelle_spectra.calibration_bench import (
     BenchFrame,
     CalibrationBenchSession,
@@ -3101,6 +3102,266 @@ def test_a_background_is_routed_by_its_role_and_not_by_its_label(qt_app, tmp_pat
     )
     assert headline == f"NOT DARK AT ALL · {blocked.headline}"
     assert "cluster" not in headline
+
+
+def test_the_previous_pair_is_chosen_in_the_bench_not_on_a_command_line(
+    qt_app, tmp_path, monkeypatch
+):
+    """Owner, 2026-08-18: "This is terrible UX again. CLI OR GUI. Not both."
+
+    The pattern got its picker; the previous pair is the same case. One dialog
+    for the signal, the background offered from the naming beside it, and the
+    comparison dropped through the path every other input change already uses.
+    """
+
+    # Flags still win at launch: a bench opened with a pair names that pair and
+    # keeps it for as long as nobody picks another.
+    launched = _campaign_window(tmp_path)
+    assert launched.campaign.previous_sphere == tmp_path / "previous_sphere.sif"
+    assert "previous_sphere.sif + previous_sphere_bg.sif" in (
+        launched.previous_pair_value.text()
+    )
+    launched.refresh()
+    assert launched.campaign.previous_sphere == tmp_path / "previous_sphere.sif"
+    launched.close()
+
+    window = _manual_window(tmp_path)
+    window.show()
+    qt_app.processEvents()
+    previous = tmp_path / "campaign_2024"
+    previous.mkdir()
+    signal = previous / "sphere-2s.sif"
+    signal.write_bytes(b"sif\n")
+    background = previous / "sphere-2s-bg.sif"
+    background.write_bytes(b"sif-bg\n")
+
+    # Nobody has picked yet: the packaged default is whatever launched, and
+    # the reading says so rather than inventing one.
+    assert window.campaign.previous_pair_name == ""
+    assert "none chosen" in window.previous_pair_value.text()
+    assert window.choose_previous_button.isEnabled()
+
+    asked = []
+    monkeypatch.setattr(
+        QtWidgets.QFileDialog,
+        "getOpenFileName",
+        lambda *args, **values: (asked.append(args[1]) or (str(signal), "")),
+    )
+    offered = []
+    monkeypatch.setattr(
+        QtWidgets.QMessageBox,
+        "question",
+        lambda *args, **values: (
+            offered.append(args[2]) or QtWidgets.QMessageBox.Yes
+        ),
+    )
+    window.campaign.comparison = campaign_module.SphereComparison(
+        ComparisonState.READY, "compared against something else"
+    )
+
+    window.choose_previous_button.click()
+    qt_app.processEvents()
+
+    # One dialog, because the folder answered the second question itself.
+    assert len(asked) == 1
+    assert "SIGNAL" in asked[0]
+    assert background.name in offered[0]
+    assert window.campaign.previous_sphere == signal
+    assert window.campaign.previous_sphere_background == background
+    # Invalidated through the ordinary path, and named where the comparison is.
+    assert window.campaign.comparison.state is ComparisonState.NOT_RUN
+    assert window.campaign.comparison.reason == "inputs changed"
+    assert f"{signal.name} + {background.name}" in window.previous_pair_value.text()
+    assert "Recompute" in window.message_value.text()
+
+    # A folder that cannot answer asks a second time instead of guessing.
+    lonely = tmp_path / "campaign_2019"
+    lonely.mkdir()
+    orphan = lonely / "IS-1s.sif"
+    orphan.write_bytes(b"sif\n")
+    other = lonely / "IS-1s_bg.sif"
+    other.write_bytes(b"sif-bg\n")
+    replies = [str(orphan), str(other)]
+    asked.clear()
+    offered.clear()
+    monkeypatch.setattr(
+        QtWidgets.QMessageBox,
+        "question",
+        lambda *args, **values: (
+            offered.append(args[2]) or QtWidgets.QMessageBox.No
+        ),
+    )
+    monkeypatch.setattr(
+        QtWidgets.QFileDialog,
+        "getOpenFileName",
+        lambda *args, **values: (asked.append(args[1]) or (replies.pop(0), "")),
+    )
+
+    window.choose_previous_button.click()
+    qt_app.processEvents()
+
+    assert len(asked) == 2
+    assert "BACKGROUND" in asked[1]
+    assert window.campaign.previous_sphere == orphan
+    assert window.campaign.previous_sphere_background == other
+    window.close()
+
+
+def test_a_correct_background_is_painted_its_own_calm_colour(qt_app, tmp_path):
+    """Owner, 2026-08-18: "can we paint background something... telling?"
+
+    It had been amber (attend to me) and was fixed to green, which said the
+    right thing in the wrong voice: on the bench's dark ground a background row
+    and a healthy lamp row read identically.  A correct background now carries
+    a colour that belongs to no exposure state — and a background that is not
+    dark still carries the blocking one.  Pinned on the shared helper, because
+    that is the single place the rule is written and every surface reads it.
+    """
+
+    dim = triage_exposure(_frame_for(tmp_path / "Ne-bg.sif", peak=400.0))
+    correct = triage_for_role(dim, MeasurementRole.LAMP_BACKGROUND, 40000.0)
+    colour = CalibrationBenchWindow._verdict_colour(correct, dim)
+
+    assert colour == bench_gui._BACKGROUND_COLOR
+    # Neither an alarm, nor a blockage, nor the same reading as a good signal.
+    assert colour not in {
+        bench_gui._TRIAGE_COLORS[ExposureState.GOOD],
+        bench_gui._TRIAGE_COLORS[ExposureState.DIM],
+        bench_gui._TRIAGE_COLORS[ExposureState.SATURATED],
+        bench_gui._SUGGESTED_COLOR,
+    }
+    # Calm and cool, and readable against the bench's own dark ground: more
+    # blue than red, and light enough to be a headline.
+    paint = QtGui.QColor(colour)
+    assert paint.blue() > paint.red()
+    assert paint.lightness() > QtGui.QColor("#151b22").lightness()
+
+    # Everything the shared helper feeds repaints with it, and the second
+    # helper above it agrees on a background rather than demoting it.
+    assert CalibrationBenchWindow._reading_colour(correct, dim) == colour
+
+    # A background that is NOT dark keeps the blocking colour.
+    leaking = triage_for_role(dim, MeasurementRole.LAMP_BACKGROUND, 500.0)
+    assert leaking.blocking
+    assert CalibrationBenchWindow._verdict_colour(leaking, dim) == (
+        bench_gui._TRIAGE_COLORS[ExposureState.SATURATED]
+    )
+
+
+def test_the_why_dock_sets_prose_to_a_measure_and_spaces_its_paragraphs(
+    qt_app, tmp_path
+):
+    """Owner, 2026-08-18: "the formatting is terrible. All long and breaky."
+
+    Two defects in one dock: prose wrapping at the full width of the window,
+    and multi-paragraph explanations run together into one grey wall.
+    """
+
+    forget_session_layout()
+    window = _manual_window(tmp_path)
+    window.resize(3000, 1200)
+    window.show()
+    qt_app.processEvents()
+    window._distribute_space()
+    qt_app.processEvents()
+
+    view = window.details_view
+    metrics = QtGui.QFontMetrics(view.font())
+    # The cap is a measure in characters, turned into pixels by this platform's
+    # own font — never a pixel number measured on one display.
+    assert window._reading_measure() == (
+        bench_gui.BENCH_READING_MEASURE_CHARS * max(1, metrics.averageCharWidth())
+    )
+    assert view.lineWrapMode() == QtWidgets.QTextEdit.FixedPixelWidth
+    assert 0 < view.lineWrapColumnOrWidth() <= window._reading_measure()
+    # Bounded: the dock is three thousand pixels wide and the prose is not.
+    assert view.lineWrapColumnOrWidth() < window.width()
+    # A path is one long unbreakable word and must wrap rather than widen it.
+    assert view.document().defaultTextOption().wrapMode() == (
+        QtGui.QTextOption.WrapAtWordBoundaryOrAnywhere
+    )
+
+    window.explain(
+        "Ne-bg.sif — exposure verdict",
+        "The first paragraph, about the reading.\n\n"
+        f"In full: {tmp_path / 'Ne-bg.sif'}\n\n"
+        "SELF-CHECK: the third paragraph, about the pair.",
+    )
+    qt_app.processEvents()
+
+    blocks = []
+    block = view.document().begin()
+    while block.isValid():
+        blocks.append(block)
+        block = block.next()
+    bodies = [item for item in blocks if item.text().strip()][1:]
+    assert len(bodies) == 3, [item.text() for item in blocks]
+    # Real space between them, not three sentences jammed into one wall.
+    assert all(item.blockFormat().bottomMargin() > 0 for item in bodies)
+    # And the path is still there to read and to copy out.
+    assert str(tmp_path / "Ne-bg.sif") in view.toPlainText()
+    window.close()
+    forget_session_layout()
+
+
+def test_the_why_dock_opens_tall_enough_and_remembers_a_drag(qt_app, tmp_path):
+    """Owner: "by default it's a few lines" — and it cropped almost everything.
+
+    The dock asks for the height a whole ordinary explanation costs and yields
+    what the rails cannot spare, because both tables carry a workable-row
+    contract this dock may not buy its comfort with.  A drag is not a wish and
+    is obeyed as given, for as long as the session lives.
+    """
+
+    forget_session_layout()
+    window = _manual_window(tmp_path)
+    # A window with height to spare: at the bench's default geometry the two
+    # tables are at exactly their six rows and there is nothing to give.
+    window.resize(1501, 1400)
+    window.show()
+    qt_app.processEvents()
+    for _ in range(2):
+        window._distribute_space()
+        qt_app.processEvents()
+
+    unit = window.layout_unit
+    assert window.details_dock.height() >= bench_gui.BENCH_DETAILS_LINES * unit
+    window.explain(
+        "Ne-bg.sif — exposure verdict",
+        "Brightest non-anomalous pixel 41234 counts.\n"
+        "Saturation: no connected full-scale cluster.\n"
+        "Anomalies: none counted.\n"
+        "Noise floor 300 counts.",
+    )
+    qt_app.processEvents()
+    view = window.details_view
+    assert view.document().size().height() <= view.viewport().height()
+
+    # The rails keep what they were promised, whatever the dock wanted.
+    assert _visible_rows(window.anchor_table) >= (
+        CalibrationBenchWindow.EXPECTED_LINE_ROWS
+    )
+
+    # An operator's drag is remembered as lines of this platform's own text,
+    # and survives the next layout pass rather than being cut back to default.
+    dragged = 14 * unit
+    QtWidgets.QApplication.sendEvent(
+        window.details_dock,
+        QtGui.QResizeEvent(
+            QtCore.QSize(window.details_dock.width(), dragged),
+            QtCore.QSize(window.details_dock.width(), window.details_dock.height()),
+        ),
+    )
+    assert bench_gui._SESSION_DOCK_LINES["details"] == pytest.approx(14.0)
+    window._distribute_space()
+    qt_app.processEvents()
+    assert window._details_dock_height == dragged
+    assert window._details_dock_lines() == pytest.approx(14.0)
+
+    forget_session_layout()
+    assert window._details_dock_lines() <= bench_gui.BENCH_DETAILS_LINES
+    window.close()
+    forget_session_layout()
 
 
 def test_a_bench_without_campaign_memory_still_adds_files(qt_app, tmp_path, monkeypatch):

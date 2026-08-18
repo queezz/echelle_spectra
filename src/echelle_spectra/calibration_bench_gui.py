@@ -38,6 +38,7 @@ from .calibration_campaign import (
     LampReferenceSet,
     MeasurementRole,
     TomlState,
+    background_sibling,
     catalog_mismatch_warning,
     default_validity,
     expected_lines_for_order,
@@ -290,6 +291,26 @@ _TRIAGE_COLORS = {
     ExposureState.NO_DATA: "#93a8b8",
 }
 
+def _record_exposure_s(record) -> float | None:
+    """The exposure time one loaded frame's header gave, if it gave one.
+
+    Read in one place because every surface that asks a verdict for its role
+    has to hand it the same number: the saturated readings quote an exposure to
+    try next, and a suggestion computed from a missing header is no suggestion.
+    """
+
+    exposure = getattr(record, "exposure", None)
+    return None if exposure is None else exposure.exposure_s
+
+
+#: Colour for a correct background: a calm slate blue that belongs to no
+#: exposure state.  A dark frame that is dark is not an alarm (amber), not a
+#: blockage (red) and not the same reading as a healthy signal (the GOOD
+#: green) — on the bench's dark ground the two greens were indistinguishable,
+#: and "this one is dark on purpose" is exactly what the operator needs to see
+#: without being called over to it (owner, 2026-08-18).
+_BACKGROUND_COLOR = "#8aa6e0"
+
 #: Colour for a control showing a filename suggestion nobody has confirmed.
 _SUGGESTED_COLOR = "#ffb86b"
 
@@ -368,6 +389,23 @@ BENCH_RESIDUAL_TICK_GAP = 14
 #: How many summary rows the triage table shows before it scrolls.  Enough for
 #: a whole campaign folder; past that the reading is a scroll either way.
 BENCH_SUMMARY_ROWS = 8
+
+#: The measure prose is set to in the Why dock, in characters.  Typography's
+#: own number, not a pixel one: a line much past this is measurably harder to
+#: read because the eye loses its place on the way back to the left margin.
+#: The dock spans the whole window, so without a cap an explanation wrapped at
+#: whatever the window happened to be — two thousand pixels on the owner's
+#: screen ("all long and breaky").
+BENCH_READING_MEASURE_CHARS = 96
+
+#: How tall the Why dock opens: a title and the five or six wrapped lines a
+#: typical verdict costs, measured rather than guessed.  It used to open at
+#: four lines of the platform's text and crop almost everything written into
+#: it.  This is a wish, not a demand — see ``_details_dock_ceiling_lines``.
+BENCH_DETAILS_LINES = 12
+
+#: And the floor it may never be squeezed below, dragged or not.
+BENCH_DETAILS_FLOOR_LINES = 3
 
 
 def bench_point_sizes(base_point_size: float | None = None) -> tuple[float, float]:
@@ -665,11 +703,17 @@ def bench_window_icon(
 #: working preference for this sitting, not a decision to write to disk.
 _SESSION_SPLITTER_SHARES: dict[str, tuple[float, ...]] = {}
 
+#: The same working preference, for the docks — kept in *lines of body text*
+#: rather than pixels, because that is the unit every other size here is quoted
+#: in and it survives a font or DPI change the way a pixel count does not.
+_SESSION_DOCK_LINES: dict[str, float] = {}
+
 
 def forget_session_layout() -> None:
     """Drop every remembered splitter cut (used by tests and by a fresh run)."""
 
     _SESSION_SPLITTER_SHARES.clear()
+    _SESSION_DOCK_LINES.clear()
 
 
 class _ElidingLabel(QtWidgets.QLabel):
@@ -967,6 +1011,11 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         #: which resizes this window's own layout, which would ask for the cut
         #: again — a recursion Qt answers by overflowing the paint stack.
         self._distributing = False
+        #: The Why dock's height as this window last asked for it, and whether
+        #: the answer to that ask is still on its way.  A height that arrives
+        #: outside an ask is the operator's own drag and is remembered as one.
+        self._details_dock_height = 0
+        self._sizing_details = False
         self.last_folder = Path(watcher.folder) if watcher is not None else Path.cwd()
         self._build_ui()
         self._connect_ui()
@@ -1254,6 +1303,12 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
             self._watch_splitter(self.readings_splitter, "readings")
             self._pin_status_band_height()
             self._fit_residual_strip()
+            if getattr(self, "details_dock", None) is not None:
+                # The measure is a property of the font and the dock's width;
+                # both are only true after a layout pass, so it is re-read on
+                # the same passes every other cut in this window is made on.
+                self._apply_reading_measure()
+                self._fit_details_dock()
         finally:
             self._distributing = False
 
@@ -1629,15 +1684,27 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         # a few lines and drags taller the moment it needs to — and its height
         # is quoted in lines of the platform's own text, like every other size
         # in this window.
-        self.details_view.setMinimumHeight(3 * self.layout_unit)
+        self.details_view.setMinimumHeight(BENCH_DETAILS_FLOOR_LINES * self.layout_unit)
         self.details_view.setPlaceholderText(
             "Click any verdict, checklist row, file, or anchor and the whole "
             "explanation is written here. It changes only when asked."
         )
+        # An absolute path is one long unbreakable word.  Left to itself it
+        # would push the whole block wider than the measure and hand the dock a
+        # horizontal scrollbar; broken anywhere, it wraps like everything else
+        # and stays selectable text the operator can copy out.
+        option = self.details_view.document().defaultTextOption()
+        option.setWrapMode(QtGui.QTextOption.WrapAtWordBoundaryOrAnywhere)
+        self.details_view.document().setDefaultTextOption(option)
         dock.setWidget(self.details_view)
         self.details_dock = dock
         self.addDockWidget(QtCore.Qt.BottomDockWidgetArea, dock)
-        self.resizeDocks([dock], [4 * self.layout_unit], QtCore.Qt.Vertical)
+        # The operator's own drag is remembered from here, by the same law the
+        # splitter cuts follow: the filter reports the dock's height, and any
+        # height this window did not itself ask for is the operator's.
+        dock.installEventFilter(self)
+        self._apply_reading_measure()
+        self._fit_details_dock()
         self.explain(
             "Exposure triage is the front door",
             "Drop any SIF and the bench judges the exposure before any role "
@@ -1646,14 +1713,149 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
             "you adjust the lamp by.",
         )
 
-    def explain(self, title: str, text: str) -> None:
-        """Show one full explanation in the details dock."""
+    def _reading_measure(self) -> int:
+        """How wide prose may get in the Why dock, in pixels of this font.
 
-        body = str(text).strip().replace("\n", "<br>")
+        A line stops being readable long before it stops fitting.  The dock is
+        as wide as the window, so an explanation was setting itself across two
+        thousand pixels and the eye lost its place on the way back to the left
+        margin (owner, 2026-08-18: "all long and breaky").  The cap is stated
+        in characters — typography's own measure — and turned into pixels by
+        the platform's own font metrics, like every other size in this window.
+        """
+
+        metrics = QtGui.QFontMetrics(self.details_view.font())
+        return int(BENCH_READING_MEASURE_CHARS * max(1, metrics.averageCharWidth()))
+
+    def _apply_reading_measure(self) -> int:
+        """Set the dock's wrap to the measure, or to the dock when it is narrower.
+
+        Narrower wins so a dock dragged to the side rail wraps at the width it
+        has instead of growing a horizontal scrollbar; the measure is a cap on
+        prose, never a demand for space.
+        """
+
+        width = self._reading_measure()
+        viewport = self.details_view.viewport().width()
+        if viewport > 0:
+            width = min(width, viewport)
+        self.details_view.setLineWrapMode(QtWidgets.QTextEdit.FixedPixelWidth)
+        self.details_view.setLineWrapColumnOrWidth(int(width))
+        return int(width)
+
+    def explain(self, title: str, text: str) -> None:
+        """Show one full explanation in the details dock.
+
+        Blank-line-separated paragraphs are set as paragraphs, with real space
+        between them.  Several explanations now carry a path and a SELF-CHECK
+        passage after the prose, and joining those with a bare line break ran
+        three separate statements together into one grey wall.
+        """
+
+        gap = max(6, self.layout_unit // 2)
+        paragraphs = [
+            block.strip()
+            for block in re.split(r"\n[ \t]*\n", str(text).strip())
+            if block.strip()
+        ]
+        body = "".join(
+            "<p style='margin-top:0px;margin-bottom:{gap}px'>{para}</p>".format(
+                gap=gap, para=paragraph.replace("\n", "<br>")
+            )
+            for paragraph in paragraphs
+        )
         self.details_view.setHtml(
             f"<h3 style='color:#8fd9ff;margin:0 0 6px 0'>{title}</h3>"
             f"<div style='color:#cfe0ec;line-height:145%'>{body}</div>"
         )
+
+    def _spare_height(self) -> float | None:
+        """Height no rail is using, measured — ``None`` before there is geometry.
+
+        The dock spans the bottom of the whole window, so every pixel it takes
+        comes out of both rails and the plots at once.  Both rails have a
+        contract it must not break: six workable rows in each table, and no
+        control column that scrolls.  So the surplus is the smaller of the two
+        surpluses, and it is measured rather than assumed.
+        """
+
+        needs = self._workable_panel_heights()
+        extent = self.tables_splitter.height()
+        if needs is None or extent <= 0:
+            return None
+        spare = float(extent - sum(needs))
+        for index in range(self.control_tabs.count()):
+            tab = self.control_tabs.widget(index)
+            inner = tab.widget() if isinstance(tab, QtWidgets.QScrollArea) else None
+            if inner is None or tab.viewport().height() <= 0:
+                continue
+            spare = min(spare, float(tab.viewport().height() - inner.sizeHint().height()))
+        return spare
+
+    def _details_dock_ceiling_lines(self) -> float:
+        """How tall the dock may open before it starts costing a rail its rows.
+
+        At the bench's default geometry the vertical budget is already spent —
+        the two tables are at exactly their six workable rows — so a dock that
+        simply demanded the height an explanation costs would buy its comfort
+        with the anchor table's rows.  It asks for that height and settles for
+        whatever the rails genuinely are not using, keeping a line of slack in
+        hand so a font or a scaling that measures slightly differently cannot
+        turn the last spare pixels into a scrolling control column.
+        """
+
+        current = self.details_dock.height()
+        spare = self._spare_height()
+        if current <= 0 or self.layout_unit <= 0 or spare is None:
+            return float(BENCH_DETAILS_LINES)
+        # Signed on purpose: a dock that has already taken more than the rails
+        # could spare has to give it back, not merely stop growing.
+        return max(
+            BENCH_DETAILS_FLOOR_LINES,
+            (current + spare - self.layout_unit) / self.layout_unit,
+        )
+
+    def _details_dock_lines(self) -> float:
+        """How many lines tall the Why dock should be: the drag, or the default.
+
+        A drag is an instruction and is obeyed as given; the default is a wish
+        and yields to the rails.
+        """
+
+        dragged = _SESSION_DOCK_LINES.get("details")
+        if dragged is not None:
+            return max(BENCH_DETAILS_FLOOR_LINES, dragged)
+        return max(
+            BENCH_DETAILS_FLOOR_LINES,
+            min(float(BENCH_DETAILS_LINES), self._details_dock_ceiling_lines()),
+        )
+
+    def _fit_details_dock(self) -> None:
+        """Open the dock at a height that holds a whole ordinary explanation."""
+
+        height = int(self._details_dock_lines() * self.layout_unit)
+        self._details_dock_height = height
+        if height == self.details_dock.height():
+            return
+        # Whatever comes back from this is this window's own doing, however far
+        # it lands from what was asked, and must never be filed as a drag.
+        self._sizing_details = True
+        self.resizeDocks([self.details_dock], [height], QtCore.Qt.Vertical)
+
+    def _details_dock_resized(self, height: int) -> None:
+        """Remember a height this window did not ask for: the operator's drag."""
+
+        if height <= 0 or self.layout_unit <= 0:
+            return
+        if self._sizing_details:
+            self._sizing_details = False
+            # What the layout could actually give, which is now the baseline.
+            self._details_dock_height = height
+            return
+        if abs(height - self._details_dock_height) <= 2:
+            return
+        _SESSION_DOCK_LINES["details"] = height / self.layout_unit
+        self._details_dock_height = height
 
     def _explainable(self, widget, title: str, text: str, *, hint: str = "") -> None:
         """Route one widget's explanation to the Why dock, not to a tooltip.
@@ -1693,6 +1895,10 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
     def eventFilter(self, source, event) -> bool:  # noqa: N802 - Qt naming
         """Send any explained widget's click or focus to the dock."""
 
+        if event.type() == QtCore.QEvent.Resize and source is getattr(
+            self, "details_dock", None
+        ):
+            self._details_dock_resized(event.size().height())
         if event.type() in self._EXPLAIN_EVENTS:
             title = source.property("explainTitle")
             if title:
@@ -2992,6 +3198,31 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         pattern_row.addWidget(self.extract_pattern_button)
         layout.addLayout(pattern_row)
 
+        # The other half of the comparison, on the same terms as the pattern:
+        # the previous pair arrived as a command line, and a command line is a
+        # launch convenience, not a place to change an input from (owner,
+        # 2026-08-18: "CLI OR GUI. Not both").  It sits beside the curve it
+        # draws and the ratio it is the denominator of.
+        previous_row = QtWidgets.QHBoxLayout()
+        self.previous_pair_value = _ElidingLabel("Previous pair: —")
+        self.previous_pair_value.setObjectName("mutedText")
+        previous_row.addWidget(self.previous_pair_value, 1)
+        self.choose_previous_button = QtWidgets.QPushButton("Choose previous pair…")
+        self._explainable(
+            self.choose_previous_button,
+            "Comparing against a different previous campaign",
+            "Picks the previous campaign's integrating-sphere pair this "
+            "campaign's factors are measured against — the amber curve, and "
+            "the denominator of the median ratio beside it. Choose the signal "
+            "frame; its background is offered from the file naming beside it "
+            "(-bg, _bg, -background) and asked for only when the folder does "
+            "not answer. The comparison is dropped the moment the pair "
+            "changes, because a ratio measured against the old pair is not a "
+            "reading about the new one: Recompute is the next press.",
+        )
+        previous_row.addWidget(self.choose_previous_button)
+        layout.addLayout(previous_row)
+
         self.sphere_plot = pg.PlotWidget(title="Absolute calibration factors")
         self.sphere_plot.setBackground("#10151b")
         self.sphere_plot.setLabel("bottom", "wavelength", units="nm")
@@ -3069,6 +3300,7 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         self.regenerate_tomls_button.clicked.connect(self._regenerate_tomls)
         self.recompute_sphere_button.clicked.connect(self._start_sphere_comparison)
         self.choose_pattern_button.clicked.connect(self._choose_pattern_file)
+        self.choose_previous_button.clicked.connect(self._choose_previous_pair)
         self.extract_pattern_button.clicked.connect(self._extract_pattern_from_sphere)
         self.save_snapshot_button.clicked.connect(self._save_snapshot)
         self.snapshot_id_edit.textChanged.connect(self.refresh_campaign)
@@ -3811,6 +4043,93 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
             )
         )
 
+    def _choose_previous_pair(self) -> None:
+        """Name the previous campaign's sphere pair from inside the bench.
+
+        One dialog where one is enough: the signal is chosen, and its
+        background is read off the file naming beside it and offered for
+        confirmation.  The second dialog appears only when the folder does not
+        answer the question or the operator says that is not the file — which
+        is the difference between a suggestion and a decision, exactly as the
+        role suggestions work everywhere else on this bench.
+        """
+
+        if self.campaign is None or self._campaign_thread is not None:
+            return
+        start = self.campaign.previous_sphere
+        folder = start.parent if start is not None and start.parent.is_dir() else self.last_folder
+        chosen, _filter = QtWidgets.QFileDialog.getOpenFileName(
+            self,
+            "Choose the previous campaign's integrating-sphere SIGNAL frame",
+            str(folder),
+            "Andor SIF frames (*.sif);;All files (*)",
+        )
+        if not chosen:
+            return
+        signal = Path(chosen)
+        background = self._previous_background_for(signal)
+        if background is None:
+            return
+        self._adopt_previous_pair(signal, background)
+
+    def _previous_background_for(self, signal: Path) -> Path | None:
+        """The background for a chosen previous signal: offered, then asked for."""
+
+        assert self.campaign is not None
+        suggested = background_sibling(signal)
+        if suggested is not None and suggested != signal:
+            answer = QtWidgets.QMessageBox.question(
+                self,
+                "The background beside it",
+                f"{suggested.name} looks like the background shot with "
+                f"{signal.name}.\n\nUse it as the previous background?",
+                QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+                QtWidgets.QMessageBox.Yes,
+            )
+            if answer == QtWidgets.QMessageBox.Yes:
+                return suggested
+        chosen, _filter = QtWidgets.QFileDialog.getOpenFileName(
+            self,
+            "Choose the previous campaign's integrating-sphere BACKGROUND frame",
+            str(signal.parent),
+            "Andor SIF frames (*.sif);;All files (*)",
+        )
+        return Path(chosen) if chosen else None
+
+    def _adopt_previous_pair(self, signal: Path, background: Path) -> None:
+        """Swap the pair, drop what was measured against the old one, and say so."""
+
+        assert self.campaign is not None
+        try:
+            self.campaign.adopt_previous_pair(signal, background)
+        except (FileNotFoundError, ValueError) as error:
+            self._save_says(str(error))
+            return
+        self.refresh()
+        self._save_says(
+            f"Comparing against {self.campaign.previous_pair_name}. The previous "
+            "comparison was measured against another pair and has been dropped; "
+            "press Recompute."
+        )
+
+    def _refresh_previous_pair(self, busy: bool) -> None:
+        """Say which previous pair the next comparison would run against."""
+
+        if self.campaign is None:
+            self.previous_pair_value.setText("Previous pair: —")
+            self.choose_previous_button.setEnabled(False)
+            return
+        name = self.campaign.previous_pair_name
+        self.previous_pair_value.setText(
+            f"Previous pair: {name}" if name else "Previous pair: none chosen"
+        )
+        self.previous_pair_value.setToolTip(
+            f"{self.campaign.previous_sphere}\n{self.campaign.previous_sphere_background}"
+            if name
+            else "No previous campaign pair has been chosen for the comparison."
+        )
+        self.choose_previous_button.setEnabled(not busy)
+
     def _adopt_pattern_rebase(self, result: PatternRebase) -> None:
         """Swap the pattern under the whole bench, and say what that cost.
 
@@ -4325,7 +4644,12 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         triage = record.triage
         measurement = self.campaign.measurements.get(path)
         role = measurement.role if measurement is not None else None
-        verdict = triage_for_role(triage, role, self.campaign.partner_peak(path, role))
+        verdict = triage_for_role(
+            triage,
+            role,
+            self.campaign.partner_peak(path, role),
+            _record_exposure_s(record),
+        )
         color = self._reading_colour(verdict, triage)
         headline = triage.headline
         if verdict.is_background:
@@ -4554,6 +4878,7 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
             enabled and not busy and self._sphere_pair_assigned()
         )
         self._refresh_pattern_source(busy)
+        self._refresh_previous_pair(busy)
         # An offer to overwrite belongs to the identity that was refused.  The
         # id field is edited between the refusal and the press, and this runs on
         # every keystroke in it, so a different identity withdraws the offer
@@ -4653,18 +4978,23 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
         """The colour a frame's ROLE earns it, not the one its raw state does.
 
         A background is DIM by construction and DIM is amber, so every correct
-        dark frame was painted in the colour that means attend to me.  A
-        background earns green for being dark and red only for not being.
+        dark frame was painted in the colour that means attend to me.  It then
+        earned the GOOD green, which said the right thing but said it in the
+        same voice as a healthy signal: on the bench's dark ground the operator
+        could no longer tell a background row from a lamp row at a glance.  So
+        a correct background now has a colour of its own — calm, cool, and
+        nobody's alarm — and a background that is NOT dark still earns red.
 
-        This is the one place that rule is written; the triage panel and the
-        files table both read it here, and it is keyed on the role the verdict
-        carries so that rewording a badge can never repaint a frame.
+        This is the one place that rule is written; the triage panel, the files
+        table and the folder summary all read it here, and it is keyed on the
+        role the verdict carries so that rewording a badge can never repaint a
+        frame.
         """
 
         if verdict is not None and verdict.is_background:
-            return _TRIAGE_COLORS[
-                ExposureState.SATURATED if verdict.blocking else ExposureState.GOOD
-            ]
+            if verdict.blocking:
+                return _TRIAGE_COLORS[ExposureState.SATURATED]
+            return _BACKGROUND_COLOR
         return _TRIAGE_COLORS[triage.state]
 
     @classmethod
@@ -4737,6 +5067,7 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
                     record.triage,
                     row_role,
                     self.campaign.partner_peak(path, row_role),
+                    _record_exposure_s(record),
                 )
                 marks.append(verdict.label.upper())
                 if record.triage.saturation.anomalous_pixels:
@@ -4791,7 +5122,10 @@ class CalibrationBenchWindow(QtWidgets.QMainWindow):
             return (path.name, role_text, "—", "—", "—"), "", ""
         role = measurement.role if measurement is not None else None
         verdict = triage_for_role(
-            record.triage, role, self.campaign.partner_peak(path, role)
+            record.triage,
+            role,
+            self.campaign.partner_peak(path, role),
+            _record_exposure_s(record),
         )
         peak = (
             "—"

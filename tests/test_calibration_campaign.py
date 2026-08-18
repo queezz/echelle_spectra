@@ -28,6 +28,7 @@ from echelle_spectra.calibration_campaign import (
     ReferenceState,
     SaveState,
     TomlState,
+    background_sibling,
     catalog_lines_for_order,
     compute_absolute_calibration,
     evaluate_exposure,
@@ -36,6 +37,7 @@ from echelle_spectra.calibration_campaign import (
     measure_saturation_clusters,
     normalize_lamp_name,
     suggest_file_roles,
+    suggest_unsaturated_exposure_s,
     triage_exposure,
     triage_for_role,
 )
@@ -710,6 +712,18 @@ def _too_dim(images: np.ndarray) -> None:
     _bright_line(images, level=700.0)
 
 
+def _saturated_over_tall_structure(images: np.ndarray) -> None:
+    """A clipped spike with a bright, still-honest peak standing under it.
+
+    55000 counts is above 70% of full scale, so it is a peak the suggestion can
+    actually be scaled against; the 65535 cluster beside it is the number the
+    detector refused to record.
+    """
+
+    _bright_line(images, level=55000.0)
+    images[0, 10:13, 40] = 65535.0
+
+
 @pytest.mark.parametrize(
     ("name", "painter", "expected", "clusters", "anomalies"),
     [
@@ -807,6 +821,97 @@ def test_exposure_guidance_names_next_action(tmp_path, painter, expected, phrase
     if painter is _cosmic_singles:
         assert result.anomalous_pixels == 3
         assert result.saturated_pixels == 0
+
+
+def test_a_saturated_frame_is_told_an_exposure_from_its_unsaturated_peak(tmp_path):
+    """Owner, 2026-08-18: "I liked the exposure suggestion... for dim images.
+
+    Can we do one for saturated ones?"  The dim path scales its own peak up to
+    the target; a clipped frame cannot, because the peak is the one number the
+    detector refused to record.  So the arithmetic runs on the brightest pixel
+    still below the clip, and the sentence says it is a starting point.
+    """
+
+    frame = _triage_frame(tmp_path, "Ne-hot.sif", _saturated_over_tall_structure)
+    triage = triage_exposure(frame)
+    assert triage.state is ExposureState.SATURATED
+    # The clip is what the peak reads; 55000 is what the frame actually knows.
+    assert triage.saturation.unsaturated_peak_counts == pytest.approx(55000.0)
+    assert triage.peak_counts == pytest.approx(65535.0)
+
+    # 0.2 s of exposure, scaled until 55000 counts would sit at 70% of full
+    # scale.  A reduction, computed rather than assumed.
+    expected = 0.2 * 0.70 * 65535.0 / 55000.0
+    assert suggest_unsaturated_exposure_s(triage, 0.2) == pytest.approx(expected)
+    assert expected < 0.2
+
+    guidance = evaluate_exposure(frame)
+    assert guidance.suggested_exposure_s == pytest.approx(expected)
+    assert f"{expected:.4g}" in guidance.next_action
+    assert "clipped peak hides its own height" in guidance.next_action
+
+    # A spike over a dark field has nothing high enough to scale against: the
+    # clip is then the only honest reference, and the answer is still a cut.
+    spike = triage_exposure(_triage_frame(tmp_path, "Ne-spike.sif", _saturated_cluster))
+    assert spike.saturation.unsaturated_peak_counts == pytest.approx(45000.0)
+    fallback = suggest_unsaturated_exposure_s(spike, 0.2)
+    assert fallback == pytest.approx(0.2 * 0.70 * 65535.0 / spike.saturation.saturation_level)
+    assert fallback < 0.2
+
+    # And a frame whose header never said how long it was exposed gets no
+    # number invented for it.
+    assert suggest_unsaturated_exposure_s(triage, None) is None
+    assert suggest_unsaturated_exposure_s(triage, 0.0) is None
+
+
+def test_every_saturated_verdict_carries_a_suggestion_worded_for_its_role(tmp_path):
+    """The lamp shot to clip is offered the companion exposure, not a scolding."""
+
+    triage = triage_exposure(
+        _triage_frame(tmp_path, "Ne-dim.sif", _saturated_over_tall_structure)
+    )
+    expected = 0.2 * 0.70 * 65535.0 / 55000.0
+
+    lamp = triage_for_role(triage, MeasurementRole.LAMP, exposure_s=0.2)
+    assert not lamp.blocking
+    assert f"{expected:.4g}" in lamp.next_action
+    assert "catch the strong lines unsaturated" in lamp.next_action
+    # Never the sphere's sentence: this frame is not being asked to reshoot.
+    assert "Lower exposure" not in lamp.next_action
+
+    sphere = triage_for_role(triage, MeasurementRole.SPHERE, exposure_s=0.2)
+    assert sphere.blocking
+    assert f"{expected:.4g}" in sphere.next_action
+    assert "Lower exposure" in sphere.next_action
+    assert "reshoot" in sphere.next_action
+
+    # A role-less frame is the front door and still gets the number.
+    unassigned = triage_for_role(triage, None, exposure_s=0.2)
+    assert f"{expected:.4g}" in unassigned.next_action
+
+    # Without an exposure time in the header there is still an action, and it
+    # still has no invented number in it.
+    blind = triage_for_role(triage, MeasurementRole.LAMP)
+    assert blind.next_action
+    assert "companion exposure" in blind.next_action
+    assert "s and" not in blind.next_action
+
+
+def test_the_dim_suggestion_is_untouched_by_the_saturated_one(tmp_path):
+    """The path the owner liked keeps its own arithmetic and its own words."""
+
+    frame = _triage_frame(tmp_path, "Ne-faint.sif", _too_dim)
+    guidance = evaluate_exposure(frame)
+
+    assert guidance.state is ExposureState.DIM
+    # Scaled off its own real peak, which a dim frame has and a clipped one
+    # does not.
+    triage = triage_exposure(frame)
+    assert guidance.suggested_exposure_s == pytest.approx(
+        0.2 * 0.70 * 0.98 * 65535.0 / triage.peak_counts
+    )
+    assert "Increase exposure toward" in guidance.next_action
+    assert "clipped peak" not in guidance.next_action
 
 
 def test_shared_catalog_line_help_maps_packaged_thar_rows():
@@ -933,6 +1038,114 @@ def test_previous_pair_copied_from_the_candidate_reads_as_a_self_check(tmp_path)
     )
     manifest = (snapshot.root / "snapshot.toml").read_text(encoding="utf-8")
     assert "sphere_comparison_self = true" in manifest
+
+
+def test_the_previous_pair_is_swapped_from_inside_the_session(tmp_path):
+    """Owner, 2026-08-18, handed a ``--previous-sphere`` command line:
+
+    "This is terrible UX again. CLI OR GUI. Not both."  Every input the bench
+    consumes has to be changeable from inside it; the flags remain a launch
+    convenience.  The swap goes through the ordinary inputs-changed path, so a
+    ratio measured against the old pair cannot survive the pair it named.
+    """
+
+    sources = _sources(tmp_path)
+    alignment = _aligned_session(tmp_path)
+    campaign = _campaign(tmp_path, sources)
+    _classify_complete(campaign, sources, alignment.frame)
+
+    assert campaign.previous_pair_name == "previous_sphere.sif + previous_sphere_bg.sif"
+    first = campaign.compute_sphere_comparison(_calculator)
+    assert first.state is ComparisonState.READY
+
+    folder = tmp_path / "campaign_2019"
+    folder.mkdir()
+    signal = folder / "IS-1s.sif"
+    signal.write_bytes(b"is-1s\n")
+    background = folder / "IS-1s_bg.sif"
+    background.write_bytes(b"is-1s-bg\n")
+
+    campaign.adopt_previous_pair(signal, background)
+
+    assert campaign.previous_sphere == signal
+    assert campaign.previous_sphere_background == background
+    assert campaign.previous_pair_name == "IS-1s.sif + IS-1s_bg.sif"
+    # Dropped, not carried over: the same words every other input change uses.
+    assert campaign.comparison.state is ComparisonState.NOT_RUN
+    assert campaign.comparison.reason == "inputs changed"
+    assert campaign.save_state is SaveState.NOT_READY
+
+    again = campaign.compute_sphere_comparison(_calculator)
+
+    assert again.state is ComparisonState.READY
+    assert again.previous_sphere == signal
+    assert again.reference_name == "IS-1s.sif + IS-1s_bg.sif"
+    assert "compared against IS-1s.sif + IS-1s_bg.sif" in again.reason
+
+    # A pair that is not there, or a file offered as its own background, is
+    # refused rather than half-adopted.
+    with pytest.raises(FileNotFoundError):
+        campaign.adopt_previous_pair(folder / "missing.sif", background)
+    with pytest.raises(ValueError):
+        campaign.adopt_previous_pair(signal, signal)
+    assert campaign.previous_sphere == signal
+    assert campaign.previous_sphere_background == background
+
+
+def test_the_self_check_follows_the_pair_across_a_swap(tmp_path):
+    """The byte comparison is about the chosen pair, not the launched one."""
+
+    sources = _sources(tmp_path)
+    alignment = _aligned_session(tmp_path)
+    campaign = _campaign(tmp_path, sources)
+    _classify_complete(campaign, sources, alignment.frame)
+
+    # A previous pair that is a copy of this campaign's own sphere.
+    copied = tmp_path / "copied"
+    copied.mkdir()
+    copy_signal = copied / "sphere_copy.sif"
+    copy_signal.write_bytes(sources["sphere.sif"].read_bytes())
+    copy_background = copied / "sphere_copy_bg.sif"
+    copy_background.write_bytes(sources["sphere_bg.sif"].read_bytes())
+
+    campaign.adopt_previous_pair(copy_signal, copy_background)
+    assert campaign.compute_sphere_comparison(_calculator).self_comparison
+
+    # And a genuinely different one clears it again.
+    campaign.adopt_previous_pair(
+        sources["previous_sphere.sif"], sources["previous_sphere_bg.sif"]
+    )
+    cleared = campaign.compute_sphere_comparison(_calculator)
+    assert not cleared.self_comparison
+    assert campaign_module.SELF_COMPARISON_NOTE not in cleared.reason
+
+
+def test_the_background_beside_a_signal_is_read_off_the_house_naming(tmp_path):
+    """One dialog where one is enough; ambiguity asks instead of guessing."""
+
+    folder = tmp_path / "previous"
+    folder.mkdir()
+    signal = folder / "sphere-1s.sif"
+    signal.write_bytes(b"signal\n")
+
+    # Nothing beside it yet.
+    assert background_sibling(signal) is None
+
+    suffixed = folder / "sphere-1s-bg.sif"
+    suffixed.write_bytes(b"bg\n")
+    assert background_sibling(signal) == suffixed
+
+    # The 2019 habit, where no suffix rule joins IS-1s.sif to IS_bg.sif: the
+    # folder is asked instead, and answers only when it is unambiguous.
+    old = tmp_path / "campaign_2019"
+    old.mkdir()
+    is_signal = old / "IS-1s.sif"
+    is_signal.write_bytes(b"signal\n")
+    (old / "IS_bg.sif").write_bytes(b"bg\n")
+    assert background_sibling(is_signal) == old / "IS_bg.sif"
+
+    (old / "sphere_background.sif").write_bytes(b"another\n")
+    assert background_sibling(is_signal) is None
 
 
 def test_tomls_are_commented_parseable_and_machine_path_free(tmp_path):
