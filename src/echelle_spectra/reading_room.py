@@ -29,6 +29,15 @@ law (fleet's ``WEBUI.md`` and ``WEBUI-COOKBOOK.md``):
 * empty, unmeasured, unreachable and judged states are rendered distinctly, and
   a verdict word this page does not know is rendered as unrecognized rather
   than dressed as one it does.
+
+When a local server serves the same page (``served=True``) it gains one power
+the file cannot have: it may ask that server which folders exist on this
+machine.  That is the whole served half — a folder picker behind a Browse
+button on the composer's data-folder field, and the two one-screen pages a cold
+campaign is served (:func:`render_setup_page` when no campaign home is recorded
+yet, :func:`render_empty_campaign_page` when a home has no catalog yet).  Every
+one of those pieces is *appended* to the static build rather than woven into
+it, so the one-shot file keeps its "fetches nothing" contract byte for byte.
 """
 
 from __future__ import annotations
@@ -1586,21 +1595,37 @@ def _select(identifier: str, label: str, options: list[tuple[str, str]], *, firs
 
 
 def _text_field(
-    identifier: str, label: str, value: str, *, note: str = "", placeholder: str = ""
+    identifier: str,
+    label: str,
+    value: str,
+    *,
+    note: str = "",
+    placeholder: str = "",
+    browse: bool = False,
 ) -> str:
-    """One text control.
+    """One text control, and — served only — the Browse button beside it.
 
     A field with nothing to fill carries a placeholder and no ``value`` at all:
-    a baked example path is a claim about a machine this build never saw.
+    a baked example path is a claim about a machine this build never saw. The
+    Browse button keeps one position whether the picker has ever been opened
+    or not, and falls through to the page's base ``button`` styling, so it
+    looks pressable at rest rather than only under the pointer.
     """
 
     hint = f'<small class="muted">{_e(note)}</small>' if note else ""
     attributes = f' value="{_e(value)}"' if value else ""
     if placeholder:
         attributes += f' placeholder="{_e(placeholder)}"'
+    control = f'<input type="text" id="{_e(identifier)}"{attributes}>'
+    if browse:
+        control = (
+            f'<span class="field-row">{control}'
+            f'<button type="button" class="browse" data-browse="{_e(identifier)}">'
+            "Browse…</button></span>"
+        )
     return (
         f'<label class="field"><span>{_e(label)}</span>'
-        f'<input type="text" id="{_e(identifier)}"{attributes}>{hint}</label>'
+        f"{control}{hint}</label>"
     )
 
 
@@ -1642,12 +1667,19 @@ def _epoch_options(epochs: list[str], registry: dict[str, Any]) -> str:
     return f'<option value="">{_e(stated)}</option>'
 
 
-def _composer_card(values: dict[str, str], epochs: list[str], registry: dict[str, Any]) -> str:
+def _composer_card(
+    values: dict[str, str],
+    epochs: list[str],
+    registry: dict[str, Any],
+    *,
+    served: bool = False,
+) -> str:
     """Two questions, and every answer they decide folded away behind them.
 
     The data folder and the calibration are the only two facts a person holds
     that this build cannot read off a file; everything else is derived from
     them and stays editable in the fold for the run that needs an exception.
+    Served, the data folder also carries the Browse button into the picker.
     """
 
     body = (
@@ -1659,6 +1691,7 @@ def _composer_card(values: dict[str, str], epochs: list[str], registry: dict[str
             "",
             placeholder="the folder holding this drive's SIF shots",
             note="Not recorded by any catalog or receipt — the one field this page cannot fill.",
+            browse=served,
         )
         + '<label class="field"><span>Calibration</span>'
         f'<select id="f-epoch">{_epoch_options(epochs, registry)}</select></label>'
@@ -2434,6 +2467,305 @@ wire();
 """
 
 
+# ---------------------------------------------------------------------------
+# The served half: a folder picker, and the two states a cold campaign has
+# ---------------------------------------------------------------------------
+#
+# Everything below renders only when ``echelle web`` is serving the page from a
+# local server, which is the one situation where the page may ask a question:
+# the server answers ``/api/browse`` with the folders on this machine and
+# ``/api/home`` with the campaign home it wrote.  The static build never reaches
+# any of it -- these constants are concatenated into the page only under
+# ``served=True``, so the one-shot file keeps its "reaches nothing" contract
+# byte for byte.
+#
+# The dialog obeys the deep-view law: its Close and its Choose sit in a header
+# that never scrolls away, Escape dismisses it from any depth, its body owns its
+# own scroll (the page behind it is locked, with a stable scrollbar gutter so
+# locking moves no rail by a pixel), and every row is one press target with its
+# SIF count as a plain label rather than a second door.
+
+#: The one relative endpoint the picker itself reads.
+BROWSE_ENDPOINT = "/api/browse?path="
+
+#: The one relative endpoint that writes a campaign home.
+HOME_ENDPOINT = "/api/home"
+
+_PICKER_CSS = """
+/* Served only. A stable gutter is declared before anything can lock the page,
+   so opening the dialog cannot shift the layout -- or a rail -- sideways. */
+html { scrollbar-gutter: stable; }
+html.picker-open { overflow: hidden; }
+.field-row { display: flex; gap: .4rem; align-items: center; }
+.field-row input { flex: 1 1 auto; min-width: 0; }
+.field-row .browse { flex: 0 0 auto; white-space: nowrap; }
+.picker { position: fixed; inset: 0; z-index: 20; display: flex; align-items: center;
+  justify-content: center; padding: var(--gap); }
+.picker-backdrop { position: absolute; inset: 0; background: rgba(12, 12, 14, .5); }
+/* One bordered panel, headed groups inside it as plain rows: no card in card. */
+.picker-dialog { position: relative; display: flex; flex-direction: column;
+  width: min(46rem, 100%); max-height: min(80vh, 42rem); background: var(--panel);
+  border: 1px solid var(--line); border-radius: .55rem; padding: .8rem .9rem .9rem; }
+/* The exit stays within reach at any depth: the head never scrolls. */
+.picker-head { flex: 0 0 auto; border-bottom: 1px solid var(--line); padding-bottom: .55rem; }
+.picker-title { font-size: 1.05rem; margin: 0 0 .15rem; }
+.picker-path { margin: 0 0 .5rem; color: var(--muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; overflow-wrap: anywhere; }
+.picker-actions { display: flex; gap: .5rem; flex-wrap: wrap; margin: 0; }
+.picker-choose[disabled] { opacity: .55; cursor: default; }
+.picker-error { margin: .5rem 0 0; border-left: .2rem solid var(--bad); color: var(--bad);
+  padding-left: .6rem; }
+.picker-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain;
+  display: flex; flex-direction: column; gap: .25rem; padding-top: .55rem; }
+.picker-row { display: flex; align-items: baseline; gap: .6rem; width: 100%; text-align: left; }
+.picker-name { flex: 1 1 auto; overflow-wrap: anywhere; }
+.picker-count { flex: 0 0 auto; color: var(--muted); font-size: .9rem; }
+.picker-empty { color: var(--muted); margin: .4rem 0 0; }
+.solo { max-width: 46rem; margin: 0 auto; padding: 2rem 24px 3rem; }
+.solo h2 { font-size: 1.3rem; }
+.solo .cmd { border-top: 1px solid var(--line); }
+"""
+
+#: The dialog's markup, identical on every served surface so one script drives
+#: all of them.
+_PICKER_MARKUP = """<div class="picker" id="picker" hidden>
+<div class="picker-backdrop" data-picker-close></div>
+<section class="picker-dialog" id="picker-dialog" role="dialog" aria-modal="true"
+ aria-labelledby="picker-title" tabindex="-1">
+<header class="picker-head"><h2 class="picker-title" id="picker-title">Pick a folder</h2>
+<p class="picker-path" id="picker-path">Drives on this machine</p>
+<p class="picker-actions">
+<button type="button" class="picker-choose" id="picker-choose" disabled>Choose this folder</button>
+<button type="button" class="picker-close" id="picker-close" data-picker-close>Close</button>
+</p></header>
+<p class="picker-error" id="picker-error" hidden></p>
+<div class="picker-body" id="picker-body"></div>
+</section></div>
+"""
+
+_PICKER_JS = (
+    """
+/* The folder picker. Two states: the drive list (an empty path) and one
+   folder's own subfolders. A row is the press target and descends; the count
+   beside it is a label, never a second door. */
+var PICKER_BROWSE = '"""
+    + BROWSE_ENDPOINT
+    + """';
+var picker = { path: '', choose: null, opener: null };
+
+function pickerEl(id) { return document.getElementById(id); }
+
+function pickerSay(message) {
+  var box = pickerEl('picker-error');
+  if (!box) { return; }
+  box.textContent = message || '';
+  box.hidden = !message;
+}
+
+function pickerRow(name, path, note) {
+  var row = document.createElement('button');
+  row.type = 'button';
+  row.className = 'picker-row';
+  row.setAttribute('data-path', path === null || path === undefined ? '' : String(path));
+  var label = document.createElement('span');
+  label.className = 'picker-name';
+  label.textContent = name;
+  row.appendChild(label);
+  var count = document.createElement('span');
+  count.className = 'picker-count';
+  count.textContent = note;
+  row.appendChild(count);
+  return row;
+}
+
+function pickerRender(payload) {
+  var body = pickerEl('picker-body');
+  var head = pickerEl('picker-path');
+  var choose = pickerEl('picker-choose');
+  if (!body) { return; }
+  picker.path = String(payload.path || '');
+  if (head) { head.textContent = picker.path || 'Drives on this machine'; }
+  if (choose) { choose.disabled = !picker.path; }
+  while (body.firstChild) { body.removeChild(body.firstChild); }
+  if (picker.path) {
+    var parent = payload.parent ? String(payload.parent) : '';
+    body.appendChild(pickerRow('..', parent, parent ? 'one folder up' : 'the drive list'));
+  }
+  var entries = picker.path ? (payload.dirs || []) : (payload.drives || []);
+  Array.prototype.forEach.call(entries, function (entry) {
+    var folder = typeof entry === 'string' ? { name: entry, path: entry } : entry;
+    var counted = typeof folder.sif_count === 'number'
+      ? folder.sif_count + ' SIF file(s)'
+      : 'SIF files not counted';
+    body.appendChild(pickerRow(
+      String(folder.name || folder.path || ''), String(folder.path || ''), counted
+    ));
+  });
+  if (!entries.length) {
+    var empty = document.createElement('p');
+    empty.className = 'picker-empty';
+    empty.textContent = picker.path
+      ? 'This folder holds no subfolders.'
+      : 'This machine listed no drives.';
+    body.appendChild(empty);
+  }
+}
+
+function pickerLoad(path, keepError) {
+  /* A refused folder says so in one sentence and still leaves somewhere to go:
+     the drive list, which is the one listing with no folder to refuse. The
+     retry cannot loop, because the drive list's own path is empty. */
+  if (!keepError) { pickerSay(''); }
+  fetch(PICKER_BROWSE + encodeURIComponent(path || '')).then(function (response) {
+    return response.json().then(function (payload) {
+      return { ok: response.ok, payload: payload };
+    });
+  }).then(function (answer) {
+    if (!answer.ok || answer.payload.error) {
+      pickerSay(String(answer.payload.error || 'That folder could not be read.'));
+      if (path) { pickerLoad('', true); }
+      return;
+    }
+    pickerRender(answer.payload);
+  }, function () {
+    pickerSay('This machine did not answer, so no folder could be listed.');
+  });
+}
+
+function pickerOpen(seed, choose, opener) {
+  var box = pickerEl('picker');
+  if (!box) { return; }
+  picker.choose = choose;
+  picker.opener = opener || null;
+  box.hidden = false;
+  document.documentElement.classList.add('picker-open');
+  var dialog = pickerEl('picker-dialog');
+  if (dialog) { dialog.focus(); }
+  pickerLoad(seed || '');
+}
+
+function pickerClose() {
+  var box = pickerEl('picker');
+  if (!box || box.hidden) { return; }
+  box.hidden = true;
+  document.documentElement.classList.remove('picker-open');
+  if (picker.opener && picker.opener.focus) { picker.opener.focus(); }
+  picker.opener = null;
+}
+
+function pickerWire() {
+  var box = pickerEl('picker');
+  if (!box) { return; }
+  box.addEventListener('click', function (event) {
+    if (!event.target || !event.target.closest) { return; }
+    if (event.target.closest('[data-picker-close]')) { pickerClose(); return; }
+    if (event.target.closest('.picker-choose')) {
+      if (picker.path && picker.choose) { picker.choose(picker.path); }
+      return;
+    }
+    var row = event.target.closest('.picker-row');
+    if (row) { pickerLoad(row.getAttribute('data-path') || ''); }
+  });
+  /* Escape dismisses from any depth, including a long folder list. */
+  document.addEventListener('keydown', function (event) {
+    if (event.key === 'Escape' && !box.hidden) { pickerClose(); }
+  });
+}
+
+pickerWire();
+"""
+)
+
+#: The served build's own wiring: Browse fills the composer's data folder and
+#: derives everything the composer derives from it, exactly as typing would.
+_SERVED_JS = """
+function browseInto(button) {
+  var field = byId(button.getAttribute('data-browse'));
+  if (!field) { return; }
+  pickerOpen(field.value, function (chosen) {
+    field.value = chosen;
+    field.dispatchEvent(new Event('input', { bubbles: true }));
+    compose();
+    pickerClose();
+  }, button);
+}
+
+document.addEventListener('click', function (event) {
+  if (!event.target || !event.target.closest) { return; }
+  var browse = event.target.closest('.browse');
+  if (browse) { browseInto(browse); }
+});
+"""
+
+#: The one-screen pages carry the same command rows the campaign page does, so
+#: they carry the same wiring: a show/hide toggle that flips one attribute, and
+#: a copy button that carries the whole command whether the row is open or shut.
+#: Without this the rows would render controls that look pressable and are not.
+_SOLO_JS = """
+function soloCopy(button) {
+  var text = button.getAttribute('data-copy') || '';
+  var done = function () { button.textContent = 'Copied'; };
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text).then(done, function () { done(); });
+    return;
+  }
+  var holder = document.createElement('textarea');
+  holder.value = text;
+  document.body.appendChild(holder);
+  holder.select();
+  try { document.execCommand('copy'); done(); } catch (error) { /* nothing to do */ }
+  document.body.removeChild(holder);
+}
+
+document.addEventListener('click', function (event) {
+  if (!event.target || !event.target.closest) { return; }
+  var toggle = event.target.closest('.fold-toggle');
+  if (toggle) {
+    var body = document.getElementById(toggle.getAttribute('aria-controls'));
+    var open = toggle.getAttribute('aria-expanded') === 'true';
+    if (body) { body.hidden = open; }
+    toggle.setAttribute('aria-expanded', open ? 'false' : 'true');
+    toggle.textContent = open ? toggle.getAttribute('data-show') : 'hide';
+    return;
+  }
+  var copy = event.target.closest('.copy');
+  if (copy) { soloCopy(copy); }
+});
+"""
+
+#: The setup page's own wiring: the chosen folder becomes the campaign home.
+_SETUP_JS = (
+    """
+function chooseHome(folder) {
+  fetch('"""
+    + HOME_ENDPOINT
+    + """', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ folder: folder })
+  }).then(function (response) {
+    return response.json().then(function (payload) {
+      return { ok: response.ok, payload: payload };
+    });
+  }).then(function (answer) {
+    if (!answer.ok || answer.payload.error) {
+      pickerSay(String(answer.payload.error || 'That folder could not become the campaign home.'));
+      return;
+    }
+    window.location.href = '/';
+  }, function () {
+    pickerSay('This machine did not answer, so nothing was written.');
+  });
+}
+
+var opener = document.getElementById('pick-home');
+if (opener) {
+  opener.addEventListener('click', function () { pickerOpen('', chooseHome, opener); });
+}
+"""
+)
+
+
 #: The four tabs, in work order: what to do now, the drives, the calibration
 #: evidence, and the canon last.
 TABS = (
@@ -2526,7 +2858,10 @@ def _page(context: dict[str, Any]) -> str:
             _group(
                 "now",
                 _composer_card(
-                    context["data"]["values"], context["epochs"], context["registry"]
+                    context["data"]["values"],
+                    context["epochs"],
+                    context["registry"],
+                    served=bool(context.get("served")),
                 ),
             ),
             _group(
@@ -2596,21 +2931,163 @@ def _page(context: dict[str, Any]) -> str:
             ),
         ]
     )
+    # The served half is appended, never woven in: with ``served`` false every
+    # piece below is the empty string and the file is the static build's own
+    # bytes, down to the banner sentence.
+    served = bool(context.get("served"))
+    picker_css = _PICKER_CSS if served else ""
+    picker_markup = _PICKER_MARKUP if served else ""
+    served_js = (_PICKER_JS + _SERVED_JS) if served else ""
+    tagline = (
+        "Served from this machine. This page never executes commands and never starts a "
+        "worker; Browse asks this local server which folders exist."
+        if served
+        else "Read-only. This page never executes commands, never starts a "
+        "worker, and fetches nothing."
+    )
     return (
         "<!doctype html>\n"
         '<html lang="en"><head><meta charset="utf-8">'
         '<meta name="viewport" content="width=device-width, initial-scale=1">'
         "<title>Echelle campaign</title>\n"
-        f"<style>{_CSS}</style></head><body>\n"
+        f"<style>{_CSS}{picker_css}</style></head><body>\n"
         f'<header class="topbar"><h1>Echelle campaign</h1>{_tab_bar()}'
-        '<span class="tagline">Read-only. This page never executes commands, never starts a '
-        "worker, and fetches nothing.</span></header>\n"
+        f'<span class="tagline">{tagline}</span></header>\n'
         '<div class="wrap"><div class="rail-grid">'
         f'<aside class="rail rail-left" id="rail-left" aria-label="Controls">{left}</aside>'
         f'<main class="content" id="content">{views}</main>'
         f'<aside class="rail rail-right" id="rail-right" aria-label="Context">{right}</aside>'
         "</div></div>\n"
-        f"<script>\nconst DATA={encoded};\n{_JS}</script>\n</body></html>\n"
+        f"{picker_markup}"
+        f"<script>\nconst DATA={encoded};\n{_JS}{served_js}</script>\n</body></html>\n"
+    )
+
+
+# ---------------------------------------------------------------------------
+# The two one-screen pages a cold campaign is served
+# ---------------------------------------------------------------------------
+
+#: The one value neither a campaign home nor a catalog records: where the raw
+#: SIF files are.  It is written as a marker so a pasted command fails loudly on
+#: the missing folder rather than quietly on a guessed one.
+DATA_FOLDER_MARKER = "<data folder>"
+
+
+def _solo_page(title: str, tagline: str, body: str, script: str) -> str:
+    """One self-contained screen in the page's own palette and CSS discipline."""
+
+    return (
+        "<!doctype html>\n"
+        '<html lang="en"><head><meta charset="utf-8">'
+        '<meta name="viewport" content="width=device-width, initial-scale=1">'
+        f"<title>{_e(title)}</title>\n"
+        f"<style>{_CSS}{_PICKER_CSS}</style></head><body>\n"
+        f'<header class="topbar"><h1>Echelle campaign</h1>'
+        f'<span class="tagline">{_e(tagline)}</span></header>\n'
+        f'<main class="solo">{body}</main>\n'
+        f"{_PICKER_MARKUP}"
+        f"<script>\n{_PICKER_JS}{_SOLO_JS}{script}</script>\n</body></html>\n"
+    )
+
+
+def render_setup_page() -> str:
+    """The page a cold start is served: picking the folder *is* the setup.
+
+    There is no campaign home yet, so there is nothing to show and one thing to
+    do.  The page names that in plain words, teaches it once, and hands over the
+    same picker the composer uses — seeded at this machine's own drives, because
+    an example path from another machine is a guess dressed as a default.
+    """
+
+    body = (
+        '<section class="panel">'
+        "<h2>No campaign home yet</h2>"
+        "<p>Pick the folder this campaign lives in — the one holding, or about to hold, "
+        "its calibrations and its catalog. This machine remembers it, so the next time you "
+        "open this page it opens on the campaign instead of on this screen.</p>"
+        '<p class="actions"><button type="button" id="pick-home">Pick the campaign folder…'
+        "</button></p>"
+        "</section>"
+    )
+    return _solo_page(
+        "Echelle campaign — setup",
+        "Served from this machine. Choosing a folder writes one small campaign file in it "
+        "and changes nothing else.",
+        body,
+        _SETUP_JS,
+    )
+
+
+def _home_value(home: dict[str, Any], keys: tuple[str, ...], default: str = "") -> str:
+    for key in keys:
+        value = home.get(key)
+        if value:
+            return _posix(value)
+    return default
+
+
+def render_empty_campaign_page(home: dict[str, Any]) -> str:
+    """The page a campaign home with no catalog yet is served.
+
+    Empty is not broken, and the two are rendered as the different facts they
+    are: nothing has been processed here, so the file that would list the cubes
+    does not exist.  The page therefore claims no cube and no drive; it carries
+    the one command that ends the state, composed from the home's own registry,
+    snapshot root and catalog path, with the raw data folder left as a marker
+    because nothing on disk records it.
+    """
+
+    root = _home_value(home, ("folder", "root", "home", "path"))
+    named = str(home.get("volume_label") or home.get("label") or "")
+    values = {
+        "input": DATA_FOLDER_MARKER,
+        "output": _home_value(
+            home, ("cubes", "output", "cubes_root"), f"{root}/cubes" if root else "cubes"
+        ),
+        "registry": _home_value(
+            home,
+            ("registry", "registry_path"),
+            f"{root}/calibration_registry.toml" if root else "calibration_registry.toml",
+        ),
+        "calibrations": _home_value(
+            home,
+            ("calibrations", "calibrations_root", "snapshots_root"),
+            f"{root}/calibrations" if root else "calibrations",
+        ),
+        "catalog": _home_value(
+            home,
+            ("catalog", "catalog_path", "central_index"),
+            f"{root}/echelle-catalog.json" if root else "echelle-catalog.json",
+        ),
+        "sample": str(home.get("sample") or "20"),
+        # No drive is catalogued here yet, so nothing names one: the home's own
+        # folder name is a default to edit, not a drive this page claims to see.
+        "label": named or (root.rsplit("/", 1)[-1] if root else "unknown"),
+    }
+    meaning, template = STEP_COMMANDS["sample"]
+    shapes = {shell: _fill(template, values, shell) for shell, _ in SHELL_NAMES}
+    body = (
+        '<section class="panel">'
+        "<h2>This campaign has no catalog yet</h2>"
+        "<p>Its home is in place and nothing has been processed here, so the file that would "
+        "list the cubes has not been written. That is empty, not broken.</p>"
+        f'<p class="muted">Home {_e(root or "not recorded")} · registry {_e(values["registry"])} '
+        f'· snapshot root {_e(values["calibrations"])} · catalog to be written at '
+        f'{_e(values["catalog"])}</p>'
+        "<h3>The first command</h3>"
+        + _command_row(
+            "first-run", "Process a first sample", _fill(meaning, values, "posix"), shapes
+        )
+        + f'<p class="note">The folder holding the raw SIF files is the one value no file here '
+        f"records: replace {_e(DATA_FOLDER_MARKER)} with it. This page shows the campaign as "
+        "soon as that first run writes the catalog.</p>"
+        "</section>"
+    )
+    return _solo_page(
+        "Echelle campaign — no catalog yet",
+        "Served from this machine. This page never executes commands and never starts a worker.",
+        body,
+        "",
     )
 
 
@@ -2716,11 +3193,20 @@ def build_reading_room(
     document_paths: tuple[str | Path, ...] | list[str | Path] = (),
     registry_path: str | Path | None = None,
     calibrations_root: str | Path | None = None,
+    served: bool = False,
 ) -> Path:
-    """Build one static page; no worker or command execution surface exists.
+    """Build one page; no worker or command execution surface exists either way.
 
-    The page is the whole artifact.  It carries its own data inline, so there
-    is no sidecar for it to read and nothing for it to fetch.
+    The static build (``served`` false, the default) is the whole artifact: it
+    carries its own data inline, so there is no sidecar for it to read and
+    nothing for it to fetch, and its bytes are exactly what they were before the
+    served half existed.
+
+    With ``served`` true the same page is built for a local server that can
+    answer two questions about this machine — which folders exist, and which one
+    is the campaign home.  The composer's data-folder field then carries a
+    Browse button opening the folder picker, and only that appended block
+    fetches anything.
     """
 
     loaded = load_catalog(catalog_path)
@@ -2775,6 +3261,7 @@ def build_reading_room(
     )
     every_step = [*calibrate_steps, *(step for row in drive_rows for step in row["steps"])]
     context = {
+        "served": served,
         "catalog_path": _posix(catalog_path),
         "generated_at": generated_at,
         "sources": sources,
