@@ -25,11 +25,15 @@ import xarray as xr
 from echelle_spectra.drift import (
     ALIGNMENT_MAX_PIXEL_RESIDUAL,
     DEUTERIUM_CALENDAR_RESOURCE,
+    ERA_MISASSIGNED_VERDICT,
     REPAIR_LIMIT_PX,
+    DriftError,
     audit_cubes,
     deuterium_prior,
     load_deuterium_calendar,
+    require_sampled_verdict,
     verdict_from_evidence,
+    write_drift_evidence,
 )
 from echelle_spectra.tools.line_catalog import (
     LINE_FAMILY_ISOTOPES,
@@ -369,10 +373,39 @@ def test_a_deuterium_reading_outside_the_calendar_window_flags_the_shot(
     assert "outside every deuterium window" in shot["isotope_prior_basis"]
     assert "expects hydrogen" in shot["isotope_flag"]
     assert payload["summary"]["isotope_flagged_shots"] == ["190000"]
-    # Flagged, never resolved: the measurement still stands and the verdict is
-    # the one the residuals earned.
-    assert payload["verdict"] == "aligned"
+    # CHANGED after the 2026-08-18 real-light rehearsal.  This used to assert
+    # ``aligned``: the flag was advisory and the verdict was "the one the
+    # residuals earned".  That night showed what earning it costs — a 2019 cube
+    # recalibrated onto the wrong era had its hydrogen lines re-read as
+    # deuterium and the flipped fit scored *better* than the correct one, so an
+    # aligned verdict here would authorize a bulk run over cubes processed
+    # against the wrong epoch.  Every measurement below is untouched: the
+    # assignment is still D, the residuals are still sub-pixel against D.  Only
+    # the interval's authorization changed, and it changed to a word that names
+    # the cause.
+    assert payload["verdict"] == ERA_MISASSIGNED_VERDICT
     assert all(item["isotope"] == "D" for item in _balmer(payload))
+    for item in _balmer(payload):
+        assert abs(item["pixel_residual_px"]) < ALIGNMENT_MAX_PIXEL_RESIDUAL
+
+    ambiguity = payload["summary"]["isotope_ambiguity"]
+    assert ambiguity["finding"] == "isotope flip or era shift, degenerate; calendar says H-only"
+    assert ambiguity["excludes_deuterium"] is True
+    assert ambiguity["implied_common_shift_px"] == pytest.approx(-16.5, abs=0.5)
+    assert ambiguity["isotope_separation_px"] == pytest.approx(16.5, abs=0.5)
+    assert payload["summary"]["isotope_ambiguous_shots"] == ["190000"]
+    assert "wrong epoch" in ambiguity["detail"]
+    # The repair is a cross-era recalibration, so the advice names the full
+    # 'recal-cube' and warns off the --wavelength-only form the shifted verdict
+    # composes: that flag reuses the base snapshot's sphere pair, and another
+    # era's snapshot does not share it.
+    assert "190000" in payload["verdict_advice"]
+    assert "NOT the --wavelength-only form" in payload["verdict_advice"]
+
+    # And it is refused at the gate rather than merely displayed.
+    evidence = write_drift_evidence(tmp_path / "flipped.json", payload)
+    with pytest.raises(DriftError, match="recalibrate these cubes"):
+        require_sampled_verdict(evidence, {"20170301_ccd"})
 
 
 def test_a_deuterium_reading_inside_the_window_is_expected_and_unflagged(

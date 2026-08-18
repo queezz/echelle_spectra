@@ -25,6 +25,32 @@ pixels; the shot is tagged with the isotopologue its lines chose; and on a shot
 that shows deuterium the H2 Fulcher anchors are dropped rather than fitted
 against the wrong molecule.
 
+The verdict is decided on the *strong* lines only.  The 2026-08-18 rehearsal on
+real light settled this: a flawless era match read the Balmer residuals at
++0.38/+0.65/+0.66/+1.21 px on lines of SNR up to 440, while weak Fulcher lines
+near the detection floor scattered over -10..+17 px, because a +/-0.4 nm fit
+window is +/-37 px at H-alpha and +/-60 px in the blue -- wide enough to reach
+a neighbour and drag a faint centroid across it.  Judged over every line at
+once that shot read ``misaligned-beyond-repair``, and its advice (reprocess the
+raw SIF) could not have repaired what was centroid noise.  So the strong lines
+carry the verdict and the weak ones are reported beside it as a data-quality
+figure with their own words; ``misaligned-beyond-repair`` is reserved for
+strong-line residuals that are both large and mutually inconsistent, which is
+what real geometric damage looks like.
+
+The same rehearsal produced the isotope hazard in the flesh.  A 2019 cube
+recalibrated onto the *wrong* era had its hydrogen Balmer lines re-identified
+as deuterium -- H-gamma to D-gamma is 0.1187 nm, ~16.5 px, degenerate with the
+era shift -- and the flipped fit then looked *better* than the correct one.  So
+whenever every two-reference Balmer window in a shot chooses deuterium and the
+hydrogen reading of the same centroids implies one common shift equal to the
+H/D separation, the evidence carries a loud ambiguity finding naming both
+readings.  When the calendar excludes deuterium for that shot's date the
+finding is not advisory: the interval verdict becomes
+``era-misassigned-calibration`` and no bulk run is authorized by it.  The
+finding still never moves a residual or an assignment -- the spectroscopy
+stands as measured; only the interval's authorization changes.
+
 This is a guard, not a precision instrument (owner's scope, 2026-08-15: the
 audit is a rough-alignment epoch gate, and fine wavelength work belongs to
 local lines in analysis, outside this pipeline).  One centroid per window, no
@@ -34,9 +60,9 @@ the offset does -- so it is exactly degenerate with a real 16.5 px detector
 shift, and nearest-assignment cannot separate the two past their ~8 px
 midpoint.  That is what the bundled deuterium calendar is for: it says where
 the isotope question exists at all, and when the calendar and the measurement
-disagree the shot is flagged.  The flag never moves a residual, a verdict, or
-an assignment.  Spectroscopy decides; the calendar tells the operator where to
-look twice.
+disagree the shot is flagged.  Spectroscopy decides; the calendar tells the
+operator where to look twice, and where it says hydrogen outright it withholds
+the interval's authorization rather than resolving the physics.
 """
 
 from __future__ import annotations
@@ -88,12 +114,26 @@ READABLE_DRIFT_SCHEMAS = (DRIFT_SCHEMA, DRIFT_SCHEMA_V1)
 # finer than the calibration's own stated accuracy.
 ALIGNMENT_MAX_PIXEL_RESIDUAL = 0.5
 
-# SHIFT_CONSISTENCY_PX — how far one line's pixel residual may sit from the
-# fitted rigid shift and still belong to the same rigid shift.  One pixel is
-# ~1.5x the bench's alignment RMS and covers ordinary centroid noise; beyond it
-# the residuals are not one translation of the detector, so no single shift
-# repairs them and the interval is beyond repair (or wants splitting).
+# SHIFT_CONSISTENCY_PX — how far one *verdict-carrying* line's pixel residual
+# may sit from the fitted rigid shift and still belong to the same rigid shift.
+# One pixel is ~1.5x the bench's alignment RMS and covers ordinary centroid
+# noise; beyond it the residuals are not one translation of the detector, so no
+# single shift repairs them and the interval wants splitting -- or, when the
+# disagreement is also large, is beyond repair.  The bound may stay at one
+# pixel only because VERDICT_SNR_FLOOR keeps noisy centroids out of the fit:
+# every line that reaches it is good to <= 0.25 px, so a pixel of disagreement
+# is ~4 sigma of centroid noise and means a real disagreement.
 SHIFT_CONSISTENCY_PX = 1.0
+
+# GEOMETRIC_DAMAGE_PX — how far the worst strong-line residual must sit from
+# zero before an inconsistent set is called damage rather than quality.  1.5 px
+# is 1.5x SHIFT_CONSISTENCY_PX and ~2.2x the bench's own 0.67 px rigid-alignment
+# RMS: inside it a slid table still lands every strong line within about a
+# pixel, which is a correction worth making, and the honest report is a shift
+# whose consistency is noted.  Beyond it, lines that also refuse to agree on one
+# translation are not a table that slipped -- the detector geometry itself
+# moved, and only re-identifying the anchors against lamp data can fix that.
+GEOMETRIC_DAMAGE_PX = 1.5
 
 # REPAIR_LIMIT_PX — the largest rigid shift a table correction may still claim.
 # Two independent measurement windows bound it: this audit fits centroids in a
@@ -119,6 +159,58 @@ REPAIR_LIMIT_PX = 25.0
 MINIMUM_CENTROIDS = 3
 MINIMUM_DISTINCT_ORDERS = 3
 MINIMUM_SNR = 4.0
+
+# --- Which lines may decide a verdict ---------------------------------------
+#
+# INSTRUMENT_LINE_SIGMA_NM is this spectrograph's Gaussian line sigma, the ~0.03
+# nm instrumental width the alignment bound is already stated against.
+INSTRUMENT_LINE_SIGMA_NM = 0.035
+
+# VERDICT_SNR_FLOOR — the SNR at which one centroid can state the alignment
+# bound at all, and therefore the line between evidence and quality.
+#
+# The physics: a line of sigma 0.035 nm is 3.2 px wide at H-alpha's 0.0108 nm/px
+# and 5.1 px wide in the bluest audited order (0.0068 nm/px).  A baseline-
+# subtracted centroid on such a line is good to roughly sigma/SNR.  Requiring
+# that precision to be at most half of ALIGNMENT_MAX_PIXEL_RESIDUAL in the worst
+# (bluest) order gives 5.1 px / 0.25 px = 20.  Below SNR 20 a line's own
+# centroid noise is a sizeable fraction of the bound the verdict is stated in,
+# and the +/-0.4 nm fit window -- +/-37 px at H-alpha, +/-60 px in the blue --
+# is wide enough to reach a neighbour that drags a faint centroid many pixels
+# across it.  That is not a hypothesis: on 2026-08-18 the strong Balmer lines
+# (SNR 68..440) agreed to under a pixel on a flawless era match while weak
+# Fulcher lines near the detection floor scattered over -10..+17 px in the same
+# shot.  The strong lines carry the alignment truth; the weak ones describe how
+# clean the data is.
+#
+# It is also 5x MINIMUM_SNR, which was always a *detection* floor -- enough to
+# say a line is there -- and never a metrology floor.
+VERDICT_SNR_FLOOR = 20.0
+
+# --- The isotope/era degeneracy ---------------------------------------------
+#
+# ISOTOPE_FLIP_MINIMUM_LINES — how many two-reference Balmer windows a shot must
+# hold before their agreement means anything.  One window flipping is an
+# assignment; two or more flipping together is a pattern.
+ISOTOPE_FLIP_MINIMUM_LINES = 2
+
+# ISOTOPE_DEGENERACY_WINDOW_PX — how near the hydrogen reading's implied common
+# shift must fall to the H/D separation before the two readings are declared
+# indistinguishable.  Equivalently (the algebra collapses to it) how near the
+# deuterium reading's own common residual must be to zero: that is the "better
+# looking" fit the alarm exists to refuse.  4 px is half the ~8 px midpoint past
+# which nearest-isotope assignment cannot separate the two references at all --
+# inside it either hypothesis explains the centroids, outside it the deuterium
+# reading is itself several pixels off, so the shot's problem is a shift the
+# ordinary verdict already reports and not the isotope question.
+ISOTOPE_DEGENERACY_WINDOW_PX = 4.0
+
+#: The verdict a shot earns when its lines read as deuterium, the hydrogen
+#: reading of the same centroids is one common H/D-sized shift, and the calendar
+#: says deuterium was not running.  Named rather than folded into another word:
+#: no correction repairs it, because nothing is broken except which calibration
+#: epoch the cube was processed against.
+ERA_MISASSIGNED_VERDICT = "era-misassigned-calibration"
 
 # --- Plasma-presence frame selection ---------------------------------------
 #
@@ -435,6 +527,105 @@ def _isotope_flag(prior: dict[str, Any], *, shows_deuterium: bool) -> str:
     )
 
 
+#: How the calendar's expectation reads inside the degeneracy finding.
+_CALENDAR_WORDS = {
+    "hydrogen expected": "H-only",
+    "deuterium possible": "D-possible",
+}
+
+
+def isotope_ambiguity(
+    lines: list[dict[str, Any]], prior: dict[str, Any]
+) -> dict[str, Any] | None:
+    """Alarm when a shot's isotope reading and an era shift explain it equally well.
+
+    Every audited Balmer window holds two references ~16.5 px apart, and a rigid
+    era shift moves every line by the same pixels.  So the two readings are
+    indistinguishable exactly when *all* of a shot's two-reference windows chose
+    deuterium **and** the hydrogen reading of the same centroids implies one
+    common shift the size of that separation -- which, algebraically, is the
+    same statement as "the deuterium fit's own residual is near zero".  That is
+    the trap the 2026-08-18 rehearsal walked into: a 2019 cube recalibrated onto
+    the wrong era had its hydrogen lines re-identified as deuterium and the
+    flipped fit then read *better* than the correct one.
+
+    A single hydrogen assignment anywhere in the shot refutes the era-shift
+    hypothesis outright -- one translation cannot move three lines onto
+    deuterium and leave a fourth on hydrogen -- so a mixed shot is not
+    ambiguous, it is mixed, and this returns nothing for it.
+
+    Returns ``None`` when there is no ambiguity to report.  It never changes an
+    assignment or a residual; the caller decides what the finding is worth.
+    """
+
+    baseline, flipped_isotope = BALMER_ISOTOPES
+    windows = [
+        item
+        for item in lines
+        if item.get("status") == "measured" and item.get("isotope_candidates")
+    ]
+    if len(windows) < ISOTOPE_FLIP_MINIMUM_LINES:
+        return None
+    if any(str(item.get("isotope")) != flipped_isotope for item in windows):
+        return None
+    baseline_px: list[float] = []
+    separations: list[float] = []
+    for item in windows:
+        candidates = {
+            str(entry.get("isotope")): entry for entry in item["isotope_candidates"]
+        }
+        if not {baseline, flipped_isotope} <= set(candidates):
+            return None
+        anchor = float(candidates[baseline]["pixel_residual_px"])
+        moved = float(candidates[flipped_isotope]["pixel_residual_px"])
+        baseline_px.append(anchor)
+        separations.append(moved - anchor)
+    implied_shift = float(np.median(baseline_px))
+    separation = float(np.median(separations))
+    # The flipped fit's own common residual: how much better it looks.
+    degeneracy = abs(implied_shift + separation)
+    if not np.isfinite(degeneracy) or degeneracy > ISOTOPE_DEGENERACY_WINDOW_PX:
+        return None
+    expectation = str(prior.get("expectation", "unknown"))
+    calendar = _CALENDAR_WORDS.get(expectation, "unknown")
+    excludes = expectation == "hydrogen expected"
+    finding = (
+        f"isotope flip or era shift, degenerate; calendar says {calendar}"
+    )
+    return {
+        "finding": finding,
+        "flipped_lines": len(windows),
+        "baseline_isotope": baseline,
+        "measured_isotope": flipped_isotope,
+        "implied_common_shift_px": implied_shift,
+        "isotope_separation_px": separation,
+        "flipped_fit_residual_px": degeneracy,
+        "degeneracy_window_px": ISOTOPE_DEGENERACY_WINDOW_PX,
+        "calendar": calendar,
+        "calendar_expectation": expectation,
+        "calendar_basis": str(prior.get("basis", "")),
+        "excludes_deuterium": bool(excludes),
+        "detail": (
+            f"all {len(windows)} two-reference Balmer window(s) chose {flipped_isotope}, and "
+            f"reading the same centroids as {baseline} implies one common shift of "
+            f"{implied_shift:+.2f} px against an H/D separation of {separation:+.2f} px at "
+            f"these orders -- the two explanations differ by {degeneracy:.2f} px, inside the "
+            f"{ISOTOPE_DEGENERACY_WINDOW_PX:g} px window where neither can be told from the "
+            "other. "
+            + (
+                "The calendar excludes deuterium for this shot, so the likelier reading is a "
+                "calibration from the wrong epoch: the fit that looks better is the flipped "
+                "one. Re-run the cube against the calibration its own date selects before "
+                "trusting any number here."
+                if excludes
+                else "The calendar allows deuterium here, so the spectroscopic assignment "
+                "stands as measured -- but confirm the epoch before accepting a correction, "
+                "because a wrong-era calibration would look exactly like this."
+            )
+        ),
+    }
+
+
 # ---------------------------------------------------------------------------
 # Measurement
 # ---------------------------------------------------------------------------
@@ -550,7 +741,21 @@ def centroid_evidence(
     expected_nm: float,
     window_nm: float = 0.4,
 ) -> dict[str, Any]:
-    """Measure a baseline-subtracted centroid with explicit sufficiency evidence."""
+    """Measure a baseline-subtracted centroid with explicit sufficiency evidence.
+
+    The baseline and the noise are read off the whole window robustly, never off
+    its outer fifth.  An edge estimate is contaminated the moment the line moves
+    towards an edge, so the reported SNR fell as the shift grew -- on the
+    fixture's four-order cube an 18 px rigid shift dragged H-alpha's SNR from
+    2400 to 19, purely because the line's own wing had reached the strip the
+    baseline was read from.  That was tolerable while SNR only gated detection;
+    now that it decides which lines carry the verdict, an SNR that depends on
+    the very shift being measured would let a large honest shift disqualify its
+    own evidence.  The window median is the baseline because an emission line
+    occupies about a quarter of a +/-0.4 nm window, and the noise is measured
+    from the samples at or below that baseline, which no emission line can
+    reach.
+    """
 
     selected = np.abs(wavelength - expected_nm) <= window_nm
     x = wavelength[selected]
@@ -559,10 +764,15 @@ def centroid_evidence(
     x, y = x[finite], y[finite]
     if x.size < 5:
         return {"status": "insufficient-data", "reason": "fewer than five samples in window"}
-    edge_count = max(1, x.size // 5)
-    baseline = float(np.median(np.r_[y[:edge_count], y[-edge_count:]]))
+    baseline = float(np.median(y))
     signal = np.clip(y - baseline, 0.0, None)
-    noise = float(np.std(np.r_[y[:edge_count], y[-edge_count:]] - baseline))
+    below = (y - baseline)[y <= baseline]
+    # For Gaussian noise E[x^2 | x <= 0] is exactly the variance, so the RMS of
+    # the samples at or under the baseline is an unbiased sigma that no emission
+    # line can enter.  The RMS rather than a MAD because it uses every one of
+    # those samples: a MAD over half a window is noisy enough that a pure-noise
+    # window crosses MINIMUM_SNR measurably more often than it should.
+    noise = float(np.sqrt(np.mean(below**2))) if below.size else 0.0
     peak = float(np.max(signal))
     snr = peak / max(noise, np.finfo(float).eps)
     if not np.isfinite(snr) or snr < MINIMUM_SNR or signal.sum() <= 0:
@@ -910,12 +1120,87 @@ def _resolved(lines: list[dict[str, Any]]) -> list[dict[str, Any]]:
     ]
 
 
+def _line_snr(item: dict[str, Any]) -> float:
+    """Return one measured line's peak SNR.
+
+    A record without one is treated as strong: every producer in this package
+    writes an SNR, so a missing value belongs to hand-composed evidence whose
+    author never expressed a doubt for this function to honour.
+    """
+
+    try:
+        value = float(item.get("snr", np.inf))
+    except (TypeError, ValueError):
+        return np.inf
+    return value if np.isfinite(value) or value == np.inf else np.inf
+
+
+def _verdict_lines(lines: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Return the resolved lines strong enough to decide an alignment verdict."""
+
+    return [item for item in _resolved(lines) if _line_snr(item) >= VERDICT_SNR_FLOOR]
+
+
+def _quality_lines(lines: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Return the resolved lines that describe data quality but never a verdict."""
+
+    return [item for item in _resolved(lines) if _line_snr(item) < VERDICT_SNR_FLOOR]
+
+
+def _weak_line_scatter(lines: list[dict[str, Any]]) -> dict[str, Any]:
+    """Describe the weak lines' scatter in its own words, beside the verdict.
+
+    This is a quality figure and says so.  A faint centroid measured inside a
+    +/-0.4 nm window can be dragged whole pixels by a neighbour the window
+    reaches, so this scatter reports how crowded and how clean the audited
+    spectrum is -- not whether the detector moved.
+    """
+
+    weak = _quality_lines(lines)
+    strong = _verdict_lines(lines)
+    if not weak:
+        return {
+            "lines": 0,
+            "snr_floor": VERDICT_SNR_FLOOR,
+            "note": (
+                f"every resolved line reached SNR {VERDICT_SNR_FLOOR:g}, so none was set "
+                "aside from the verdict"
+            ),
+        }
+    shifts = np.asarray([float(item["pixel_residual_px"]) for item in weak], dtype=float)
+    snrs = np.asarray([_line_snr(item) for item in weak], dtype=float)
+    median = float(np.median(shifts))
+    spread = float(np.max(np.abs(shifts - median)))
+    return {
+        "lines": len(weak),
+        "snr_floor": VERDICT_SNR_FLOOR,
+        "snr_range": [float(np.min(snrs)), float(np.max(snrs))],
+        "median_shift_px": median,
+        "maximum_pixel_deviation_px": spread,
+        "pixel_residual_range_px": [float(np.min(shifts)), float(np.max(shifts))],
+        "note": (
+            f"{len(weak)} resolved line(s) below SNR {VERDICT_SNR_FLOOR:g} scatter over "
+            f"{float(np.min(shifts)):+.2f}..{float(np.max(shifts)):+.2f} px "
+            f"({spread:.2f} px about their median). At that SNR a centroid alone cannot "
+            "state a shift to better than about half a pixel, and the +/-0.4 nm fit window "
+            "reaches far enough to catch a neighbour, so this is a figure for how crowded "
+            "and how clean the spectrum is. It did not decide the verdict"
+            + (
+                f", which rests on {len(strong)} line(s) at or above the floor."
+                if strong
+                else " -- and no line reached the floor, so no verdict was earned."
+            )
+        ),
+    }
+
+
 def _quorum(
     lines: list[dict[str, Any]], coverage_nm: tuple[float, float] | None
 ) -> dict[str, Any]:
-    """Report whether the measured lines can carry a verdict at all."""
+    """Report whether the verdict-carrying lines can carry a verdict at all."""
 
-    measured = _resolved(lines)
+    measured = _verdict_lines(lines)
+    set_aside = len(_resolved(lines)) - len(measured)
     orders = sorted({int(item["echelle_order"]) for item in measured})
     if coverage_nm is None:
         expected = [float(item["expected_nm"]) for item in lines if "expected_nm" in item]
@@ -935,6 +1220,13 @@ def _quorum(
             "measured lines do not span both halves of the audited coverage "
             f"({coverage_nm[0]:.3f}-{coverage_nm[1]:.3f} nm)"
         )
+    if reasons and set_aside:
+        # Say which floor emptied the quorum, so an insufficient-data verdict on
+        # a well-lit shot is never mistaken for a shot that showed nothing.
+        reasons.append(
+            f"{set_aside} further resolved line(s) sit below the SNR "
+            f"{VERDICT_SNR_FLOOR:g} floor a verdict is decided on"
+        )
     return {
         "resolved_lines": len(measured),
         "distinct_orders": len(orders),
@@ -942,6 +1234,8 @@ def _quorum(
         "coverage_nm": [float(coverage_nm[0]), float(coverage_nm[1])],
         "bluer_half": bool(blue),
         "redder_half": bool(red),
+        "below_snr_floor_lines": int(set_aside),
+        "snr_floor": VERDICT_SNR_FLOOR,
         "satisfied": not reasons,
         "reason": "; ".join(reasons),
     }
@@ -951,13 +1245,23 @@ def verdict_from_evidence(
     evidence: list[dict[str, Any]],
     *,
     coverage_nm: tuple[float, float] | None = None,
+    isotope_ambiguity: dict[str, Any] | None = None,
 ) -> tuple[str, dict[str, Any]]:
-    """Classify one interval in detector space and report how it was classified."""
+    """Classify one interval in detector space and report how it was classified.
+
+    Only the lines above ``VERDICT_SNR_FLOOR`` decide the word; the rest are
+    summarised beside it under ``weak_line_scatter``.  ``isotope_ambiguity``, when
+    the caller found one whose calendar prior excludes deuterium, replaces an
+    otherwise ordinary aligned/shifted reading with
+    ``ERA_MISASSIGNED_VERDICT``: those residuals are real, but they were
+    measured against references the calendar says the plasma cannot have had.
+    """
 
     quorum = _quorum(evidence, coverage_nm)
+    scatter = _weak_line_scatter(evidence)
     if not quorum["satisfied"]:
-        return "insufficient-data", {"quorum": quorum}
-    measured = _resolved(evidence)
+        return "insufficient-data", {"quorum": quorum, "weak_line_scatter": scatter}
+    measured = _verdict_lines(evidence)
     shifts = np.asarray([float(item["pixel_residual_px"]) for item in measured], dtype=float)
     dispersions = np.asarray(
         [abs(float(item["dispersion_nm_per_px"])) for item in measured], dtype=float
@@ -984,16 +1288,76 @@ def verdict_from_evidence(
             float(median * value) for value in (float(np.min(dispersions)), float(np.max(dispersions)))
         ],
         "quorum": quorum,
+        "verdict_lines": len(measured),
+        "verdict_snr_floor": VERDICT_SNR_FLOOR,
+        "verdict_snr_range": [
+            float(np.min([_line_snr(item) for item in measured])),
+            float(np.max([_line_snr(item) for item in measured])),
+        ],
+        "verdict_basis": (
+            f"decided on the {len(measured)} resolved line(s) at or above SNR "
+            f"{VERDICT_SNR_FLOOR:g}; weaker lines are reported under weak_line_scatter and "
+            "never enter the arithmetic"
+        ),
+        "weak_line_scatter": scatter,
     }
+    # Two independent facts, because they mean different things.  Inconsistency
+    # says no single translation fits these lines; largeness says the misfit is
+    # bigger than a centroid could be wrong by.  Only both together are damage.
+    inconsistent = spread > SHIFT_CONSISTENCY_PX
+    large = maximum > GEOMETRIC_DAMAGE_PX
+    summary["strong_lines_inconsistent"] = bool(inconsistent)
+    summary["strong_lines_large"] = bool(large)
+    summary["geometric_damage_px"] = GEOMETRIC_DAMAGE_PX
+    if isotope_ambiguity is not None and isotope_ambiguity.get("excludes_deuterium"):
+        summary["verdict_reason"] = str(isotope_ambiguity.get("finding", ""))
+        summary["isotope_ambiguity"] = isotope_ambiguity
+        return ERA_MISASSIGNED_VERDICT, summary
+    if isotope_ambiguity is not None:
+        summary["isotope_ambiguity"] = isotope_ambiguity
     if np.all(np.abs(shifts) <= tolerances):
+        summary["verdict_reason"] = (
+            "every verdict-carrying line sits inside its own alignment tolerance"
+        )
         return "aligned", summary
-    if abs(median) <= REPAIR_LIMIT_PX and spread <= SHIFT_CONSISTENCY_PX:
-        return "shifted", summary
-    return "misaligned-beyond-repair", summary
+    if inconsistent and large:
+        summary["verdict_reason"] = (
+            f"the verdict-carrying lines disagree by {spread:.2f} px, past the "
+            f"{SHIFT_CONSISTENCY_PX:g} px one translation allows, and the worst of them sits "
+            f"{maximum:.2f} px out, past the {GEOMETRIC_DAMAGE_PX:g} px a centroid can be "
+            "wrong by: this is the detector geometry, not a table that slipped"
+        )
+        return "misaligned-beyond-repair", summary
+    if abs(median) > REPAIR_LIMIT_PX:
+        summary["verdict_reason"] = (
+            f"the verdict-carrying lines agree on one shift of {median:+.2f} px, but it is "
+            f"past the {REPAIR_LIMIT_PX:g} px a table correction may claim; the anchors must "
+            "be re-identified against lamp data rather than slid"
+        )
+        return "misaligned-beyond-repair", summary
+    summary["verdict_reason"] = (
+        f"the verdict-carrying lines describe one rigid shift of {median:+.2f} px"
+        + (
+            f", though they scatter {spread:.2f} px about it -- past the "
+            f"{SHIFT_CONSISTENCY_PX:g} px bound, but with the worst line only {maximum:.2f} px "
+            f"out, inside the {GEOMETRIC_DAMAGE_PX:g} px that separates quality from damage"
+            if inconsistent
+            else ""
+        )
+    )
+    return "shifted", summary
 
 
 def _per_shot_summary(lines: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Group the resolved residuals per shot, ordered by date then shot."""
+    """Group the residuals per shot, ordered by date then shot.
+
+    ``median_shift_px`` and ``pixel_spread_px`` describe the lines that would
+    decide a verdict, because those are the numbers an operator acts on and the
+    ones ``detect_interval_split`` clusters.  A shot with no line above the SNR
+    floor still gets a row -- from every resolved line it has, marked
+    ``below_snr_floor`` -- so it is visible rather than absent.  The weaker
+    lines' own scatter travels alongside as a quality figure.
+    """
 
     groups: dict[tuple[str, str, str], list[dict[str, Any]]] = {}
     for item in _resolved(lines):
@@ -1001,19 +1365,30 @@ def _per_shot_summary(lines: list[dict[str, Any]]) -> list[dict[str, Any]]:
         groups.setdefault(key, []).append(item)
     summary = []
     for (when, shot, cube), items in sorted(groups.items()):
-        shifts = np.asarray([float(item["pixel_residual_px"]) for item in items], dtype=float)
+        strong = [entry for entry in items if _line_snr(entry) >= VERDICT_SNR_FLOOR]
+        carrying = strong or items
+        shifts = np.asarray([float(item["pixel_residual_px"]) for item in carrying], dtype=float)
         median = float(np.median(shifts))
-        summary.append(
-            {
-                "shot_number": shot,
-                "cube": cube,
-                "date": when,
-                "lines": len(items),
-                "isotope": _majority_isotope(items),
-                "median_shift_px": median,
-                "pixel_spread_px": float(np.max(np.abs(shifts - median))),
-            }
-        )
+        row = {
+            "shot_number": shot,
+            "cube": cube,
+            "date": when,
+            "lines": len(carrying),
+            "isotope": _majority_isotope(carrying),
+            "median_shift_px": median,
+            "pixel_spread_px": float(np.max(np.abs(shifts - median))),
+            "resolved_lines": len(items),
+            "weak_lines": len(items) - len(strong),
+        }
+        if not strong:
+            row["below_snr_floor"] = True
+        weak = [entry for entry in items if _line_snr(entry) < VERDICT_SNR_FLOOR]
+        if weak and strong:
+            faint = np.asarray(
+                [float(entry["pixel_residual_px"]) for entry in weak], dtype=float
+            )
+            row["weak_line_spread_px"] = float(np.max(np.abs(faint - np.median(faint))))
+        summary.append(row)
     return summary
 
 
@@ -1216,6 +1591,7 @@ def audit_cubes(  # noqa: C901 - one readable pass over cubes, lines, and shots
     snapshot_ids: set[str] = set()
     sampled: list[dict[str, Any]] = []
     skipped: list[dict[str, Any]] = []
+    ambiguities: list[dict[str, Any]] = []
     coverage: list[float] = []
     geometries: dict[str, CubeGeometry] = {}
     for path in selected:
@@ -1272,9 +1648,22 @@ def audit_cubes(  # noqa: C901 - one readable pass over cubes, lines, and shots
         flag = _isotope_flag(prior, shows_deuterium=_shows_deuterium(measured))
         if flag:
             record["isotope_flag"] = flag
+        ambiguity = isotope_ambiguity(measured, prior)
+        if ambiguity is not None:
+            record["isotope_ambiguity"] = ambiguity
+            ambiguities.append({"shot_number": shot_number, "cube": path.name, **ambiguity})
 
     coverage_nm = (min(coverage), max(coverage)) if coverage else None
-    verdict, summary = verdict_from_evidence(per_line, coverage_nm=coverage_nm)
+    # One shot the calendar contradicts is enough to withhold the interval: the
+    # cubes were audited as one epoch, so if any of them was measured against
+    # references its own date forbids, the epoch's authorization is not sound.
+    forcing = next(
+        (item for item in ambiguities if item.get("excludes_deuterium")),
+        ambiguities[0] if ambiguities else None,
+    )
+    verdict, summary = verdict_from_evidence(
+        per_line, coverage_nm=coverage_nm, isotope_ambiguity=forcing
+    )
     per_shot = _per_shot_summary(per_line)
     interval_warning = detect_interval_split(per_shot)
     _label_shot_groups(per_shot)
@@ -1293,6 +1682,9 @@ def audit_cubes(  # noqa: C901 - one readable pass over cubes, lines, and shots
     summary["isotope_tags"] = _isotope_tally(sampled)
     summary["isotope_flagged_shots"] = [
         str(item["shot_number"]) for item in sampled if item.get("isotope_flag")
+    ]
+    summary["isotope_ambiguous_shots"] = [
+        str(item["shot_number"]) for item in ambiguities
     ]
 
     order_corrections: list[dict[str, Any]] = []
@@ -1341,6 +1733,9 @@ def audit_cubes(  # noqa: C901 - one readable pass over cubes, lines, and shots
             "minimum_centroids": MINIMUM_CENTROIDS,
             "minimum_distinct_orders": MINIMUM_DISTINCT_ORDERS,
             "minimum_snr": MINIMUM_SNR,
+            "verdict_snr_floor": VERDICT_SNR_FLOOR,
+            "geometric_damage": GEOMETRIC_DAMAGE_PX,
+            "isotope_degeneracy_window": ISOTOPE_DEGENERACY_WINDOW_PX,
             "plasma_frame_sigma": PLASMA_FRAME_SIGMA,
         },
         "isotope_prior": _isotope_prior_provenance(),
@@ -1356,10 +1751,31 @@ def audit_cubes(  # noqa: C901 - one readable pass over cubes, lines, and shots
         payload["refined_snapshot_id"] = refined_preview
     if interval_warning:
         payload["interval_warning"] = interval_warning
+    if ambiguities:
+        payload["isotope_ambiguity"] = ambiguities
+    if verdict == ERA_MISASSIGNED_VERDICT and forcing is not None:
+        # No raw data is needed and no shift repairs this: the cube is fine and
+        # the calibration it was processed against is the wrong one.  The fix is
+        # a *cross-era* recalibration, so it is the full 'echelle recal-cube'
+        # and never the --wavelength-only form the shifted verdict composes:
+        # that flag exists for a refinement of the same base snapshot, which
+        # keeps its sphere pair and integral curve, and another era's snapshot
+        # carries neither of those.
+        payload["verdict_advice"] = (
+            f"{forcing['finding']} — recalibrate shot(s) "
+            + ", ".join(sorted({str(item["shot_number"]) for item in ambiguities}))
+            + " onto the calibration snapshot their own acquisition date selects, then audit "
+            "again. This is a full 'echelle recal-cube <cube> -o <out> --new-snapshot "
+            "<other-era-snapshot>' across eras, NOT the --wavelength-only form: the other "
+            "era's sphere pair and integral curve must be re-derived too. Accepting a shift "
+            "from this evidence instead would bake one isotope's worth of error "
+            f"({forcing['isotope_separation_px']:+.1f} px) into a snapshot."
+        )
     if verdict == "misaligned-beyond-repair":
         payload["data_requirement"] = _drive_requirement(
             sorted({str(item["shot_number"]) for item in per_shot}), catalog
         )
+        payload["verdict_advice"] = str(summary.get("verdict_reason", ""))
     return payload
 
 
@@ -1575,4 +1991,11 @@ def require_sampled_verdict(path: str | Path, snapshot_ids: set[str]) -> dict[st
         return payload
     if verdict == "insufficient-data":
         raise DriftError("bulk processing refused: sampled verdict is insufficient-data")
+    if verdict == ERA_MISASSIGNED_VERDICT:
+        raise DriftError(
+            "bulk processing refused: the audited lines read as deuterium where the "
+            "calendar expects hydrogen, and the hydrogen reading of the same centroids is "
+            "one H/D-sized shift — recalibrate these cubes against the snapshot their own "
+            "dates select and audit again"
+        )
     raise DriftError(f"bulk processing refused: sampled verdict is {verdict}")
