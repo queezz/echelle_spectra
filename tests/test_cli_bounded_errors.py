@@ -415,7 +415,9 @@ def test_drift_audit_refuses_a_taken_evidence_name_and_offers_the_next_one(
     assert "Traceback" not in shown
     assert "immutable" in shown
     assert str(taken.resolve()) in shown
-    assert str((tmp_path / "epoch-drift-2.json").resolve()) in shown
+    # The offered name uses the one numbering the audits themselves write:
+    # zero-padded from 001, so a folder of verdicts sorts in the order they ran.
+    assert str((tmp_path / "epoch-drift-001.json").resolve()) in shown
     # Immutability stands: nothing was written over the existing verdict.
     assert taken.read_text(encoding="utf-8") == "{}"
 
@@ -425,17 +427,17 @@ def test_the_suggested_evidence_name_walks_past_the_names_already_used(
 ) -> None:
     cubes = tmp_path / "cubes"
     cubes.mkdir()
-    for name in ("epoch-drift.json", "epoch-drift-2.json", "epoch-drift-3.json"):
+    for name in ("epoch-drift.json", "epoch-drift-001.json", "epoch-drift-002.json"):
         (tmp_path / name).write_text("{}", encoding="utf-8")
 
     assert (
         campaign_tools_cli.drift_main(
-            ["audit", str(cubes), "-o", str(tmp_path / "epoch-drift-2.json")]
+            ["audit", str(cubes), "-o", str(tmp_path / "epoch-drift-001.json")]
         )
         == 1
     )
 
-    assert str((tmp_path / "epoch-drift-4.json").resolve()) in _shown(capsys)
+    assert str((tmp_path / "epoch-drift-003.json").resolve()) in _shown(capsys)
 
 
 # ---------------------------------------------------------------------------

@@ -31,6 +31,7 @@ from echelle_spectra.campaign_tools_cli import (
     _derived_every,
     _derived_evidence_path,
     _evidence_home,
+    _next_free,
     drift_main,
     web_main,
 )
@@ -251,6 +252,21 @@ def test_the_evidence_is_named_beside_the_cubes_it_describes(tmp_path: Path) -> 
     assert _derived_evidence_path([cubes]) == cubes / "drift-evidence-002.json"
 
 
+def test_a_taken_evidence_name_is_answered_in_the_same_numbering(tmp_path: Path) -> None:
+    """The refusal offers a name from the one series the folder already uses."""
+
+    taken = tmp_path / "drift-evidence.json"
+    taken.write_text("{}", encoding="utf-8")
+    assert _next_free(taken) == tmp_path / "drift-evidence-001.json"
+
+    (tmp_path / "drift-evidence-001.json").write_text("{}", encoding="utf-8")
+    assert _next_free(taken) == tmp_path / "drift-evidence-002.json"
+    # An already-numbered name is never offered back to itself.
+    assert _next_free(tmp_path / "drift-evidence-001.json") == (
+        tmp_path / "drift-evidence-002.json"
+    )
+
+
 def test_cubes_named_one_by_one_share_their_folder(tmp_path: Path) -> None:
     cubes = tmp_path / "cubes"
     (cubes / "day-a").mkdir(parents=True)
@@ -285,7 +301,108 @@ def test_the_interval_is_derived_to_measure_about_twenty_cubes(
     for index in range(cubes):
         (folder / f"{index:04d}.nc").touch()
 
-    assert _derived_every([folder]) == expected
+    assert _derived_every([folder]) == (expected, cubes)
+
+
+def _dated_cube(path: Path, day: str) -> Path:
+    """One cube carrying nothing but the acquisition date the filter reads."""
+
+    import numpy as np
+    import xarray as xr
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    xr.Dataset(
+        {"intensity": ("wavelength", np.zeros(1))},
+        coords={"wavelength": np.zeros(1)},
+        attrs={"t_start": f"{day}T09:00:00+09:00"},
+    ).to_netcdf(path)
+    return path
+
+
+def _dated_drive(folder: Path, inside: int, outside: int) -> Path:
+    """A drive whose cubes mostly sit outside the window an operator asks for."""
+
+    for index in range(outside):
+        _dated_cube(folder / f"old-{index:04d}.nc", "2019-06-01")
+    for index in range(inside):
+        _dated_cube(folder / f"new-{index:04d}.nc", "2026-08-14")
+    return folder
+
+
+WINDOW = {"date_from": "2026-08-01", "date_to": "2026-08-31"}
+
+
+def test_the_interval_is_derived_from_the_cubes_the_dates_actually_keep(
+    tmp_path: Path,
+) -> None:
+    """The gate-integrity case: dividing by the drive would measure one cube.
+
+    ``audit_cubes`` filters by date and *then* takes every Nth survivor.  A
+    derivation counted over the whole drive -- 100 here, 40 inside the window --
+    would hand ``select_sample_paths`` an interval of 5 for a list of 40 and
+    measure 8 of them, under a line promising twenty.  At campaign scale the
+    same arithmetic measures exactly one.
+    """
+
+    from echelle_spectra.drift import _filter_by_date, resolve_cube_paths, select_sample_paths
+
+    folder = _dated_drive(tmp_path / "cubes", inside=40, outside=60)
+
+    assert _derived_every([folder], **WINDOW) == (2, 40)
+
+    # And the interval, applied the way the audit applies it, measures twenty.
+    kept = _filter_by_date(resolve_cube_paths([folder]), **WINDOW)
+    assert len(select_sample_paths(kept, every=2)) == 20
+
+
+def test_the_unfiltered_derivation_is_unchanged(tmp_path: Path) -> None:
+    folder = _dated_drive(tmp_path / "cubes", inside=40, outside=60)
+
+    assert _derived_every([folder]) == (5, 100)
+
+
+def test_a_window_holding_fewer_than_twenty_cubes_measures_all_of_them(
+    tmp_path: Path,
+) -> None:
+    from echelle_spectra.drift import _filter_by_date, resolve_cube_paths, select_sample_paths
+
+    folder = _dated_drive(tmp_path / "cubes", inside=12, outside=60)
+
+    assert _derived_every([folder], **WINDOW) == (1, 12)
+
+    kept = _filter_by_date(resolve_cube_paths([folder]), **WINDOW)
+    assert len(select_sample_paths(kept, every=1)) == 12
+
+
+def test_the_derived_interval_says_which_count_it_divided(tmp_path: Path, capsys) -> None:
+    folder = _dated_drive(tmp_path / "cubes", inside=40, outside=60)
+
+    with patch("echelle_spectra.drift.audit_cubes") as audited:
+        audited.return_value = {"verdict": "aligned"}
+        with patch("echelle_spectra.drift.write_drift_evidence") as written:
+            written.return_value = tmp_path / "evidence.json"
+            assert (
+                drift_main(
+                    [
+                        "audit",
+                        str(folder),
+                        "--from",
+                        WINDOW["date_from"],
+                        "--to",
+                        WINDOW["date_to"],
+                        "-o",
+                        str(tmp_path / "evidence.json"),
+                    ]
+                )
+                == 0
+            )
+
+    assert audited.call_args.kwargs["every"] == 2
+    shown = capsys.readouterr().out
+    assert "every: 2 (derived from 40 cubes in --from/--to;" in shown
+    # The drive's 100 cubes are not what this number came from, and saying so
+    # is the only check an operator can run on it.
+    assert "100" not in shown
 
 
 def test_an_explicit_interval_wins(tmp_path: Path) -> None:

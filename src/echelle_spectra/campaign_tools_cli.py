@@ -147,11 +147,19 @@ def _parse_toml(path: Path, *, flag: str, what: str) -> Any:
 
 
 def _next_free(path: Path) -> Path:
-    """Return the next unused ``-N`` sibling of an immutable output path."""
+    """Return the next unused ``-NNN`` sibling of an immutable output path.
+
+    Zero-padded from 001, which is the one numbering an operator ever sees:
+    ``_derived_evidence_path`` names unnamed evidence that way and the page's
+    composer reads it back with the same three digits.  A refusal that offered
+    ``drift-evidence-2.json`` would invite a second, differently-shaped series
+    to grow beside the first, and the folder would stop sorting into the order
+    the audits actually ran in.
+    """
 
     base = re.sub(r"-\d+$", "", path.stem) or path.stem
-    for index in range(2, 1000):
-        candidate = path.with_name(f"{base}-{index}{path.suffix}")
+    for index in range(1, 1000):
+        candidate = path.with_name(f"{base}-{index:03d}{path.suffix}")
         if not candidate.exists():
             return candidate
     return path.with_name(f"{base}-{path.stat().st_mtime_ns}{path.suffix}")  # pragma: no cover
@@ -341,7 +349,7 @@ def drift_main(argv: list[str] | None = None, *, prog: str = "echelle drift") ->
         default=None,
         help=(
             "Audit every Nth selected cube. Default: derived so about 20 cubes are "
-            "measured, max(1, cubes // 20)."
+            "measured, max(1, cubes // 20), counting the cubes --from/--to keeps."
         ),
     )
     audit.add_argument(
@@ -458,18 +466,38 @@ def _derived_evidence_path(cubes: list[Path]) -> Path:
     )
 
 
-def _derived_every(cubes: list[Path]) -> int:
-    """Derive the sampling interval that measures about twenty of these cubes."""
+def _derived_every(
+    cubes: list[Path], *, date_from: str | None = None, date_to: str | None = None
+) -> tuple[int, int]:
+    """Derive the interval measuring ~20 cubes, and the count it divided.
 
-    from .drift import DriftError, resolve_cube_paths
+    The interval has to be derived from the set the audit actually samples, and
+    ``audit_cubes`` filters by date *first*: it keeps the cubes inside
+    ``--from``/``--to`` and only then takes every Nth survivor.  Deriving from
+    the unfiltered set turns the derivation into a lie with a gate behind it --
+    2000 cubes on the drive, 40 of them inside the window, an interval of 100,
+    and ``select_sample_paths`` keeping index 0 alone.  One cube would be
+    measured under a line promising twenty, and that verdict is what authorizes
+    the bulk run.
+
+    So the count comes from ``drift``'s own date filter, called here exactly as
+    the audit calls it.  Which attribute carries a cube's acquisition date, and
+    what an undatable cube means, are rules that must not exist twice.
+    """
+
+    from .drift import DriftError, _filter_by_date, resolve_cube_paths
 
     try:
-        count = len(resolve_cube_paths(list(cubes)))
+        resolved = resolve_cube_paths(list(cubes))
+        if date_from or date_to:
+            resolved = _filter_by_date(resolved, date_from=date_from, date_to=date_to)
     except (DriftError, OSError):
-        # The audit itself answers an empty or unreadable selection; deriving an
-        # interval is not the place to refuse it.
-        return 1
-    return max(1, count // AUDIT_TARGET_CUBES)
+        # The audit itself answers an empty, unreadable, undatable or
+        # out-of-window selection, in its own words; deriving an interval is
+        # not the place to refuse it.
+        return 1, 0
+    count = len(resolved)
+    return max(1, count // AUDIT_TARGET_CUBES), count
 
 
 def _drift_audit_inputs(args: argparse.Namespace) -> dict[str, Any]:
@@ -539,9 +567,16 @@ def _drift_audit(args: argparse.Namespace) -> int:
     output = resolved["output"]
     every = args.every
     if every is None:
-        every = _derived_every(cubes)
+        every, counted = _derived_every(cubes, date_from=args.date_from, date_to=args.date_to)
         if every > 1:
-            print(f"every: {every} (derived; about {AUDIT_TARGET_CUBES} cubes are measured)")
+            # Naming the count is the whole check an operator can run on the
+            # number: 2000 and 40 derive wildly different intervals, and only
+            # the printed count says which set this one came from.
+            scope = "cubes" if not (args.date_from or args.date_to) else "cubes in --from/--to"
+            print(
+                f"every: {every} (derived from {counted} {scope}; "
+                f"about {AUDIT_TARGET_CUBES} are measured)"
+            )
     try:
         payload = audit_cubes(
             cubes,
