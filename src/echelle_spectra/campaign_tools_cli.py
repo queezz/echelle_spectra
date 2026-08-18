@@ -689,7 +689,24 @@ def _web_inputs(args: argparse.Namespace, parser: argparse.ArgumentParser) -> di
         if not value
     ]
     if missing:
-        parser.error("the following arguments are required: " + ", ".join(missing))
+        # A cold start with nothing supplied is where an operator first meets
+        # this command, so the refusal teaches the two-word form instead of
+        # reciting argparse: say what a campaign home is and what it holds.
+        parser.error(
+            "the following arguments are required: "
+            + ", ".join(missing)
+            + f"\n\nno {CAMPAIGN_HOME_NAME} was found in this folder. Run this from the"
+            "\nfolder where the campaign lives, or write one there so the whole"
+            "\ninvocation becomes 'echelle web --open':"
+            "\n"
+            '\n  catalog = "all-years.json"          # the merged cube catalog'
+            '\n  output = "campaign-page"            # where index.html is written'
+            '\n  registry = "calibration_registry.toml"'
+            '\n  calibrations = "calibrations"'
+            "\n"
+            "\npaths resolve against the file's own folder; any explicit --flag wins."
+            "\n'echelle status' says what catalogs and calibrations exist."
+        )
 
     catalog = _require_file(
         catalog_value, flag=catalog_flag, what="catalog file", remedy=CATALOG_REMEDY
@@ -774,7 +791,16 @@ def web_main(argv: list[str] | None = None, *, prog: str = "echelle web") -> int
         action="store_true",
         help="Open the built page in the default browser. The page stays a static file.",
     )
-    parser.add_argument("--drift", action="append", default=[])
+    parser.add_argument(
+        "--drift",
+        action="append",
+        default=[],
+        metavar="JSON",
+        help=(
+            "Drift evidence rendered on the page and used to derive the next free "
+            "evidence name. Repeat once per file (default: the campaign home's drift list)."
+        ),
+    )
     parser.add_argument(
         "--document",
         action="append",

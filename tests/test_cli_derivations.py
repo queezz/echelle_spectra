@@ -385,7 +385,14 @@ def test_without_a_home_the_required_arguments_still_stand(
         web_main([])
 
     assert exit_code.value.code == 2
-    assert "the following arguments are required: --catalog, --output" in capsys.readouterr().err
+    err = capsys.readouterr().err
+    assert "the following arguments are required: --catalog, --output" in err
+    # The cold start is where an operator first meets the command, so the
+    # refusal teaches the campaign home instead of stopping at argparse.
+    assert "no campaign.toml was found in this folder" in err
+    assert "echelle web --open" in err
+    assert 'catalog = "all-years.json"' in err
+    assert "echelle status" in err
 
 
 def test_open_hands_the_written_file_to_the_browser_and_nothing_else(
