@@ -129,6 +129,13 @@ def build_drive_catalog(
         }
         if receipt.drive_warning:
             run["drive_warning"] = receipt.drive_warning
+        if receipt.pruned_dirs:
+            # Carried only when discovery actually skipped something, the same
+            # way the receipt states it: the key's presence means a real skip,
+            # and a catalog from a run that pruned nothing is unchanged.  A
+            # reader of the merged index is otherwise the one person who cannot
+            # tell a complete run from a pruned one.
+            run["pruned_dirs"] = list(receipt.pruned_dirs)
     records = []
     errors = []
     for path in sorted(root.rglob("*.nc")):

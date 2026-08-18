@@ -149,9 +149,11 @@ data, and always prints its absolute path. `--open` additionally opens it in
 the default browser; without a `campaign.toml` supplying `--catalog`/
 `--output`/`--registry`/`--calibrations`/`--drift`, every path is named
 explicitly as above. The page also links out to the documentation site. Four
-tabs: **Now** (the flow), **Drives** (the catalog), **Calibration**
-(epochs and drift evidence in sequence position) and **Reading room** (the
-packaged canon). Pressing a tab always returns it to its own home state, even
+tabs: **Now** (the flow), **Drives** (the catalog), **Calibration** (each
+saved snapshot's own record — its folder, its lamps and spheres, and what the
+bench measured — with the epochs and the drift evidence following as pipeline
+context) and **Reading room** (the packaged canon). Pressing a tab always
+returns it to its own home state, even
 from inside an open fold, and lands at the top of the destination. Each rail
 carries only the active tab's cargo: controls left, scope, context, legend and
 the "On this page" index right. Both rails are sticky at an offset derived from

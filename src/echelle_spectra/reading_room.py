@@ -4,9 +4,10 @@ The page is a one-shot static build: ``echelle web`` writes one ``index.html``
 that carries its own CSS and JavaScript and fetches nothing.  It is organized
 by the work rather than by the data: four tabs — **Now** (the campaign as a
 stepper, one independent row per drive), **Drives** (the catalog),
-**Calibration** (epochs and drift evidence in sequence position) and
-**Reading room** (the packaged canon).  Its structure follows the house web UI
-law (fleet's ``WEBUI.md`` and ``WEBUI-COOKBOOK.md``):
+**Calibration** (each saved snapshot's own record, then the epochs and the
+drift evidence as pipeline context) and **Reading room** (the packaged canon).
+Its structure follows the house web UI law (fleet's ``WEBUI.md`` and
+``WEBUI-COOKBOOK.md``):
 
 * the main column is what a person reads; the rails are what a person presses,
   with controls on the left and context plus the section index on the right,
@@ -26,6 +27,9 @@ law (fleet's ``WEBUI.md`` and ``WEBUI-COOKBOOK.md``):
 * the composer asks two things -- the folder of SIF shots and the calibration
   -- because those are the only two a person holds that no file here records;
   every other value is derived from them and folded away, editable;
+* a snapshot's own record is read in the order the physicist who ran the bench
+  asks for it: where the folder is, which lamps and spheres went into it, and
+  what the bench measured -- rigid alignment, wavelength fit, absolute factors;
 * empty, unmeasured, unreachable and judged states are rendered distinctly, and
   a verdict word this page does not know is rendered as unrecognized rather
   than dressed as one it does.
@@ -38,12 +42,9 @@ one-screen page a machine with no campaign home yet is served.  Every one of
 those pieces is *appended* to the static build rather than woven into it, so
 the one-shot file keeps its "fetches nothing" contract byte for byte.
 
-:func:`render_empty_campaign_page` renders the other cold state — a home whose
-catalog has not been written yet — but nothing serves it: the server renders
-that campaign as the FULL page over a synthesized empty catalog instead, so
-every control exists before the first scan result does.  It is kept as the
-one-screen alternative, and it is named here as one nothing currently reaches
-rather than left to look load-bearing.
+A campaign home whose catalog has not been written yet gets no second page of
+its own: the server renders it as the FULL page over a synthesized empty
+catalog, so every control exists before the first scan result does.
 """
 
 from __future__ import annotations
@@ -346,7 +347,7 @@ def _refresh_availability(catalog: dict[str, Any]) -> dict[str, Any]:
 PLAN_TEMPLATE = """# Composed by the Echelle reading room. Nothing here has been run.
 # Save this as {{plan}} beside the campaign, read it once, then paste the
 # process command below. Relative paths resolve against this file's folder.
-# The registry selects the epoch; for these shots that is {{epoch}}.
+# The registry selects the epoch from each shot's own date{{epoch_clause}}.
 # Discovery walks input_dir recursively; calibration folders are left out.
 
 [plan]
@@ -492,6 +493,20 @@ def _derived_from_folder(folder: str, evidence_name: str) -> dict[str, str]:
     }
 
 
+def _epoch_clause(epoch: str) -> str:
+    """The plan comment's optional half, so its sentence stands either way.
+
+    The comment used to end in the placeholder itself, which rendered "for
+    these shots that is ." whenever no calibration was chosen — a sentence with
+    its subject missing.  The whole clause is the value now, and an unchosen
+    calibration simply removes it.  ``epochClause`` in the page's own
+    JavaScript is the other half of this one rule.
+    """
+
+    chosen = str(epoch).strip()
+    return f"; for these shots that is {chosen}" if chosen else ""
+
+
 def _composer_values(
     *,
     catalog_path: str | Path,
@@ -512,6 +527,10 @@ def _composer_values(
     the central index somewhere the campaign never reads.
     """
 
+    # "unassigned" is a cube's way of saying it had no calibration identity,
+    # so it is never a calibration to seed: the select does not offer it
+    # either, and an empty seed matches the one option it does offer.
+    epoch = next((item for item in epochs if item and item != "unassigned"), "")
     return {
         **_derived_from_folder("", evidence_name),
         "pattern": "*.SIF",
@@ -519,10 +538,8 @@ def _composer_values(
         "calibrations": registry.get("calibrations") or "calibrations",
         "catalog": _posix(catalog_path),
         "plan": "campaign-plan.toml",
-        # "unassigned" is a cube's way of saying it had no calibration identity,
-        # so it is never a calibration to seed: the select does not offer it
-        # either, and an empty seed matches the one option it does offer.
-        "epoch": next((item for item in epochs if item and item != "unassigned"), ""),
+        "epoch": epoch,
+        "epoch_clause": _epoch_clause(epoch),
     }
 
 
@@ -1217,7 +1234,25 @@ def _drive_chips(source: dict[str, Any], drift: list[dict[str, Any]]) -> str:
         _chip(", ".join(epochs[:2]) + ("…" if len(epochs) > 2 else "")) if epochs else "",
         _path_chip(source.get("drive_root")),
     ]
-    return f'<p class="chips">{"".join(chips)}</p>'
+    return f'<p class="chips">{"".join(chips)}</p>{_pruned_line(run)}'
+
+
+def _pruned_line(run: dict[str, Any]) -> str:
+    """What discovery left out of this run, named where the run is read.
+
+    A batch that walked past a calibration folder says so in its receipt, and a
+    page that renders only what was converted is the one surface where the run
+    still reads complete.  The names are here in full: "N folders" without them
+    tells an operator a folder is missing and not which one.
+    """
+
+    pruned = [str(item).strip() for item in (run.get("pruned_dirs") or ()) if str(item).strip()]
+    if not pruned:
+        return ""
+    return (
+        f'<p class="pruned">This run skipped {len(pruned)} calibration folder(s): '
+        f'{_e(", ".join(pruned))}</p>'
+    )
 
 
 def _source_cards(sources: list[dict[str, Any]], drift: list[dict[str, Any]]) -> str:
@@ -1552,6 +1587,257 @@ def _drift_section(drift: list[dict[str, Any]]) -> str:
     return "".join(_drift_card(entry, position) for position, entry in enumerate(drift, start=1))
 
 
+# ---------------------------------------------------------------------------
+# The calibration record
+# ---------------------------------------------------------------------------
+#
+# One snapshot folder, rendered in the order the physicist who ran the bench
+# asks for it (owner, 2026-08-18): where is the data, what did I shine into it,
+# and what did the bench measure.  Every value comes from that folder's own
+# ``snapshot.toml`` and nothing is computed here -- a field the binder does not
+# carry is named ``not recorded``, because a snapshot written before a field
+# existed did not measure it and a dash would let a reader guess otherwise.
+
+NOT_RECORDED = "not recorded"
+
+
+def _stated(value: Any, unit: str = "") -> str:
+    """One manifest value in the reader's words, or the word for its absence."""
+
+    if value is None:
+        return NOT_RECORDED
+    if isinstance(value, bool):
+        return "yes" if value else "no"
+    if isinstance(value, (int, float)):
+        text = str(value) if isinstance(value, int) else f"{float(value):.6g}"
+        return f"{text} {unit}".strip()
+    if isinstance(value, (list, tuple)):
+        joined = " → ".join(str(item).strip() for item in value if str(item).strip())
+        return joined or NOT_RECORDED
+    text = str(value).strip()
+    return f"{text} {unit}".strip() if text else NOT_RECORDED
+
+
+def _size(value: Any) -> str:
+    try:
+        size = float(int(value))
+    except (TypeError, ValueError):
+        return NOT_RECORDED
+    if size < 0:
+        return NOT_RECORDED
+    for unit in ("B", "kB", "MB"):
+        if size < 1024 or unit == "MB":
+            return f"{size:.0f} {unit}" if unit == "B" else f"{size:.1f} {unit}"
+        size /= 1024
+    return NOT_RECORDED  # pragma: no cover - the loop always returns
+
+
+def _facts(rows: list[tuple[str, str]]) -> str:
+    """One headed group's facts as a name/value grid, never a nested card."""
+
+    items = "".join(
+        f'<li><span class="facts-name">{_e(name)}</span>'
+        f'<span class="facts-value">{_e(value)}</span></li>'
+        for name, value in rows
+    )
+    return f'<ul class="facts">{items}</ul>'
+
+
+def _manifest_group(manifest: dict[str, Any], heading: str) -> dict[str, Any]:
+    table = manifest.get(heading)
+    return table if isinstance(table, dict) else {}
+
+
+def _artifacts(manifest: dict[str, Any]) -> list[dict[str, Any]]:
+    return [item for item in (manifest.get("artifacts") or []) if isinstance(item, dict)]
+
+
+def _one_artifact(manifest: dict[str, Any], role: str) -> dict[str, Any]:
+    for item in _artifacts(manifest):
+        if str(item.get("role", "")) == role:
+            return item
+    return {}
+
+
+def _frame_name(artifact: dict[str, Any]) -> str:
+    """What the operator called this file — which is where an exposure is written."""
+
+    name = str(artifact.get("source_name") or "").strip()
+    if name:
+        return name
+    return str(artifact.get("path") or "").rsplit("/", 1)[-1] or NOT_RECORDED
+
+
+def _stored(artifact: dict[str, Any]) -> str:
+    if not artifact:
+        return NOT_RECORDED
+    return "referenced" if str(artifact.get("kind", "")) == "referenced" else "copied in"
+
+
+def _source_rows(manifest: dict[str, Any]) -> list[list[str]]:
+    """Every lamp and both sphere frames, in the order they are shone."""
+
+    artifacts = _artifacts(manifest)
+    lamp_frames = [item for item in artifacts if str(item.get("role", "")) == "lamp"]
+    named = [str(item).strip() for item in (manifest.get("lamps") or []) if str(item).strip()]
+    rows: list[list[str]] = []
+    claimed: list[int] = []
+    for species in named:
+        matched = [
+            (index, item)
+            for index, item in enumerate(lamp_frames)
+            if str(item.get("label", "")).strip().casefold() == species.casefold()
+        ]
+        if not matched:
+            # The thin historical binder: the lamp is named, its frame is not.
+            rows.append(["lamp", species, NOT_RECORDED, NOT_RECORDED, NOT_RECORDED])
+            continue
+        for index, item in matched:
+            claimed.append(index)
+            rows.append(
+                ["lamp", species, _frame_name(item), _size(item.get("size_bytes")), _stored(item)]
+            )
+    for index, item in enumerate(lamp_frames):
+        if index in claimed:
+            continue
+        rows.append(
+            [
+                "lamp",
+                str(item.get("label", "")).strip() or NOT_RECORDED,
+                _frame_name(item),
+                _size(item.get("size_bytes")),
+                _stored(item),
+            ]
+        )
+    for role, reads_as in (("sphere", "sphere"), ("sphere_background", "sphere background")):
+        item = _one_artifact(manifest, role)
+        rows.append(
+            [
+                reads_as,
+                "integrating sphere",
+                _frame_name(item) if item else NOT_RECORDED,
+                _size(item.get("size_bytes")) if item else NOT_RECORDED,
+                _stored(item),
+            ]
+        )
+    return rows
+
+
+def _alignment_facts(manifest: dict[str, Any]) -> str:
+    alignment = _manifest_group(manifest, "alignment")
+    rows = [
+        ("Δx", _stated(alignment.get("dx_px"), "px")),
+        ("Δy", _stated(alignment.get("dy_px"), "px")),
+        ("θ", _stated(alignment.get("rotation_deg"), "deg")),
+        ("RMS", _stated(alignment.get("rms_px"), "px")),
+        ("wavelength table shifted", _stated(alignment.get("wavelength_correction_applied"))),
+        ("order pattern shifted", _stated(alignment.get("pattern_correction_applied"))),
+        ("pattern band offset", _stated(alignment.get("pattern_band_offset_rows"), "rows")),
+        ("bands over orders", _stated(alignment.get("pattern_band_offset_orders"))),
+        ("pattern file", _frame_name(_one_artifact(manifest, "pattern"))),
+    ]
+    return _facts(rows)
+
+
+def _wavelength_facts(manifest: dict[str, Any]) -> str:
+    alignment = _manifest_group(manifest, "alignment")
+    qc = _manifest_group(manifest, "qc")
+    rows = [
+        ("lines used", _stated(qc.get("lines_used"))),
+        ("worst residual", _stated(qc.get("worst_residual_px"), "px")),
+        ("vetted set", _stated(alignment.get("vetted_set"))),
+        ("vetted lineage", _stated(alignment.get("vetted_lineage"))),
+        ("held against physics", _stated(alignment.get("science_validation"))),
+        ("science lines", _stated(alignment.get("science_lines_validated"))),
+        ("science residual RMS", _stated(alignment.get("science_residual_rms_nm"), "nm")),
+        ("table file", _frame_name(_one_artifact(manifest, "wavelength"))),
+    ]
+    return _facts(rows)
+
+
+def _absolute_facts(manifest: dict[str, Any]) -> str:
+    qc = _manifest_group(manifest, "qc")
+    rows = [
+        ("factor table", _frame_name(_one_artifact(manifest, "integral"))),
+        ("sphere comparison", _stated(qc.get("sphere_comparison"))),
+        ("compared against", _stated(qc.get("sphere_comparison_reference"))),
+        ("compared with itself", _stated(qc.get("sphere_comparison_self"))),
+    ]
+    return _facts(rows)
+
+
+def _snapshot_card(record: dict[str, Any]) -> str:
+    """One snapshot in the owner's reading order: place, sources, bench."""
+
+    manifest = record["manifest"]
+    if not record["readable"]:
+        return _card(
+            _e(record["id"]),
+            f'<p class="path-line">{_e(record["root"])}</p>'
+            '<p class="note state-unrecognized">This binder could not be read, so nothing '
+            "below it is known.</p>",
+            classes="snapshot state-unrecognized",
+            identifier=record["anchor"],
+        )
+    validity = _manifest_group(manifest, "validity")
+    head = [
+        _chip(_stated(manifest.get("detector"))),
+        _chip("saved " + _stated(manifest.get("created_utc")) + " UTC"),
+        _chip("valid from " + _stated(validity.get("date_from"))),
+    ]
+    if manifest.get("base_snapshot"):
+        head.append(_chip("revises " + str(manifest["base_snapshot"])))
+    if manifest.get("notes"):
+        head.append(_chip(str(manifest["notes"])))
+    band_note = _manifest_group(manifest, "alignment").get("pattern_band_offset_note")
+    body = "".join(
+        [
+            f'<p class="chips">{"".join(head)}</p>',
+            "<h4>Where</h4>",
+            f'<p class="path-line">{_e(record["root"])}</p>',
+            "<h4>Lamps and spheres</h4>",
+            _simple_table(
+                ("Role", "Species", "Frame", "Size", "Stored"), _source_rows(manifest)
+            ),
+            "<h4>Rigid alignment</h4>",
+            _alignment_facts(manifest),
+            f'<p class="muted">{_e(band_note)}</p>' if band_note else "",
+            "<h4>Wavelength fit</h4>",
+            _wavelength_facts(manifest),
+            "<h4>Absolute calibration</h4>",
+            _absolute_facts(manifest),
+        ]
+    )
+    return _card(_e(record["id"]), body, classes="snapshot", identifier=record["anchor"])
+
+
+def _snapshot_section(context: dict[str, Any]) -> str:
+    """The calibrations this build can actually read, or why it read none."""
+
+    registry = context["registry"]
+    records = context["snapshots"]
+    if not records:
+        if not registry.get("scanned"):
+            return (
+                '<p class="note state-unmeasured">This build was given no snapshot root, so it '
+                "cannot say which calibrations exist.</p>"
+            )
+        return (
+            '<p class="note state-empty">No snapshot folder was found under '
+            f'{_e(registry.get("calibrations") or "the snapshot root")}.</p>'
+        )
+    lead = (
+        '<p class="muted">A binder records no exposure time; the frame name is what carries '
+        "it.</p>"
+    )
+    if registry.get("saved_truncated"):
+        lead += (
+            '<p class="note state-unmeasured">The scan stopped at its budget, so this is what '
+            "it reached and not the whole root.</p>"
+        )
+    return lead + "".join(_snapshot_card(record) for record in records)
+
+
 def _bounds(start: Any, end: Any) -> str:
     if start and end:
         return f"{start}–{end}"
@@ -1834,11 +2120,10 @@ def _registry_card(context: dict[str, Any]) -> str:
             f'<p class="note">{_e(registry["detail"])}</p>'
         )
     else:
-        registry_line = (
-            f'<p class="state-line">{_pill("state-unmeasured", "no registry supplied")}</p>'
-            '<p class="note">This build was given no registry, so the page cannot say which '
-            "epoch a run would select.</p>"
-        )
+        # The pill is the whole statement: a paragraph restating it is the
+        # textbook the Teaching law bounds.
+        pill = _pill("state-unmeasured", "no registry supplied")
+        registry_line = f'<p class="state-line">{pill}</p>'
     body = (
         f'<p>{_e(len(context["epochs"]))} epoch(s), '
         f'{_e(context["drift_count"])} drift verdict(s).</p>'
@@ -2088,6 +2373,19 @@ section.panel {
 .chip.path { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; max-width: 100%;
   overflow: hidden; text-overflow: ellipsis; }
 .legend-note { color: var(--muted); font-size: .9rem; }
+/* What discovery left out of a run, said where the run is read. It is a fact
+   about the run, not a warning about it, so it stays quiet. */
+.pruned { color: var(--muted); margin: .1rem 0 .35rem; overflow-wrap: anywhere; }
+/* A snapshot's own record: flat headed groups inside one card, its facts as a
+   name/value grid rather than a second table for every three numbers. */
+.card.snapshot { margin-bottom: 1rem; }
+.path-line { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; overflow-wrap: anywhere;
+  margin: .2rem 0 .5rem; }
+.facts { list-style: none; margin: .2rem 0 .5rem; padding: 0; display: grid;
+  grid-template-columns: auto minmax(0, 1fr); gap: .1rem .9rem; }
+.facts > li { display: contents; }
+.facts-name { color: var(--muted); }
+.facts-value { overflow-wrap: anywhere; }
 .warn { border-left: .3rem solid var(--judged); padding: .4rem .6rem; background: var(--raised);
   border-radius: .3rem; }
 .pill { display: inline-block; border: 1px solid currentColor; border-radius: 999px;
@@ -2307,7 +2605,17 @@ function composerValues() {
     if (control && control.value !== '') { values[key] = control.value; }
   });
   values.cubes = values.output;
+  values.epoch_clause = epochClause(values.epoch);
   return values;
+}
+
+/* The other half of _epoch_clause in reading_room.py: the plan comment's
+   sentence has to stand with and without a chosen calibration, so the whole
+   clause is the value and an empty choice removes it rather than leaving the
+   sentence hanging on a missing word. */
+function epochClause(epoch) {
+  var chosen = String(epoch === undefined || epoch === null ? '' : epoch).trim();
+  return chosen ? '; for these shots that is ' + chosen : '';
 }
 
 function compose() {
@@ -2787,42 +3095,6 @@ document.addEventListener('click', function (event) {
 });
 """
 
-#: The one-screen pages carry the same command rows the campaign page does, so
-#: they carry the same wiring: a show/hide toggle that flips one attribute, and
-#: a copy button that carries the whole command whether the row is open or shut.
-#: Without this the rows would render controls that look pressable and are not.
-_SOLO_JS = """
-function soloCopy(button) {
-  var text = button.getAttribute('data-copy') || '';
-  var done = function () { button.textContent = 'Copied'; };
-  if (navigator.clipboard && navigator.clipboard.writeText) {
-    navigator.clipboard.writeText(text).then(done, function () { done(); });
-    return;
-  }
-  var holder = document.createElement('textarea');
-  holder.value = text;
-  document.body.appendChild(holder);
-  holder.select();
-  try { document.execCommand('copy'); done(); } catch (error) { /* nothing to do */ }
-  document.body.removeChild(holder);
-}
-
-document.addEventListener('click', function (event) {
-  if (!event.target || !event.target.closest) { return; }
-  var toggle = event.target.closest('.fold-toggle');
-  if (toggle) {
-    var body = document.getElementById(toggle.getAttribute('aria-controls'));
-    var open = toggle.getAttribute('aria-expanded') === 'true';
-    if (body) { body.hidden = open; }
-    toggle.setAttribute('aria-expanded', open ? 'false' : 'true');
-    toggle.textContent = open ? toggle.getAttribute('data-show') : 'hide';
-    return;
-  }
-  var copy = event.target.closest('.copy');
-  if (copy) { soloCopy(copy); }
-});
-"""
-
 #: The setup page's own wiring: the chosen folder becomes the campaign home.
 _SETUP_JS = (
     """
@@ -2937,7 +3209,15 @@ def _page(context: dict[str, Any]) -> str:
             ("sec-plan", "Composed plan and commands"),
         ],
         "drives": [("sec-drives-cards", "Drives"), ("sec-catalog", "Every cube")],
-        "calibration": [("sec-cal-epochs", "Epochs"), ("sec-drift", "Drift evidence")],
+        # The calibrations lead, one entry per saved snapshot, and the pipeline
+        # context — which epoch covers which shots, and what the audits found —
+        # follows them.
+        "calibration": [
+            ("sec-cal-snapshots", "Calibrations"),
+            *[(record["anchor"], record["id"]) for record in context["snapshots"]],
+            ("sec-cal-epochs", "Epochs"),
+            ("sec-drift", "Drift evidence"),
+        ],
         "reading": [
             ("sec-reading-room", "Reading room"),
             *[(document["anchor"], document["title"]) for document in context["documents"]],
@@ -3003,7 +3283,11 @@ def _page(context: dict[str, Any]) -> str:
             ),
             _view(
                 "calibration",
-                '<section class="panel" id="sec-cal-epochs"><h2>Epochs</h2>'
+                '<section class="panel" id="sec-cal-snapshots">'
+                "<h2>Calibrations, one saved snapshot each</h2>"
+                + _snapshot_section(context)
+                + "</section>"
+                + '<section class="panel" id="sec-cal-epochs"><h2>Epochs</h2>'
                 + _epoch_table(context)
                 + "</section>"
                 + '<section class="panel" id="sec-drift"><h2>Drift evidence</h2>'
@@ -3054,13 +3338,8 @@ def _page(context: dict[str, Any]) -> str:
 
 
 # ---------------------------------------------------------------------------
-# The two one-screen pages a cold campaign is served
+# The one-screen page a machine with no campaign home is served
 # ---------------------------------------------------------------------------
-
-#: The one value neither a campaign home nor a catalog records: where the raw
-#: SIF files are.  It is written as a marker so a pasted command fails loudly on
-#: the missing folder rather than quietly on a guessed one.
-DATA_FOLDER_MARKER = "<data folder>"
 
 
 def _solo_page(title: str, tagline: str, body: str, script: str) -> str:
@@ -3076,7 +3355,7 @@ def _solo_page(title: str, tagline: str, body: str, script: str) -> str:
         f'<span class="tagline">{_e(tagline)}</span></header>\n'
         f'<main class="solo">{body}</main>\n'
         f"{_PICKER_MARKUP}"
-        f"<script>\n{_PICKER_JS}{_SOLO_JS}{script}</script>\n</body></html>\n"
+        f"<script>\n{_PICKER_JS}{script}</script>\n</body></html>\n"
     )
 
 
@@ -3105,79 +3384,6 @@ def render_setup_page() -> str:
         "and changes nothing else.",
         body,
         _SETUP_JS,
-    )
-
-
-def _home_value(home: dict[str, Any], keys: tuple[str, ...], default: str = "") -> str:
-    for key in keys:
-        value = home.get(key)
-        if value:
-            return _posix(value)
-    return default
-
-
-def render_empty_campaign_page(home: dict[str, Any]) -> str:
-    """The page a campaign home with no catalog yet is served.
-
-    Empty is not broken, and the two are rendered as the different facts they
-    are: nothing has been processed here, so the file that would list the cubes
-    does not exist.  The page therefore claims no cube and no drive; it carries
-    the one command that ends the state, composed from the home's own registry,
-    snapshot root and catalog path, with the raw data folder left as a marker
-    because nothing on disk records it.
-    """
-
-    root = _home_value(home, ("folder", "root", "home", "path"))
-    named = str(home.get("volume_label") or home.get("label") or "")
-    values = {
-        "input": DATA_FOLDER_MARKER,
-        "output": _home_value(
-            home, ("cubes", "output", "cubes_root"), f"{root}/cubes" if root else "cubes"
-        ),
-        "registry": _home_value(
-            home,
-            ("registry", "registry_path"),
-            f"{root}/calibration_registry.toml" if root else "calibration_registry.toml",
-        ),
-        "calibrations": _home_value(
-            home,
-            ("calibrations", "calibrations_root", "snapshots_root"),
-            f"{root}/calibrations" if root else "calibrations",
-        ),
-        "catalog": _home_value(
-            home,
-            ("catalog", "catalog_path", "central_index"),
-            f"{root}/echelle-catalog.json" if root else "echelle-catalog.json",
-        ),
-        "sample": str(home.get("sample") or "20"),
-        # No drive is catalogued here yet, so nothing names one: the home's own
-        # folder name is a default to edit, not a drive this page claims to see.
-        "label": named or (root.rsplit("/", 1)[-1] if root else "unknown"),
-    }
-    meaning, template = STEP_COMMANDS["sample"]
-    shapes = {shell: _fill(template, values, shell) for shell, _ in SHELL_NAMES}
-    body = (
-        '<section class="panel">'
-        "<h2>This campaign has no catalog yet</h2>"
-        "<p>Its home is in place and nothing has been processed here, so the file that would "
-        "list the cubes has not been written. That is empty, not broken.</p>"
-        f'<p class="muted">Home {_e(root or "not recorded")} · registry {_e(values["registry"])} '
-        f'· snapshot root {_e(values["calibrations"])} · catalog to be written at '
-        f'{_e(values["catalog"])}</p>'
-        "<h3>The first command</h3>"
-        + _command_row(
-            "first-run", "Process a first sample", _fill(meaning, values, "posix"), shapes
-        )
-        + f'<p class="note">The folder holding the raw SIF files is the one value no file here '
-        f"records: replace {_e(DATA_FOLDER_MARKER)} with it. This page shows the campaign as "
-        "soon as that first run writes the catalog.</p>"
-        "</section>"
-    )
-    return _solo_page(
-        "Echelle campaign — no catalog yet",
-        "Served from this machine. This page never executes commands and never starts a worker.",
-        body,
-        "",
     )
 
 
@@ -3232,44 +3438,64 @@ def _documents(document_paths: tuple[str | Path, ...] | list[str | Path]) -> lis
 SNAPSHOT_SCAN_BUDGET = 400
 
 
-def _snapshot_id_of(folder: Path) -> str:
-    """The id a snapshot folder declares, falling back to its own name.
+def _snapshot_record(folder: Path) -> dict[str, Any]:
+    """One snapshot folder, read the way the Calibration tab renders it.
 
-    Same rule as :func:`echelle_spectra.snapshot.read_snapshot_folder`: the
-    manifest id is the identity, and the folder name is the fallback precisely
-    for the binder whose id is missing.  Only the manifest is opened here --
-    the page needs the name, not the validation the bench runs.
+    Same identity rule as :func:`echelle_spectra.snapshot.read_snapshot_folder`:
+    the manifest id is the identity, and the folder name is the fallback
+    precisely for the binder whose id is missing.  Only the manifest is opened
+    -- a binder is kilobytes and the raw frames it points at are not, so a page
+    build reads the record and never the detector data behind it.
     """
 
     try:
         with (folder / "snapshot.toml").open("rb") as stream:
-            manifest = tomllib.load(stream)
+            manifest: dict[str, Any] = tomllib.load(stream)
     except (OSError, tomllib.TOMLDecodeError):
-        return folder.name
+        # Unreadable is its own state: the folder binds a snapshot under its own
+        # name and this build could not read a single field of it.
+        return {"id": folder.name, "root": _posix(folder), "manifest": {}, "readable": False}
     declared = str(manifest.get("id", "") or "").strip()
-    return declared or folder.name
+    return {
+        "id": declared or folder.name,
+        "root": _posix(folder),
+        "manifest": manifest,
+        "readable": True,
+    }
 
 
-def _snapshot_binding(entry: Path) -> tuple[bool, str]:
-    """One directory entry, read once: ``(is a folder, the id it binds or "")``.
+def _snapshot_binding(entry: Path) -> tuple[bool, dict[str, Any] | None]:
+    """One directory entry, read once: ``(is a folder, the snapshot it binds)``.
 
     Both answers come from the same look because both cost the same stat, and
-    the walk below needs both: an id to offer, or a folder to look inside.
+    the walk below needs both: a snapshot to render, or a folder to look inside.
     """
 
     try:
         if not entry.is_dir():
-            return False, ""
+            return False, None
         if not (entry / "snapshot.toml").is_file():
-            return True, ""
+            return True, None
     except OSError:  # pragma: no cover - unreadable mount points
-        return False, ""
-    return True, _snapshot_id_of(entry)
+        return False, None
+    return True, _snapshot_record(entry)
+
+
+def _keep_snapshot(found: dict[str, dict[str, Any]], record: dict[str, Any]) -> None:
+    """File one reading under its id, deterministically.
+
+    Two folders binding one snapshot are one snapshot, and which of them the
+    page names must not depend on the order a directory happened to list in.
+    """
+
+    seen = found.get(record["id"])
+    if seen is None or record["root"] < seen["root"]:
+        found[record["id"]] = record
 
 
 def _saved_snapshots(
     calibrations_root: str | Path | None, *, depth: int = 3
-) -> tuple[list[str], bool]:
+) -> tuple[list[dict[str, Any]], bool]:
     """The snapshots a calibrations root actually holds, registry or not.
 
     A saved snapshot is real the moment the bench writes it; a page that only
@@ -3281,14 +3507,14 @@ def _saved_snapshots(
 
     It is also bounded in breadth, which shallowness alone does not give: three
     levels of a wide NAS root is still an unbounded number of network stats.
-    Returns ``(ids, truncated)`` -- what the budget reached, and whether it ran
-    out, because a list silently cut short would be the same lie the registry-
-    only page told.
+    Returns ``(records, truncated)`` -- what the budget reached, and whether it
+    ran out, because a list silently cut short would be the same lie the
+    registry-only page told.
     """
 
     if not calibrations_root:
         return [], False
-    found: set[str] = set()
+    found: dict[str, dict[str, Any]] = {}
     remaining = SNAPSHOT_SCAN_BUDGET
     truncated = False
 
@@ -3304,9 +3530,9 @@ def _saved_snapshots(
                     truncated = True
                     return
                 remaining -= 1
-                is_folder, identity = _snapshot_binding(entry)
-                if identity:
-                    found.add(identity)
+                is_folder, record = _snapshot_binding(entry)
+                if record is not None:
+                    _keep_snapshot(found, record)
                 elif is_folder and budget > 1:
                     deeper.append(entry)
         except OSError:
@@ -3318,26 +3544,32 @@ def _saved_snapshots(
             walk(child, budget - 1)
 
     walk(Path(calibrations_root), depth)
-    # Deduped by id, so two folders binding the same snapshot offer one option,
-    # and sorted, so the same root always renders the same order.
-    return sorted(found), truncated
+    # Sorted by id, so the same root always renders and offers the same order.
+    return [found[key] for key in sorted(found)], truncated
 
 
 def _registry_context(
     registry_path: str | Path | None, calibrations_root: str | Path | None
 ) -> dict[str, Any]:
-    """Read the registry for the composer, or say honestly that it was not read."""
+    """Read the registry for the composer, or say honestly that it was not read.
+
+    ``records`` is every snapshot folder the walk reached, read from its own
+    binder; ``saved`` is the ids alone, which is all the composer's select and
+    the calibrate stage ever need.  Both come from one walk.
+    """
 
     if registry_path is None:
-        saved, truncated = _saved_snapshots(calibrations_root)
+        records, truncated = _saved_snapshots(calibrations_root)
         return {
             "status": "not supplied",
             "path": "",
             "detail": "",
             "epochs": [],
             "epoch_rows": [],
-            "saved": saved,
+            "records": records,
+            "saved": [record["id"] for record in records],
             "saved_truncated": truncated,
+            "scanned": bool(calibrations_root),
             "calibrations": _posix(calibrations_root) if calibrations_root else "",
         }
     from .calibration_registry import CalibrationRegistryError, load_calibration_registry
@@ -3347,24 +3579,28 @@ def _registry_context(
     try:
         registry = load_calibration_registry(path, snapshots_root=root)
     except (CalibrationRegistryError, OSError) as exc:
-        saved, truncated = _saved_snapshots(root)
+        records, truncated = _saved_snapshots(root)
         return {
             "status": "unreadable",
             "path": _posix(path),
             "detail": str(exc),
             "epochs": [],
             "epoch_rows": [],
-            "saved": saved,
+            "records": records,
+            "saved": [record["id"] for record in records],
             "saved_truncated": truncated,
+            "scanned": True,
             "calibrations": _posix(root),
         }
-    saved, truncated = _saved_snapshots(root)
+    records, truncated = _saved_snapshots(root)
     return {
         "status": "read",
         "path": _posix(path),
         "detail": "",
-        "saved": saved,
+        "records": records,
+        "saved": [record["id"] for record in records],
         "saved_truncated": truncated,
+        "scanned": True,
         "epochs": [epoch.snapshot_id for epoch in registry.epochs],
         # The bounds each epoch already declares, carried through so the page
         # can say whether one covers today rather than only counting them.
@@ -3468,6 +3704,20 @@ def build_reading_room(
         values,
         generated_at[:10],
     )
+    # One jump target per snapshot, in the sec- namespace so the page's one
+    # scroll-margin rule and its scroll-spy both cover them without a second
+    # rule to remember.
+    anchors: set[str] = set()
+    snapshots = [
+        {
+            **record,
+            "anchor": _unique_id(
+                "sec-cal-snap-" + (_SLUG.sub("-", record["id"].lower()).strip("-") or "snapshot"),
+                anchors,
+            ),
+        }
+        for record in registry.get("records") or []
+    ]
     every_step = [*calibrate_steps, *(step for row in drive_rows for step in row["steps"])]
     context = {
         "served": served,
@@ -3484,6 +3734,7 @@ def build_reading_room(
         "blocked_count": sum(1 for step in every_step if step["state"] == STEP_BLOCKED),
         "documents": _documents(document_paths),
         "registry": registry,
+        "snapshots": snapshots,
         "epochs": epochs,
         "source_count": len(sources),
         "cube_count": len(rows),

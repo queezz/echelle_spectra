@@ -42,11 +42,14 @@ Skipped:     2 calibration folder(s) not searched (named 'calibrations', or hold
 
 The run receipt carries the same list in full, under `pruned_dirs` in
 `run.toml`, so an auditor reading the receipt months later sees the skip the
-console announced. A run that pruned nothing prints no extra line and writes no
-`pruned_dirs` key: the key's presence means a real skip. If a named folder was
-not supposed to be a calibration folder, move or rename the `snapshot.toml`
-that marked it, or point `--pattern` at a path pattern to search exactly where
-you mean.
+console announced. The drive catalog carries it onward into the merged index,
+and `echelle web` prints it on that drive's card in both Drives and Now —
+"this run skipped 2 calibration folder(s)", with the names — so the page is no
+longer the one surface where a pruned run reads complete. A run that pruned
+nothing prints no extra line and writes no `pruned_dirs` key anywhere: the
+key's presence means a real skip. If a named folder was not supposed to be a
+calibration folder, move or rename the `snapshot.toml` that marked it, or
+point `--pattern` at a path pattern to search exactly where you mean.
 
 A registry-backed drive takes three commands: sample the epoch, audit the
 sample, then process the drive under the verdict the audit wrote.

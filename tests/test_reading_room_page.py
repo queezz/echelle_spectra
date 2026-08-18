@@ -177,17 +177,25 @@ def test_a_saved_snapshot_is_offered_under_the_id_its_manifest_declares(
     # The one case the folder name is the truth: a binder that declares no id.
     _snapshot_folder(root / "20200101_cmos", None)
 
-    ids, truncated = _saved_snapshots(root)
-    assert ids == ["20190314_cmos", "20200101_cmos"]
+    records, truncated = _saved_snapshots(root)
+    assert [record["id"] for record in records] == ["20190314_cmos", "20200101_cmos"]
     assert truncated is False
+    # Which of two folders binding one id is named must not ride on directory
+    # order, so the earlier path wins and the same root always reads the same.
+    assert records[0]["root"].endswith("/2019-march-run")
 
     page = build_reading_room(
         _bare_catalog(tmp_path), tmp_path / "web-ids", calibrations_root=root
     ).read_text(encoding="utf-8")
     assert page.count('<option value="20190314_cmos">') == 1
     assert '<option value="20200101_cmos">' in page
+    # A folder name is a place, never an identity: it may be read as where the
+    # data is, and it is never offered as a calibration to choose.
+    chooser = re.search(r'<select id="f-epoch">(.*?)</select>', page, re.S).group(1)
     for folder in ("2019-march-run", "copied-from-the-nas"):
-        assert folder not in page, f"the folder name {folder!r} is not an identity"
+        assert folder not in chooser, f"the folder name {folder!r} is offered as an identity"
+    assert 'class="path-line">' in page
+    assert "copied-from-the-nas" not in page, "the second folder binding one id is not a snapshot"
 
 
 def test_the_snapshot_walk_stops_at_its_budget_and_the_page_says_so(
@@ -1150,3 +1158,331 @@ def test_the_page_executes_nothing_and_reaches_nothing(page: str) -> None:
     assert "@media (prefers-color-scheme: dark)" in page
     # Every control keeps a resting border and fill.
     assert "button, select, input, textarea {" in page
+
+
+# ---------------------------------------------------------------------------
+# The calibration record — the owner's own reading order
+# ---------------------------------------------------------------------------
+#
+# "Looking at the calibration tab, I'm lost and I don't know what that thing is
+# telling me. I need 1. Place, where is the data? 2. What lamps, how about
+# spheres? 3. Ok, then show me the data from the calibration bench. Image
+# shifted delta x delta y? Theta? Absolute calibration, the snapshot of the
+# factors?"  (queezz, 2026-08-18.)  These tests read the built page in exactly
+# that order, against the shape his own 20190314_cmos binder has.
+
+_DIGEST = "0" * 64
+
+#: The owner's real binder, trimmed to the fields the tab renders — and one
+#: honest hole: Xe is named among the lamps and no frame records it.
+_BINDER = f"""\
+schema = "echelle-snapshot/v1"
+id = "20190314_cmos"
+created_utc = "2019-03-14T08:12:00+00:00"
+detector = "cmos"
+lamps = ["Hg", "Ne", "ThAr", "Xe"]
+base_snapshot = "20190207_cmos"
+
+[validity]
+date_from = "2019-03-14"
+
+[alignment]
+dx_px = 0.42
+dy_px = -1.1
+rotation_deg = 0.0131
+rms_px = 0.031
+wavelength_correction_applied = true
+pattern_correction_applied = false
+pattern_band_offset_note = "the sphere's bands sit above the chosen pattern"
+pattern_band_offset_rows = 3.5
+pattern_band_offset_orders = 12
+vetted_set = "BH paper"
+vetted_lineage = ["wavelength.txt", "wavelength-2019.txt"]
+science_validation = "measured"
+science_lines_validated = 6
+science_residual_rms_nm = 0.0082
+
+[qc]
+lines_used = 37
+worst_residual_px = 0.19
+sphere_comparison = "ready"
+sphere_comparison_reference = "previous_sphere.sif + previous_sphere_bg.sif"
+
+[[artifacts]]
+role = "pattern"
+path = "pattern.txt"
+sha256 = "{_DIGEST}"
+size_bytes = 2048
+source_name = "pattern-2019.txt"
+
+[[artifacts]]
+role = "wavelength"
+path = "wavelength.txt"
+sha256 = "{_DIGEST}"
+size_bytes = 4096
+source_name = "wavelength-2019.txt"
+
+[[artifacts]]
+role = "integral"
+path = "integral.txt"
+sha256 = "{_DIGEST}"
+size_bytes = 1024
+source_name = "integral-2019.txt"
+
+[[artifacts]]
+role = "sphere"
+kind = "referenced"
+path = "../../sphere-0.1s-x3.sif"
+sha256 = "{_DIGEST}"
+size_bytes = 398458880
+source_name = "sphere-0.1s-x3.sif"
+
+[[artifacts]]
+role = "sphere_background"
+kind = "referenced"
+path = "../../sphere-bg-0.1s-x3.sif"
+sha256 = "{_DIGEST}"
+size_bytes = 398458880
+source_name = "sphere-bg-0.1s-x3.sif"
+
+[[artifacts]]
+role = "lamp"
+kind = "referenced"
+label = "Hg"
+path = "../../Hg-30s.sif"
+sha256 = "{_DIGEST}"
+size_bytes = 1048576
+source_name = "Hg-30s.sif"
+
+[[artifacts]]
+role = "lamp"
+kind = "referenced"
+label = "Ne"
+path = "../../Ne-30s.sif"
+sha256 = "{_DIGEST}"
+size_bytes = 1048576
+source_name = "Ne-30s.sif"
+
+[[artifacts]]
+role = "lamp"
+kind = "referenced"
+label = "ThAr"
+path = "../../ThAr-120s.sif"
+sha256 = "{_DIGEST}"
+size_bytes = 1048576
+source_name = "ThAr-120s.sif"
+"""
+
+
+def _bench_root(tmp_path: Path, binder: str = _BINDER, name: str = "20190314_cmos") -> Path:
+    root = tmp_path / "cal"
+    folder = root / "calibrations" / name
+    folder.mkdir(parents=True)
+    (folder / "snapshot.toml").write_text(binder, encoding="utf-8")
+    return root
+
+
+def _record_page(tmp_path: Path, root: Path, out: str = "web-record") -> str:
+    return build_reading_room(
+        _bare_catalog(tmp_path, f"{out}.json"), tmp_path / out, calibrations_root=root
+    ).read_text(encoding="utf-8")
+
+
+def _snapshot_card(text: str) -> str:
+    return _element(text, 'id="sec-cal-snap-20190314-cmos"', "article")
+
+
+def test_the_calibration_tab_leads_with_the_snapshots_and_reads_in_his_order(
+    tmp_path: Path,
+) -> None:
+    page = _record_page(tmp_path, _bench_root(tmp_path))
+    view = _view(page, "calibration")
+    # The record leads; the pipeline context follows it, never the other way.
+    order = [
+        view.index(f'id="{anchor}"')
+        for anchor in ("sec-cal-snapshots", "sec-cal-epochs", "sec-drift")
+    ]
+    assert order == sorted(order)
+    card = _snapshot_card(view)
+    # Place, then sources, then the bench — his three questions, in his order.
+    assert re.findall(r"<h4>([^<]+)</h4>", card) == [
+        "Where",
+        "Lamps and spheres",
+        "Rigid alignment",
+        "Wavelength fit",
+        "Absolute calibration",
+    ]
+    # The rail names every snapshot, so a long root is navigable rather than
+    # only scrollable.
+    rail = _rail_group(page, "rail-right", "calibration")
+    assert (
+        '<a href="#sec-cal-snap-20190314-cmos" class="sectnav-link">20190314_cmos</a>' in rail
+    )
+    assert rail.index("sec-cal-snapshots") < rail.index("sec-cal-epochs") < rail.index("sec-drift")
+    # And every jump target this tab defines is reachable from that index, in a
+    # namespace the rest of the page still does not collide with.
+    ids = re.findall(r'id="([^"]+)"', page)
+    assert len(ids) == len(set(ids)), "duplicate element ids"
+    for anchor in re.findall(r'id="(sec-cal-[^"]+)"', view):
+        assert f'href="#{anchor}"' in rail, f"{anchor} has no rail link"
+
+
+def test_a_snapshot_says_where_it_is(tmp_path: Path) -> None:
+    root = _bench_root(tmp_path)
+    page = _record_page(tmp_path, root)
+    folder = (root / "calibrations" / "20190314_cmos").as_posix()
+    assert f'<p class="path-line">{_escaped(folder)}</p>' in _snapshot_card(page)
+
+
+def test_a_snapshot_names_every_lamp_and_both_spheres(tmp_path: Path) -> None:
+    card = _snapshot_card(_record_page(tmp_path, _bench_root(tmp_path)))
+    sources = card[card.index("Lamps and spheres") : card.index("Rigid alignment")]
+    for species, frame in (("Hg", "Hg-30s.sif"), ("Ne", "Ne-30s.sif"), ("ThAr", "ThAr-120s.sif")):
+        assert f"<td>{species}</td>" in sources
+        assert f"<td>{frame}</td>" in sources
+    # The lamp named in the array with no frame behind it is stated, not dropped
+    # and not invented.
+    xenon = sources[sources.index("<td>Xe</td>") :]
+    assert xenon[: xenon.index("</tr>")].count("<td>not recorded</td>") == 3
+    # Both halves of the sphere pair, by the names that carry their exposure.
+    assert "<td>sphere-0.1s-x3.sif</td>" in sources
+    assert "<td>sphere-bg-0.1s-x3.sif</td>" in sources
+    assert "<td>referenced</td>" in sources
+    # The binder records no exposure field; that is taught once for the surface.
+    assert _record_page(tmp_path, _bench_root(tmp_path / "twin"), out="web-once").count(
+        "A binder records no exposure time"
+    ) == 1
+
+
+def test_the_bench_numbers_are_read_off_the_binder(tmp_path: Path) -> None:
+    card = _snapshot_card(_record_page(tmp_path, _bench_root(tmp_path)))
+    for name, value in (
+        ("Δx", "0.42 px"),
+        ("Δy", "-1.1 px"),
+        ("θ", "0.0131 deg"),
+        ("RMS", "0.031 px"),
+        ("wavelength table shifted", "yes"),
+        ("order pattern shifted", "no"),
+        ("lines used", "37"),
+        ("worst residual", "0.19 px"),
+        ("vetted set", "BH paper"),
+        ("vetted lineage", "wavelength.txt → wavelength-2019.txt"),
+        ("sphere comparison", "ready"),
+        ("compared against", "previous_sphere.sif + previous_sphere_bg.sif"),
+        ("factor table", "integral-2019.txt"),
+    ):
+        pair = (
+            f'<span class="facts-name">{_escaped(name)}</span>'
+            f'<span class="facts-value">{_escaped(value)}</span>'
+        )
+        assert pair in card, f"{name} does not read {value!r}"
+
+
+def test_a_thin_binder_says_not_recorded_rather_than_inventing(tmp_path: Path) -> None:
+    """Historical snapshots predate most of these fields, and say so."""
+
+    thin = 'id = "20190314_cmos"\ndetector = "cmos"\nlamps = ["Hg"]\n'
+    card = _snapshot_card(_record_page(tmp_path, _bench_root(tmp_path, thin), out="web-thin"))
+    for absent in ("Δx", "RMS", "lines used", "worst residual", "vetted set", "sphere comparison"):
+        pair = (
+            f'<span class="facts-name">{_escaped(absent)}</span>'
+            '<span class="facts-value">not recorded</span>'
+        )
+        assert pair in card, f"{absent} was invented rather than named absent"
+    # Nothing is dressed as a measurement it never made.
+    assert "0.0" not in card and "0 px" not in card
+
+
+def test_no_snapshot_root_and_an_empty_one_are_different_facts(tmp_path: Path) -> None:
+    nothing = build_reading_room(
+        _bare_catalog(tmp_path, "no-root.json"), tmp_path / "web-no-root"
+    ).read_text(encoding="utf-8")
+    assert "was given no snapshot root" in nothing
+    assert "No snapshot folder was found" not in nothing
+
+    empty = tmp_path / "empty-root"
+    empty.mkdir()
+    swept = build_reading_room(
+        _bare_catalog(tmp_path, "empty.json"), tmp_path / "web-empty", calibrations_root=empty
+    ).read_text(encoding="utf-8")
+    assert "No snapshot folder was found" in swept
+    assert "was given no snapshot root" not in swept
+
+
+def test_an_unreadable_binder_is_its_own_state(tmp_path: Path) -> None:
+    root = tmp_path / "cal"
+    folder = root / "20190314_cmos"
+    folder.mkdir(parents=True)
+    (folder / "snapshot.toml").write_text("id = [broken\n", encoding="utf-8")
+    page = _record_page(tmp_path, root, out="web-broken")
+    assert "This binder could not be read" in page
+    assert "Rigid alignment" not in page, "an unreadable binder claims no measurement"
+
+
+# ---------------------------------------------------------------------------
+# What discovery skipped, and the plan sentence that has to stand alone
+# ---------------------------------------------------------------------------
+
+
+def test_a_run_that_pruned_folders_says_which_ones(tmp_path: Path) -> None:
+    """The page was the one surface where a pruned run still read complete."""
+
+    source = _connected(
+        tmp_path,
+        "NIFS-A",
+        run={
+            "id": "run-a",
+            "state": "completed",
+            "counts": {"exported": 1},
+            "gate": "verdict",
+            "pruned_dirs": ["20190207", "calibrations"],
+        },
+        cubes=[{"path": "a.nc", "shot_number": "1", "snapshot_id": "20260812_cmos"}],
+    )
+    quiet = _connected(tmp_path, "NIFS-B", run={"id": "run-b", "state": "completed", "counts": {}})
+    page = build_reading_room(
+        _one_drive_catalog(tmp_path, [source, quiet]), tmp_path / "web-pruned"
+    ).read_text(encoding="utf-8")
+    line = '<p class="pruned">This run skipped 2 calibration folder(s): 20190207, calibrations</p>'
+    # Both surfaces a drive is read on carry it: the Drives card and the Now row.
+    assert line in _element(page, 'id="sec-drives-cards"')
+    assert line in _drive_rows(page)[0]
+    # A run that pruned nothing says nothing; silence is not a claim here.
+    assert "skipped 0 calibration folder(s)" not in page
+    assert page.count('class="pruned"') == 2
+
+
+def test_the_plan_sentence_stands_with_and_without_a_calibration(tmp_path: Path) -> None:
+    """It used to render "for these shots that is ." with nothing chosen."""
+
+    def _plan(text: str) -> str:
+        return html.unescape(
+            re.search(r'id="plan-out"[^>]*>(.*?)</textarea>', text, flags=re.S).group(1)
+        )
+
+    bare = build_reading_room(
+        _bare_catalog(tmp_path, "no-epoch.json"), tmp_path / "web-no-epoch"
+    ).read_text(encoding="utf-8")
+    assert "# The registry selects the epoch from each shot's own date.\n" in _plan(bare)
+    assert "that is ." not in _plan(bare)
+
+    named = build_reading_room(
+        _one_drive_catalog(
+            tmp_path,
+            [
+                _connected(
+                    tmp_path,
+                    "NIFS-A",
+                    cubes=[{"path": "a.nc", "shot_number": "1", "snapshot_id": "20260812_cmos"}],
+                )
+            ],
+        ),
+        tmp_path / "web-epoch",
+    ).read_text(encoding="utf-8")
+    assert (
+        "# The registry selects the epoch from each shot's own date; for these shots "
+        "that is 20260812_cmos.\n"
+    ) in _plan(named)
+    # The page's own JavaScript is the other half of the same rule.
+    assert "function epochClause(epoch)" in named
+    assert "values.epoch_clause = epochClause(values.epoch);" in named

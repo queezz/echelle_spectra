@@ -205,3 +205,60 @@ def test_an_operators_own_path_pattern_prunes_nothing_and_reports_nothing(
     manifest = _run_manifest(tmp_path / "runs")
     assert "pruned_dirs" not in manifest
     assert manifest["expected_files"] == 2
+
+
+def test_the_catalog_and_the_page_carry_the_skip_the_receipt_recorded(
+    tmp_path: Path, fake_spectrocube, capsys
+) -> None:
+    """The campaign page was the last surface where a pruned run read complete.
+
+    The receipt has said it since this packet's first half.  The drive catalog
+    now carries it onward, and the page prints it on the drive's own card, so an
+    operator reading the index months later is told a day was left out rather
+    than left to notice the missing shots.
+    """
+
+    import json
+
+    from echelle_spectra.catalog import build_drive_catalog, merge_catalogs
+    from echelle_spectra.reading_room import build_reading_room
+
+    source = tmp_path / "drive"
+    _shots(source / "20190206", "193778")
+    _shots(_snapshot_marker(source / "20190207"), "193780")
+
+    assert _process(_batch_argv(tmp_path, source)) == 0
+    capsys.readouterr()
+
+    receipt = sorted((tmp_path / "runs").rglob("run.toml"))[0].parent
+    drive_catalog = build_drive_catalog(
+        tmp_path / "cubes", volume_label="NIFS-A", drive_id="id-a", receipt_dir=receipt
+    )
+    payload = json.loads(drive_catalog.read_text(encoding="utf-8"))
+    assert payload["run"]["pruned_dirs"] == ["20190207"]
+
+    merged = merge_catalogs([drive_catalog], tmp_path / "all-years.json")
+    page = build_reading_room(merged, tmp_path / "web").read_text(encoding="utf-8")
+    assert "This run skipped 1 calibration folder(s): 20190207" in page
+
+
+def test_a_run_that_pruned_nothing_writes_no_key_into_its_catalog(
+    tmp_path: Path, fake_spectrocube, capsys
+) -> None:
+    """Absence is the statement: no key means no skip, in the catalog too."""
+
+    import json
+
+    from echelle_spectra.catalog import build_drive_catalog
+
+    source = tmp_path / "drive"
+    _shots(source / "20190206", "193778")
+
+    assert _process(_batch_argv(tmp_path, source)) == 0
+    capsys.readouterr()
+
+    receipt = sorted((tmp_path / "runs").rglob("run.toml"))[0].parent
+    drive_catalog = build_drive_catalog(
+        tmp_path / "cubes", volume_label="NIFS-A", drive_id="id-a", receipt_dir=receipt
+    )
+    assert "pruned_dirs" not in json.loads(drive_catalog.read_text(encoding="utf-8"))["run"]

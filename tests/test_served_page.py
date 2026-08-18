@@ -22,11 +22,8 @@ import pytest
 
 from echelle_spectra.reading_room import (
     BROWSE_ENDPOINT,
-    DATA_FOLDER_MARKER,
     HOME_ENDPOINT,
-    STEP_COMMANDS,
     build_reading_room,
-    render_empty_campaign_page,
     render_setup_page,
 )
 
@@ -253,34 +250,22 @@ def test_the_setup_page_bakes_in_no_example_drive_path() -> None:
 
 
 # ---------------------------------------------------------------------------
-# The empty campaign page: empty is not broken
+# The campaign with no catalog yet: one page, not two
 # ---------------------------------------------------------------------------
 #
-# Nothing serves this renderer.  ``campaign_server`` answers a home with no
-# catalog yet by building the FULL page over a synthesized empty one, so every
-# control exists before the first scan result does, and the wrapper that used to
-# stand between the two was deleted along with the key mismatch it carried: it
-# would have handed this renderer ``home_values()``, whose "home" is the
-# campaign.toml FILE where this renderer wants the folder.  These tests call it
-# directly and claim only what it renders, never that a server reaches it.
+# ``campaign_server`` answers a home with no catalog yet by building the FULL
+# page over a synthesized empty one, so every control exists before the first
+# scan result does.  The second, one-screen renderer that used to stand beside
+# it lost its last caller and is gone; nothing may quietly grow one back.
 
 
-def _home() -> dict[str, str]:
-    """The shape this renderer reads — a folder and the paths beside it."""
+def test_no_second_page_stands_in_for_an_empty_campaign() -> None:
+    """The wrapper is gone, its renderer with it, and the flag that tracked it."""
 
-    return {
-        "folder": "E:/2026-campaign",
-        "registry": "E:/2026-campaign/calibration_registry.toml",
-        "calibrations": "E:/2026-campaign/calibrations",
-        "catalog": "E:/2026-campaign/echelle-catalog.json",
-    }
+    from echelle_spectra import campaign_server, reading_room
 
-
-def test_no_server_route_reaches_the_empty_campaign_page() -> None:
-    """The wrapper is gone, and with it the flag that tracked whether it ran."""
-
-    from echelle_spectra import campaign_server
-
+    assert not hasattr(reading_room, "render_empty_campaign_page")
+    assert not hasattr(reading_room, "DATA_FOLDER_MARKER")
     assert not hasattr(campaign_server, "render_empty")
     assert not hasattr(campaign_server, "EMPTY_PLACEHOLDER")
     server = campaign_server.make_server(home=None, port=0)
@@ -288,49 +273,3 @@ def test_no_server_route_reaches_the_empty_campaign_page() -> None:
         assert not hasattr(server, "empty_page_rendered")
     finally:
         server.server_close()
-
-
-def test_the_empty_campaign_page_states_empty_rather_than_broken() -> None:
-    text = render_empty_campaign_page(_home())
-    read = text[text.index('<main class="solo">') : text.index("</main>")]
-    assert "This campaign has no catalog yet" in read
-    assert "That is empty, not broken." in read
-    # Nothing is claimed about cubes or drives, because nothing is known.
-    for claim in ("cube(s)", "drive(s)", "state-measured", "verdict-authorized", "aligned"):
-        assert claim not in read, f"the empty page claims {claim!r}"
-    assert "as soon as that first run writes the catalog" in read
-
-
-def test_the_empty_campaign_page_composes_the_first_command_in_both_shells() -> None:
-    text = render_empty_campaign_page(_home())
-    _, template = STEP_COMMANDS["sample"]
-    assert template.split()[0] == "echelle"
-    assert 'data-shell="powershell"' in text and 'data-shell="posix"' in text
-    # The registry, snapshot root and catalog come from the home; the data
-    # folder is the one marker, in both shell shapes.
-    assert text.count("&lt;data folder&gt;") >= 2
-    assert DATA_FOLDER_MARKER == "<data folder>"
-    assert "E:\\2026-campaign\\calibration_registry.toml" in text  # PowerShell shape
-    assert "E:/2026-campaign/calibration_registry.toml" in text  # POSIX shape
-    assert "--sample auto" in text
-    # One copy control per shape, carrying the whole command.
-    assert text.count('class="copy" data-copy="echelle process') == 2
-
-
-def test_the_empty_campaign_page_wires_the_controls_it_renders() -> None:
-    """A show/hide toggle and a copy button that no script answers are dead
-    controls that still look pressable, so the one-screen pages carry their own
-    copy of that wiring rather than borrowing the campaign page's."""
-
-    text = render_empty_campaign_page(_home())
-    assert 'class="fold-toggle" aria-expanded="false"' in text
-    assert "function soloCopy(button)" in text
-    assert "event.target.closest('.fold-toggle')" in text
-    assert "event.target.closest('.copy')" in text
-
-
-def test_the_empty_campaign_page_falls_back_to_the_home_folder_alone() -> None:
-    text = render_empty_campaign_page({"folder": "E:/2026-campaign"})
-    assert "E:/2026-campaign/calibrations" in text
-    assert "E:/2026-campaign/echelle-catalog.json" in text
-    assert "&lt;data folder&gt;" in text
