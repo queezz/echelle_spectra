@@ -36,6 +36,33 @@ IMAGE_CALIBRATION_UNAVAILABLE = "calibration-unavailable"
 
 CAMERA_NAMES = ("CCD", "CMOS")
 
+# What one entry of the calibration selector means.  The packaged entries are
+# the CCD/CMOS radio buttons said in words; a snapshot entry is a folder already
+# opened this session; the browse entry asks for a new one.
+CALIBRATION_PACKAGED = "packaged"
+CALIBRATION_SNAPSHOT = "snapshot"
+CALIBRATION_BROWSE = "browse"
+
+BROWSE_LABEL = "Snapshot folder…"
+
+
+def packaged_calibration_label(camera):
+    """How one packaged camera set is named in the selector."""
+    return f"Packaged {camera}"
+
+
+def choose_snapshot_folder(parent, start_dir):
+    """Ask the operator for a calibration snapshot folder.
+
+    Its own function so the in-GUI selector has one seam a test can stand in
+    for: an off-screen run must never put a real modal dialog on the screen.
+    """
+    return QtWidgets.QFileDialog.getExistingDirectory(
+        parent,
+        "Open files through a saved calibration snapshot",
+        str(start_dir),
+    )
+
 
 class CalibrationOverrideError(ValueError):
     """A folder the viewer was pointed at cannot serve as its calibration."""
@@ -162,6 +189,15 @@ class EchelleSpectraGUI(QMainWindow, window_layout.Ui_MainWindow):
         # snapshot narrows the window to that snapshot's one detector.
         self.calibration_override = calibration_override
         self.camera_names = tuple(CAMERA_NAMES)
+        # The title before any snapshot named itself in it, so a second switch
+        # replaces the first snapshot's name instead of queueing behind it.
+        self.base_title = self.windowTitle()
+        # Snapshot folders opened through the selector this session, most recent
+        # last.  Deliberately not persisted: the next launch starts packaged.
+        self.recent_snapshots = []
+        # True while the selector is being set to agree with what is worn, so
+        # the display update is not mistaken for the operator asking to switch.
+        self._selector_syncing = False
 
         # set widget statuses
         self.CameraCCD.setChecked(False)
@@ -194,11 +230,15 @@ class EchelleSpectraGUI(QMainWindow, window_layout.Ui_MainWindow):
         self.config = config
         self.frame_spinners = [self.frame_civ, self.frame_he, self.frame_h]
         self.cameras = [self.CameraCCD, self.CameraCMOS]
+        # What the camera buttons say when nothing has fixed them, so switching
+        # back off a snapshot puts their own words back rather than a blank.
+        self.camera_tooltips = [button.toolTip() for button in self.cameras]
 
         # carry out init actions
         self.connect_actions()
         self.update_paths()
         self.read_last_shot()
+        self._build_calibration_selector()
         self.prepare_calibration()
         self.setup_bands()
 
@@ -255,6 +295,214 @@ class EchelleSpectraGUI(QMainWindow, window_layout.Ui_MainWindow):
         for calibration in self.active_calibrations():
             self.load_calibration(calibration)
 
+        self._sync_calibration_selector()
+
+    # -----------------------------------------------------------------------
+    #                        The calibration selector
+    # -----------------------------------------------------------------------
+
+    def _build_calibration_selector(self):
+        """Fill the control column's calibration combo and listen to it.
+
+        The camera buttons are listened to as well, because under the packaged
+        pair they *are* the choice: a flip-retry that moves the camera moves
+        what the window is reading through, and the selector must say so.
+        """
+        self._populate_calibration_selector()
+        self.calibration_select.currentIndexChanged.connect(
+            self._on_calibration_selected
+        )
+        for button in self.cameras:
+            button.toggled.connect(self._sync_calibration_selector)
+
+    def _populate_calibration_selector(self):
+        """Rebuild the entries: the packaged sets, this session's snapshots, browse."""
+        syncing, self._selector_syncing = self._selector_syncing, True
+        try:
+            self.calibration_select.clear()
+            for camera in CAMERA_NAMES:
+                self.calibration_select.addItem(
+                    packaged_calibration_label(camera),
+                    (CALIBRATION_PACKAGED, camera),
+                )
+            for override in self.recent_snapshots:
+                self.calibration_select.addItem(
+                    override.snapshot_id, (CALIBRATION_SNAPSHOT, override.snapshot_id)
+                )
+            self.calibration_select.addItem(BROWSE_LABEL, (CALIBRATION_BROWSE, None))
+        finally:
+            self._selector_syncing = syncing
+
+    def _worn_calibration_key(self):
+        """The selector entry that names what the window is reading through now"""
+        if self.calibration_override is None:
+            selected = [name for name in CAMERA_NAMES if self._camera_button(name).isChecked()]
+            camera = selected[0] if selected else CAMERA_NAMES[0]
+            return (CALIBRATION_PACKAGED, camera)
+        return (CALIBRATION_SNAPSHOT, self.calibration_override.snapshot_id)
+
+    def _calibration_entry_index(self, key):
+        """Which entry carries this key, or -1.
+
+        Read out by hand rather than through ``findData``: the entries carry
+        plain Python tuples, and Qt's own search compares them as variants.
+        """
+        for index in range(self.calibration_select.count()):
+            if self.calibration_select.itemData(index) == key:
+                return index
+        return -1
+
+    def _sync_calibration_selector(self, *_):
+        """Show what is worn, without that display counting as a request."""
+        key = self._worn_calibration_key()
+        index = self._calibration_entry_index(key)
+        syncing, self._selector_syncing = self._selector_syncing, True
+        try:
+            if index >= 0:
+                self.calibration_select.setCurrentIndex(index)
+        finally:
+            self._selector_syncing = syncing
+        self.calibration_select.setToolTip(self._calibration_tooltip())
+
+    def _calibration_tooltip(self):
+        """Say, durably, which calibration every file is being read through."""
+        override = self.calibration_override
+        if override is None:
+            return (
+                "Which calibration every file is read through: the packaged CCD\n"
+                "and CMOS tables, or a saved snapshot folder"
+            )
+        return (
+            f"Reading every file through calibration snapshot {override.snapshot_id}\n"
+            f"— a {override.camera} calibration, so the camera is fixed to "
+            f"{override.camera}"
+        )
+
+    def _camera_button(self, camera):
+        return getattr(self, "Camera" + camera)
+
+    def _on_calibration_selected(self, index):
+        """Act on the operator's pick: packaged set, known snapshot, or browse."""
+        if self._selector_syncing:
+            return
+
+        data = self.calibration_select.itemData(index)
+        if not data:
+            return
+        kind, key = data
+
+        if not self.calibrations_settled():
+            # The combo is greyed while calibrations load, so this is the
+            # belt to that brace: a switch is refused, said, and undone rather
+            # than dropped onto half-built DIMW/DIMO.
+            self.statusBar().showMessage(
+                "Calibrations are still loading — the calibration selector is "
+                "not available yet."
+            )
+            self._sync_calibration_selector()
+            return
+
+        if kind == CALIBRATION_BROWSE:
+            self._browse_calibration_snapshot()
+            return
+
+        if kind == CALIBRATION_PACKAGED:
+            self._wear_packaged_calibration(key)
+            return
+
+        if kind == CALIBRATION_SNAPSHOT:
+            if (
+                self.calibration_override is not None
+                and self.calibration_override.snapshot_id == key
+            ):
+                return
+            for override in self.recent_snapshots:
+                if override.snapshot_id == key:
+                    self._rebase_calibration(override)
+                    return
+
+    def _browse_calibration_snapshot(self):
+        """Ask for a snapshot folder and put it on, or leave everything as it is."""
+        override = self.calibration_override
+        start = Path(override.folder).parent if override is not None else self.data_path
+        folder = choose_snapshot_folder(self, start)
+        if not folder:
+            # Cancelled: the combo had already moved to the browse entry, so put
+            # it back on what the window is still wearing.
+            self._sync_calibration_selector()
+            return
+        self.wear_snapshot_folder(folder)
+
+    def wear_snapshot_folder(self, folder):
+        """Read every file through this snapshot from now on; refuse and stay put if it is not one.
+
+        The same resolver the ``--calibration`` flag uses, so a folder refused
+        at launch is refused here for the same stated reason — the difference
+        being that a window already exists, and it keeps the calibration it has
+        rather than being stranded uncalibrated.
+        """
+        try:
+            override = load_calibration_override(folder)
+        except CalibrationOverrideError as err:
+            self.statusBar().showMessage(str(err))
+            self._sync_calibration_selector()
+            return False
+
+        self._rebase_calibration(override)
+        return True
+
+    def _wear_packaged_calibration(self, camera):
+        """Go back to the packaged pair, with this camera selected."""
+        if self.calibration_override is None:
+            # Already packaged: the entry means exactly what the radio means.
+            self._camera_button(camera).setChecked(True)
+            return
+        self._rebase_calibration(None, camera=camera)
+
+    def _rebase_calibration(self, override, camera=None):
+        """Put on a different calibration live, through the ordinary load path.
+
+        Nothing here loads a table itself: ``prepare_calibration`` rebuilds the
+        set and starts the same ``LoadCalibrationsThread`` startup starts, so
+        ``calibrations_settled`` goes false for the duration and every guard
+        F12 built — greyed controls, the queued image, the bounded retry —
+        applies to a mid-session switch exactly as it applies to a launch.
+        """
+        open_file = getattr(self, "filename", None)
+
+        self.calibration_override = override
+        self.camera_names = tuple(CAMERA_NAMES)
+        self._release_camera_buttons()
+        if override is None:
+            self.setWindowTitle(self.base_title)
+
+        self.prepare_calibration()
+
+        if override is None and camera is not None:
+            self._camera_button(camera).setChecked(True)
+
+        if open_file:
+            # The frame on screen was extracted with the calibration just taken
+            # off.  Hand it to the same queue a load issued during startup uses,
+            # and it is re-read through the new one the moment that one is up.
+            self.pending_image = open_file
+
+        self._sync_calibration_selector()
+
+    def _release_camera_buttons(self):
+        """Give the camera buttons their ordinary meaning back."""
+        for button, tooltip in zip(self.cameras, self.camera_tooltips):
+            button.setEnabled(True)
+            button.setToolTip(tooltip)
+
+    def _remember_snapshot(self, override):
+        """Keep this session's snapshot folders one click away in the combo."""
+        known = [item.snapshot_id for item in self.recent_snapshots]
+        if override.snapshot_id in known:
+            return
+        self.recent_snapshots.append(override)
+        self._populate_calibration_selector()
+
     def _wear_calibration_override(self):
         """Put the snapshot's tables where the packaged ones would have gone.
 
@@ -267,6 +515,7 @@ class EchelleSpectraGUI(QMainWindow, window_layout.Ui_MainWindow):
         """
         override = self.calibration_override
         self.camera_names = (override.camera,)
+        self._remember_snapshot(override)
 
         calibration = ech.Calibrations(str(override.folder))
         calibration.name = override.camera
@@ -283,10 +532,12 @@ class EchelleSpectraGUI(QMainWindow, window_layout.Ui_MainWindow):
             button.setEnabled(False)
             button.setToolTip(
                 f"Calibration snapshot {override.snapshot_id} is a {override.camera} "
-                "calibration, so the camera is fixed for this session"
+                "calibration, so the camera is fixed while it is worn"
             )
 
-        self.setWindowTitle("{} — {}".format(self.windowTitle(), override.snapshot_id))
+        # Built from the bare title, never from the current one: switching
+        # snapshots twice must replace the name, not accumulate names.
+        self.setWindowTitle("{} — {}".format(self.base_title, override.snapshot_id))
 
     def active_calibrations(self):
         """The calibrations this window actually wears, in camera order"""
@@ -442,9 +693,20 @@ class EchelleSpectraGUI(QMainWindow, window_layout.Ui_MainWindow):
                 + "; ".join(f"{name}: {self.calibration_errors[name]}" for name in broken)
             )
         else:
-            self.statusBar().showMessage("Calibration files loaded. Ready to work.")
+            self.statusBar().showMessage(self._calibration_ready_message())
 
         self._load_pending_image()
+
+    def _calibration_ready_message(self):
+        """Say what is now worn, and — for a snapshot — why the camera is fixed"""
+        override = self.calibration_override
+        if override is None:
+            return "Calibration files loaded. Ready to work."
+        return (
+            f"Calibration snapshot {override.snapshot_id} loaded — a "
+            f"{override.camera} calibration, so the camera is fixed to "
+            f"{override.camera}."
+        )
 
     def _load_pending_image(self):
         """Run a load that arrived while the calibrations were still loading"""

@@ -94,6 +94,20 @@ class Ui_MainWindow(object):
         self.check_autoscale.setToolTip(msg)
         self.check_autoscale.setChecked(True)
 
+        # Which calibration every file is read through.  The window fills the
+        # entries: the packaged sets the radio buttons below already stand for,
+        # any snapshot folder opened this session, and the browse entry.  Built
+        # empty here so the vocabulary lives with the logic that acts on it.
+        self.lbl_calibration = QtWidgets.QLabel("Calibration:")
+        self.calibration_select = QtWidgets.QComboBox()
+        self.calibration_select.setObjectName("calibration_select")
+        # A snapshot id is longer than the column is wide; ask for a readable
+        # slice of it rather than letting the combo stretch the control column.
+        self.calibration_select.setMinimumContentsLength(12)
+        self.calibration_select.setSizeAdjustPolicy(
+            QtWidgets.QComboBox.AdjustToMinimumContentsLength
+        )
+
         self.CameraCCD = QtWidgets.QRadioButton()
         self.CameraCCD.setText("CCD")
         self.CameraCCD.setToolTip("Calibration for CCD camera selected")
@@ -148,20 +162,22 @@ class Ui_MainWindow(object):
         self.w3.addWidget(self.fit_lines_bx, 6, 0)
         self.w3.addWidget(self.save_lines_bx, 6, 1)
         self.w3.addWidget(self.overwrite, 7, 0, 1, 2)
-        self.w3.addWidget(self.CameraCCD, 8, 0)
-        self.w3.addWidget(self.CameraCMOS, 8, 1)
-        self.w3.addWidget(self.progress_bands, 9, 0, 1, 2)
-        self.w3.addWidget(self.coursor_bw, 10, 0, 1, 2)
+        self.w3.addWidget(self.lbl_calibration, 8, 0)
+        self.w3.addWidget(self.calibration_select, 8, 1)
+        self.w3.addWidget(self.CameraCCD, 9, 0)
+        self.w3.addWidget(self.CameraCMOS, 9, 1)
+        self.w3.addWidget(self.progress_bands, 10, 0, 1, 2)
+        self.w3.addWidget(self.coursor_bw, 11, 0, 1, 2)
 
         self.btn_save_cube = QtWidgets.QPushButton("Save SpectroCube")
         self.btn_save_cube.setToolTip(
             "Save current spectrum as a SpectroCube NetCDF (.nc) file\n"
             "(uses the currently selected units)"
         )
-        self.w3.addWidget(self.btn_save_cube, 11, 0, 1, 2)
+        self.w3.addWidget(self.btn_save_cube, 12, 0, 1, 2)
 
         self.line_overlay_label = QtWidgets.QLabel("Known-line overlays:")
-        self.w3.addWidget(self.line_overlay_label, 12, 0, 1, 2)
+        self.w3.addWidget(self.line_overlay_label, 13, 0, 1, 2)
         overlay_labels = {
             "balmer": "Balmer",
             "fulcher": "Fulcher H2",
@@ -181,7 +197,7 @@ class Ui_MainWindow(object):
                 "the order the stitched spectrum reads it from, dashed on the twin"
             )
             self.line_overlay_checks[family] = checkbox
-            self.w3.addWidget(checkbox, 13 + index // 2, index % 2)
+            self.w3.addWidget(checkbox, 14 + index // 2, index % 2)
 
         # The order pattern itself, the same traces the calibration bench draws
         # on its detector view.  Independent of the line boxes: it says where
@@ -192,7 +208,7 @@ class Ui_MainWindow(object):
             "Draw the loaded calibration's order pattern over the detector\n"
             "image, one trace per diffraction order, as on the calibration bench"
         )
-        self.w3.addWidget(self.order_trace_check, 16, 0)
+        self.w3.addWidget(self.order_trace_check, 17, 0)
 
         # The same calibration read forwards: not "where is this line" but
         # "what is under my pointer".  Off by default, and off costs nothing —
@@ -206,7 +222,7 @@ class Ui_MainWindow(object):
             "trace read it from the sensor, and the status bar names the\n"
             "order and wavelength"
         )
-        self.w3.addWidget(self.cursor_link_check, 16, 1)
+        self.w3.addWidget(self.cursor_link_check, 17, 1)
 
         self.controls_open = [
             self.btn_open,
@@ -214,6 +230,9 @@ class Ui_MainWindow(object):
             self.last_shot_btn,
             self.show_btn,
             self.overwrite,
+            # Greyed while calibrations load, exactly like the load buttons: a
+            # switch accepted mid-reload is the ping-pong race F12 closed.
+            self.calibration_select,
         ]
 
         self.d3.addWidget(self.w3)

@@ -750,6 +750,9 @@ def test_launching_without_the_flag_is_the_window_it_has_always_been(qt_app, win
     assert window.camera_names == ("CCD", "CMOS")
     assert window.CameraCCD.isEnabled()
     assert window.CameraCMOS.isEnabled()
+    # The selector is the flag's in-GUI form, so it starts where the flagless
+    # launch starts: on the packaged set the checked camera stands for.
+    assert window.calibration_select.currentText() == "Packaged CMOS"
 
     spy = LoadSpy(window)
     _load(qt_app, window, "5101_cmos.SIF", spy, attempts=1)
@@ -878,3 +881,264 @@ def test_a_snapshot_missing_a_table_names_the_missing_table(tmp_path):
     message = str(err.value)
     assert "did not validate" in message
     assert "wavelength.txt" in message
+
+
+# ---------------------------------------------------------------------------
+# The calibration selector: the same thing, chosen in the window
+# ---------------------------------------------------------------------------
+
+
+def _pick(select, label: str) -> None:
+    """Choose one calibration entry the way the operator chooses it."""
+
+    index = select.findText(label)
+    assert index >= 0, f"no calibration entry named {label!r}"
+    assert index != select.currentIndex(), f"{label!r} was already chosen"
+    select.setCurrentIndex(index)
+
+
+def _entry_labels(select) -> list:
+    return [select.itemText(index) for index in range(select.count())]
+
+
+def _balmer_marks(win) -> dict:
+    """Where the Balmer overlay currently puts each line on the detector image."""
+
+    marks = win.detector_line_overlays.primary_marks("balmer")
+    assert marks
+    return {round(mark.wavelength_nm, 3): mark.column for mark in marks}
+
+
+def test_the_selector_names_the_packaged_calibration_the_window_wears(qt_app, window):
+    """It displays what is worn — including when the flip-retry moves it."""
+
+    _settle_calibrations(qt_app, window)
+    select = window.calibration_select
+
+    assert _entry_labels(select) == ["Packaged CCD", "Packaged CMOS", gui.BROWSE_LABEL]
+    assert select.currentText() == "Packaged CMOS"
+    assert select.isEnabled()
+    assert window.recent_snapshots == []
+
+    # A CCD frame flips the camera, which changes what the file is being read
+    # through; a selector that kept saying CMOS would be lying.
+    spy = LoadSpy(window)
+    _load(qt_app, window, "5201_ccd.SIF", spy, attempts=2)
+    assert window.CameraCCD.isChecked()
+    assert select.currentText() == "Packaged CCD"
+
+    # And under the packaged pair the packaged entries mean the radio buttons.
+    _pick(select, "Packaged CMOS")
+    assert window.CameraCMOS.isChecked()
+    assert window.calibration_override is None
+    assert window.windowTitle() == "Echelle viewer"
+
+
+def test_picking_a_snapshot_folder_in_the_window_rebases_the_open_frame(
+    qt_app, window, tmp_path, monkeypatch
+):
+    """The owner's ask: open the data, then change whose eyes it is read with.
+
+    Nothing about the flag's outcome may depend on having used the flag — the
+    live pick must move the overlays, the wavelength axis, the camera, and the
+    title exactly as a ``--calibration`` launch does, and it must move the frame
+    that is already on screen.
+    """
+
+    _settle_calibrations(qt_app, window)
+    spy = LoadSpy(window)
+    _load(qt_app, window, "5202_cmos.SIF", spy, attempts=1)
+    window.line_overlay_checks["balmer"].setChecked(True)
+    packaged = _balmer_marks(window)
+    packaged_red_edge = float(np.nanmax(window.spectra.wavelength))
+
+    root = _write_snapshot(tmp_path / "picked", pixel_shift=PIXEL_SHIFT)
+    monkeypatch.setattr(gui, "choose_snapshot_folder", lambda parent, start: str(root))
+
+    _pick(window.calibration_select, gui.BROWSE_LABEL)
+
+    # The switch rides the ordinary calibration threads, so the whole F12
+    # startup contract applies to it: busy controls, and the open frame held.
+    assert not window.calibrations_settled()
+    assert not window.calibration_select.isEnabled()
+    assert window.pending_image == window.filename
+
+    assert _pump(qt_app, window.calibrations_settled), "the snapshot never loaded"
+    assert window.calibration_errors == {"CMOS": ""}
+    assert _pump(qt_app, lambda: len(spy.outcomes) >= 2), "the open frame was never re-read"
+    assert spy.statuses == [gui.IMAGE_LOADED, gui.IMAGE_LOADED]
+
+    assert window.calibration_override.snapshot_id == SNAPSHOT_ID
+    assert window.windowTitle() == f"Echelle viewer — {SNAPSHOT_ID}"
+    assert window.calibration_select.currentText() == SNAPSHOT_ID
+    assert SNAPSHOT_ID in window.image_info_bw.toPlainText()
+    assert Path(window.cb_CMOS.folder).name == SNAPSHOT_ID
+
+    # The detector mode followed the snapshot, and both surfaces say why.
+    assert window.camera_names == ("CMOS",)
+    assert window.CameraCMOS.isChecked()
+    assert not window.CameraCCD.isEnabled()
+    assert not window.CameraCMOS.isEnabled()
+    assert "fixed to CMOS" in window.calibration_select.toolTip()
+    assert "fixed while it is worn" in window.CameraCMOS.toolTip()
+
+    # And every reader of the loaded calibration moved the snapshot's eighteen
+    # pixels with it — the image overlay …
+    moved = _balmer_marks(window)
+    shared = sorted(set(packaged) & set(moved))
+    assert shared, "the two calibrations agree about no line at all"
+    for wavelength in shared:
+        assert moved[wavelength] == pytest.approx(
+            packaged[wavelength] + PIXEL_SHIFT, abs=0.5
+        )
+
+    # … and the spectrum's own wavelength axis.
+    per_pixel_nm = ORDER_SPAN_NM / CMOS_SHAPE[0]
+    shifted_red_edge = float(np.nanmax(window.spectra.wavelength))
+    assert shifted_red_edge - packaged_red_edge == pytest.approx(
+        PIXEL_SHIFT * per_pixel_nm, abs=0.1
+    )
+
+
+def test_switching_back_to_a_packaged_calibration_restores_the_radios(
+    qt_app, window, tmp_path, monkeypatch
+):
+    """Off is as live as on: both packaged sets back, and the flip-retry with them."""
+
+    _settle_calibrations(qt_app, window)
+    root = _write_snapshot(tmp_path / "worn")
+    monkeypatch.setattr(gui, "choose_snapshot_folder", lambda parent, start: str(root))
+
+    _pick(window.calibration_select, gui.BROWSE_LABEL)
+    assert _pump(qt_app, window.calibrations_settled), "the snapshot never loaded"
+    assert window.calibration_override is not None
+    assert window.cb_CCD is None
+
+    _pick(window.calibration_select, "Packaged CCD")
+    assert _pump(qt_app, window.calibrations_settled), "the packaged pair never came back"
+
+    assert window.calibration_override is None
+    assert window.camera_names == ("CCD", "CMOS")
+    assert window.calibration_errors == {"CCD": "", "CMOS": ""}
+    assert window.windowTitle() == "Echelle viewer"
+    assert window.CameraCCD.isEnabled()
+    assert window.CameraCMOS.isEnabled()
+    assert window.CameraCCD.isChecked()
+    assert window.CameraCCD.toolTip() == "Calibration for CCD camera selected"
+    assert window.calibration_select.currentText() == "Packaged CCD"
+    assert "calibration:" not in window.image_info_bw.toPlainText()
+
+    # The snapshot stays one click away for the rest of the session — and only
+    # for the session: nothing about it is written down.
+    assert _entry_labels(window.calibration_select) == [
+        "Packaged CCD",
+        "Packaged CMOS",
+        SNAPSHOT_ID,
+        gui.BROWSE_LABEL,
+    ]
+
+    # The radios mean what they always meant: a CMOS frame costs one flip.
+    spy = LoadSpy(window)
+    _load(qt_app, window, "5203_cmos.SIF", spy, attempts=2)
+    assert spy.statuses == [gui.IMAGE_DIMENSION_MISMATCH, gui.IMAGE_LOADED]
+    assert window.CameraCMOS.isChecked()
+    assert window.calibration_select.currentText() == "Packaged CMOS"
+
+
+def test_a_refused_folder_leaves_the_viewer_wearing_what_it_wore(
+    qt_app, window, tmp_path, monkeypatch
+):
+    """A failed pick must never strand the window uncalibrated, and must say why.
+
+    The flag refuses before a window exists; the selector refuses with one in
+    front of it, so the answer is the same sentence and the calibration already
+    on is the calibration still on.
+    """
+
+    _settle_calibrations(qt_app, window)
+
+    plain = tmp_path / "not_a_snapshot"
+    plain.mkdir()
+    monkeypatch.setattr(gui, "choose_snapshot_folder", lambda parent, start: str(plain))
+    _pick(window.calibration_select, gui.BROWSE_LABEL)
+
+    with pytest.raises(gui.CalibrationOverrideError) as bare:
+        gui.load_calibration_override(plain)
+    assert window.statusBar().currentMessage() == str(bare.value)
+    assert "is not a calibration snapshot" in window.statusBar().currentMessage()
+
+    # A snapshot that lost a table is refused the same way.
+    gutted = _write_snapshot(tmp_path / "gutted", snapshot_id="20190315_cmos")
+    (gutted / "wavelength.txt").unlink()
+    monkeypatch.setattr(gui, "choose_snapshot_folder", lambda parent, start: str(gutted))
+    _pick(window.calibration_select, gui.BROWSE_LABEL)
+
+    with pytest.raises(gui.CalibrationOverrideError) as missing:
+        gui.load_calibration_override(gutted)
+    assert window.statusBar().currentMessage() == str(missing.value)
+    assert "wavelength.txt" in window.statusBar().currentMessage()
+
+    # Nothing was taken off, nothing was half put on, nothing was remembered.
+    assert window.calibration_override is None
+    assert window.calibrations_settled()
+    assert window.calibration_errors == {"CCD": "", "CMOS": ""}
+    assert window.windowTitle() == "Echelle viewer"
+    assert window.calibration_select.currentText() == "Packaged CMOS"
+    assert window.calibration_select.isEnabled()
+    assert _entry_labels(window.calibration_select) == [
+        "Packaged CCD",
+        "Packaged CMOS",
+        gui.BROWSE_LABEL,
+    ]
+
+    # And the viewer is still a viewer.
+    spy = LoadSpy(window)
+    _load(qt_app, window, "5204_cmos.SIF", spy, attempts=1)
+    assert spy.statuses == [gui.IMAGE_LOADED]
+
+
+def test_a_load_during_a_calibration_switch_is_queued_never_raced(
+    qt_app, window, tmp_path, monkeypatch
+):
+    """F12's guard holds across a switch, because the switch reuses it."""
+
+    _settle_calibrations(qt_app, window)
+    spy = LoadSpy(window)
+    _load(qt_app, window, "5205_cmos.SIF", spy, attempts=1)
+
+    root = _write_snapshot(tmp_path / "midswitch")
+    monkeypatch.setattr(gui, "choose_snapshot_folder", lambda parent, start: str(root))
+    _pick(window.calibration_select, gui.BROWSE_LABEL)
+
+    # Mid-switch the calibrations are in the air again, so everything that
+    # could start a load against half-built DIMW/DIMO is visibly dead.
+    assert not window.calibrations_settled()
+    assert not window.btn_open.isEnabled()
+    assert not window.show_btn.isEnabled()
+    assert not window.calibration_select.isEnabled()
+    assert not window.acceptDrops()
+
+    # A load issued anyway is queued against the calibration coming up.
+    window.filename = str(Path(window.data_path) / "5206_cmos.SIF")
+    window.load_image()
+    assert window.pending_image == window.filename
+    assert len(spy.outcomes) == 1
+
+    # And a second switch attempted mid-switch is refused out loud rather than
+    # stacked on top of the threads already running.
+    _pick(window.calibration_select, "Packaged CCD")
+    assert "still loading" in window.statusBar().currentMessage()
+    assert window.calibration_override.snapshot_id == SNAPSHOT_ID
+    assert window.calibration_select.currentText() == SNAPSHOT_ID
+
+    assert _pump(qt_app, window.calibrations_settled), "the snapshot never loaded"
+    assert _pump(qt_app, lambda: len(spy.outcomes) >= 2), "the queued load never ran"
+    # Give a ping-pong the room to prove itself before we conclude there is none.
+    _pump(qt_app, lambda: len(spy.outcomes) > 2, timeout=2.0)
+
+    assert spy.statuses == [gui.IMAGE_LOADED, gui.IMAGE_LOADED]
+    assert window.pending_image is None
+    assert Path(window.filename).name == "5206_cmos.SIF"
+    assert window.cameras_tried == ["CMOS"]
+    assert window.btn_open.isEnabled()
+    assert window.calibration_select.isEnabled()

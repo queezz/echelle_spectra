@@ -74,6 +74,11 @@ The folder is a calibration snapshot — the one holding `snapshot.toml` next to
 `pattern.txt` and `wavelength.txt`. Snapshots are made by the bench and listed
 by `echelle status`; see [Calibration snapshots](calibration-snapshots.md).
 
+The **Calibration** selector in the control column is the in-GUI form of this —
+it switches between the packaged CCD and CMOS tables and any snapshot folder you
+browse to, live, without reopening the file — and the flag simply preconfigures
+it at launch.
+
 What changes:
 
 - The title bar names the snapshot: **Echelle viewer — 20190314_cmos**, and the
