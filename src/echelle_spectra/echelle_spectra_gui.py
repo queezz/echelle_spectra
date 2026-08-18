@@ -56,12 +56,23 @@ def choose_snapshot_folder(parent, start_dir):
 
     Its own function so the in-GUI selector has one seam a test can stand in
     for: an off-screen run must never put a real modal dialog on the screen.
+
+    Qt's own dialog rather than the native picker, files visible but not
+    selectable: a snapshot folder is recognised by the snapshot.toml inside
+    it, and the native folder picker hides files entirely, forcing the
+    operator to open the same folder twice (owner, 2026-08-18: "we should
+    show contents, but make them gray").
     """
-    return QtWidgets.QFileDialog.getExistingDirectory(
-        parent,
-        "Open files through a saved calibration snapshot",
-        str(start_dir),
+    dialog = QtWidgets.QFileDialog(
+        parent, "Open files through a saved calibration snapshot", str(start_dir)
     )
+    dialog.setFileMode(QtWidgets.QFileDialog.Directory)
+    dialog.setOption(QtWidgets.QFileDialog.ShowDirsOnly, False)
+    dialog.setOption(QtWidgets.QFileDialog.DontUseNativeDialog, True)
+    if dialog.exec_() != QtWidgets.QDialog.Accepted:
+        return ""
+    chosen = dialog.selectedFiles()
+    return chosen[0] if chosen else ""
 
 
 class CalibrationOverrideError(ValueError):
