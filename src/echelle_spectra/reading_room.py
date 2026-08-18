@@ -21,7 +21,11 @@ law (fleet's ``WEBUI.md`` and ``WEBUI-COOKBOOK.md``):
 * every jump target's id starts with ``sec-`` so one ``scroll-margin-top`` rule
   covers all of them, and the scroll-spy query is scoped to the content column;
 * command rows lead with plain words and keep the literal command behind a
-  toggle, in both shell shapes, with the copy button carrying the full payload;
+  toggle, in both shell shapes, with the copy button carrying the full payload,
+  and they are read in the order the campaign runs them;
+* the composer asks two things -- the folder of SIF shots and the calibration
+  -- because those are the only two a person holds that no file here records;
+  every other value is derived from them and folded away, editable;
 * empty, unmeasured, unreachable and judged states are rendered distinctly, and
   a verdict word this page does not know is rendered as unrecognized rather
   than dressed as one it does.
@@ -75,9 +79,9 @@ def _e(value: Any) -> str:
 def _href(target: str) -> str:
     """Return a link target this offline page may keep.
 
-    Anything carrying a scheme is dropped to a fragment: the page contract is
-    that it reaches nothing outside itself, so a live URL would be a promise
-    the page cannot keep.
+    Anything carrying a scheme is dropped to a fragment: a rendered document's
+    own outbound link is a promise about a machine this build never saw, and
+    the page's one address is written by the page itself, not by a document.
     """
 
     cleaned = target.strip()
@@ -323,6 +327,7 @@ PLAN_TEMPLATE = """# Composed by the Echelle reading room. Nothing here has been
 # Save this as {{plan}} beside the campaign, read it once, then paste the
 # process command below. Relative paths resolve against this file's folder.
 # The registry selects the epoch; for these shots that is {{epoch}}.
+# Discovery walks input_dir recursively; calibration folders are left out.
 
 [plan]
 input_dir = "{{input}}"
@@ -334,46 +339,70 @@ drift_verdict = "{{verdict}}"
 central_index = "{{catalog}}"
 """
 
+#: The sequence in campaign order: sample, check the alignment, then convert in
+#: bulk.  The order the rows are read in is the order the work runs in, and the
+#: bench stays after them as the calibration aside rather than a fourth step.
 COMMAND_TEMPLATES = (
     {
-        "id": "cmd-process",
-        "title": "Process this drive in bulk",
+        "id": "cmd-sample",
+        "title": "1. Sample this data folder",
         "meaning": (
-            "Convert every SIF under the input folder into cubes. The plan file supplies "
-            "the input, the output, the registry, the snapshot root and the accepted "
-            "drift verdict, so the run is authorized by evidence you have already read, "
-            "and one resumable receipt records which evidence that was."
+            "Convert a sample of the folder's SIF shots into cubes under the registry, so "
+            "there is something to measure the wavelength alignment on. The sample size is "
+            "derived from what the folder holds, and every cube it writes is marked an "
+            "unverified sample."
+        ),
+        "powershell": (
+            'echelle process "{{input}}" -o "{{output}}" --registry "{{registry}}" '
+            '--calibrations "{{calibrations}}" --sample auto --volume-label "{{label}}" '
+            '--central-index "{{catalog}}"'
+        ),
+        "posix": (
+            'echelle process "{{input}}" -o "{{output}}" --registry "{{registry}}" '
+            '--calibrations "{{calibrations}}" --sample auto --volume-label "{{label}}" '
+            '--central-index "{{catalog}}"'
+        ),
+    },
+    {
+        "id": "cmd-audit",
+        "title": "2. Check the wavelength alignment",
+        "meaning": (
+            "We do not trust the calibration on this data, we check it: measure Balmer and "
+            "Fulcher centroids on the cubes just sampled and write one immutable verdict "
+            "file. The name is the next free one, so an audit never overwrites evidence "
+            "already on the drive."
+        ),
+        "powershell": (
+            'echelle drift audit "{{output}}" --catalog "{{catalog}}" '
+            '--calibrations "{{calibrations}}" -o "{{verdict}}"'
+        ),
+        "posix": (
+            'echelle drift audit "{{output}}" --catalog "{{catalog}}" '
+            '--calibrations "{{calibrations}}" -o "{{verdict}}"'
+        ),
+    },
+    {
+        "id": "cmd-process",
+        "title": "3. Generate cubes from the whole folder",
+        "meaning": (
+            "The product. This step is unlocked by the verdict the audit above wrote: a "
+            "registry-backed bulk run is refused until that evidence exists, and the plan "
+            "file names it beside the input, the output, the registry and the snapshot "
+            "root, so one resumable receipt records what authorized the run."
         ),
         "powershell": 'echelle process --plan "{{plan}}"',
         "posix": 'echelle process --plan "{{plan}}"',
     },
     {
-        "id": "cmd-audit",
-        "title": "Audit this epoch for drift",
-        "meaning": (
-            "Measure Balmer and Fulcher centroids on a sample of the cubes already on "
-            "this drive and write one immutable verdict file. A registry-backed bulk run "
-            "is refused until this file exists, and the file is never overwritten."
-        ),
-        "powershell": (
-            'echelle drift audit "{{cubes}}" --every {{every}} --catalog "{{catalog}}" '
-            '--calibrations "{{calibrations}}" -o "{{verdict}}"'
-        ),
-        "posix": (
-            'echelle drift audit "{{cubes}}" --every {{every}} --catalog "{{catalog}}" '
-            '--calibrations "{{calibrations}}" -o "{{verdict}}"'
-        ),
-    },
-    {
         "id": "cmd-bench",
-        "title": "Check the calibration by eye",
+        "title": "Calibration aside — check the snapshot by eye",
         "meaning": (
-            "Open the live calibration bench on the calibration folder and look at the "
+            "Open the live calibration bench on the snapshot root and look at the "
             "current epoch yourself before trusting any verdict this page renders. "
             "The bench reads; it does not change a saved snapshot."
         ),
-        "powershell": 'echelle-calib "{{bench}}"',
-        "posix": 'echelle-calib "{{bench}}"',
+        "powershell": 'echelle-calib "{{calibrations}}"',
+        "posix": 'echelle-calib "{{calibrations}}"',
     },
 )
 
@@ -398,39 +427,73 @@ def _posix(path: str | Path) -> str:
     return str(path).replace("\\", "/")
 
 
+#: The data folder is the one thing no file on this machine records, so it is
+#: the one thing the page asks for.  Until it is answered every value derived
+#: from it renders as this marker: visibly unfilled, never an invented path and
+#: never a drive letter this build has not seen.
+UNFILLED_FOLDER = "<data folder>"
+
+_EVIDENCE_NUMBER = re.compile(r"drift-evidence-(\d+)\.json$", re.IGNORECASE)
+
+
+def _next_evidence_name(drift: list[dict[str, Any]]) -> str:
+    """Name the evidence file the next audit writes, never one already read.
+
+    Drift evidence is immutable: an audit refuses to overwrite one.  So the
+    composed command names the next free number rather than the file this build
+    was handed -- ``001`` when this build knows of none.
+    """
+
+    highest = 0
+    for entry in drift:
+        match = _EVIDENCE_NUMBER.search(_posix(entry["path"]))
+        if match is not None:
+            highest = max(highest, int(match.group(1)))
+    return f"drift-evidence-{highest + 1:03d}.json"
+
+
+def _derived_from_folder(folder: str, evidence_name: str) -> dict[str, str]:
+    """Everything the data folder decides, derived in one place.
+
+    ``derivedFrom`` in the page's own JavaScript is the other half of this one
+    rule; the two must answer the same for the same folder, which is why the
+    rule is written once here and mirrored there rather than spelled twice.
+    """
+
+    marked = folder.strip() or UNFILLED_FOLDER
+    trimmed = _posix(marked).rstrip("/")
+    return {
+        "input": marked,
+        # Cubes and catalogs belong on the drive beside their own data.
+        "output": marked,
+        "cubes": marked,
+        "label": trimmed.rsplit("/", 1)[-1] or marked,
+        "verdict": f"{trimmed}/{evidence_name}",
+    }
+
+
 def _composer_values(
-    sources: list[dict[str, Any]],
     *,
     catalog_path: str | Path,
     registry: dict[str, Any],
-    drift: list[dict[str, Any]],
+    evidence_name: str,
     epochs: list[str],
 ) -> dict[str, str]:
-    """Pre-fill the composer from what the page actually carries."""
+    """Pre-fill the composer from what the page actually carries.
 
-    primary = next(
-        (source for source in sources if source.get("available") and source.get("cubes")),
-        sources[0] if sources else {},
-    )
-    cubes = _posix(primary.get("drive_root", "")) or "cubes"
-    calibrations = registry.get("calibrations") or "calibrations"
+    Two answers compose a campaign -- the data folder and the calibration --
+    and every value here is derived from those two plus this build's own
+    inputs.  Nothing is baked in: no example drive ships with the page.
+    """
+
     return {
-        # The raw SIF folder is the one thing neither the catalog nor the
-        # registry records, so it is the one placeholder here and says so.
-        "input": "shots",
-        "output": cubes,
-        "cubes": cubes,
+        **_derived_from_folder("", evidence_name),
         "pattern": "*.SIF",
         "registry": registry.get("path") or "calibration_registry.toml",
-        "calibrations": calibrations,
-        "verdict": (drift[0]["path"] if drift else "drift-evidence.json"),
+        "calibrations": registry.get("calibrations") or "calibrations",
         "catalog": _posix(catalog_path),
         "plan": "campaign-plan.toml",
-        "every": "20",
         "epoch": epochs[0] if epochs else "unassigned",
-        "bench": calibrations,
-        "sample": "20",
-        "label": str(primary.get("volume_label", "")) or "unknown",
     }
 
 
@@ -468,23 +531,24 @@ STEP_COMMANDS = {
     "bench": (
         "Open the live bench on the snapshot root and fit sphere plus every lamp you "
         "measured; the bench writes the snapshot the registry then names.",
-        'echelle-calib "{{bench}}"',
+        'echelle-calib "{{calibrations}}"',
     ),
     "connect": (
         "Catalog this drive where it is plugged in now, so the index finds its cubes again.",
         'echelle catalog build "{{cubes}}" --volume-label "{{label}}"',
     ),
     "sample": (
-        "Process the first {{sample}} files as an unverified sample — the legal first "
-        "registry run, and the cubes the drift audit then measures.",
+        "Process a sample of the data folder as an unverified sample — the legal first "
+        "registry run, and the cubes the drift audit then measures. The count is derived "
+        "from what the folder holds.",
         'echelle process "{{input}}" -o "{{output}}" --registry "{{registry}}" '
-        '--calibrations "{{calibrations}}" --sample {{sample}} --volume-label "{{label}}" '
+        '--calibrations "{{calibrations}}" --sample auto --volume-label "{{label}}" '
         '--central-index "{{catalog}}"',
     ),
     "audit": (
         "Measure Balmer and Fulcher centroids on this drive's sampled cubes and write one "
-        "immutable verdict file. The bulk run is refused until it exists.",
-        'echelle drift audit "{{cubes}}" --every {{every}} --catalog "{{catalog}}" '
+        "immutable verdict file under the next free name.",
+        'echelle drift audit "{{cubes}}" --catalog "{{catalog}}" '
         '--calibrations "{{calibrations}}" -o "{{verdict}}"',
     ),
     "audit-again": (
@@ -687,7 +751,7 @@ def _evidence_for_drive(
 
 
 def _drive_values(
-    base: dict[str, str], source: dict[str, Any], *, evidence: dict[str, Any] | None
+    base: dict[str, str], source: dict[str, Any], *, evidence_name: str
 ) -> dict[str, str]:
     """Fill the command templates for exactly one drive."""
 
@@ -695,14 +759,15 @@ def _drive_values(
     label = str(source.get("volume_label", "unknown"))
     cubes = [str(cube.get("path", "")) for cube in source.get("cubes", [])]
     first = cubes[0] if cubes else ""
-    slug = _SLUG.sub("-", label.lower()).strip("-") or "drive"
     values = dict(base)
     values.update(
         {
             "output": root,
             "cubes": root,
             "label": label,
-            "verdict": evidence["path"] if evidence else f"drift-{slug}.json",
+            # An audit writes; it never overwrites the evidence it was handed,
+            # so the name here is the next free one on this drive.
+            "verdict": _posix(Path(root) / evidence_name),
             "drive_catalog": _posix(
                 Path(root) / (str(source.get("catalog_path") or "echelle-catalog.json"))
             ),
@@ -1078,15 +1143,34 @@ def _path_chip(value: Any) -> str:
     return f'<span class="chip path" title="{_e(text)}">{_e(shown)}</span>'
 
 
-def _drive_chips(source: dict[str, Any]) -> str:
-    """Facts only: the states, the counts, and one truncated path."""
+def _drive_verdict(source: dict[str, Any], drift: list[dict[str, Any]]) -> tuple[str, str]:
+    """Name this drive's wavelength-alignment verdict.
+
+    A drive no evidence measures is unmeasured, which is its own state and not
+    a quiet ``aligned``: nothing on this page turns silence into a pass.
+    """
+
+    evidence = _evidence_for_drive(source, drift)
+    if evidence is None:
+        return ("state-unmeasured", "alignment unmeasured")
+    return _verdict_state(evidence["evidence"].get("verdict"))
+
+
+def _drive_chips(source: dict[str, Any], drift: list[dict[str, Any]]) -> str:
+    """Facts only: the states, the counts, and one truncated path.
+
+    The wavelength-alignment verdict leads, because it is the one fact that
+    decides whether this drive's data may be converted at all.
+    """
 
     state = source_state(source)
     classes, label = _SOURCE_STATES[state]
     run = source.get("run") or {}
     counts = ", ".join(f"{value} {key}" for key, value in sorted((run.get("counts") or {}).items()))
     epochs = sorted({str(cube.get("snapshot_id") or "") for cube in source.get("cubes", [])} - {""})
+    verdict_class, verdict_label = _drive_verdict(source, drift)
     chips = [
+        _pill(f"{verdict_class} verdict-lead", verdict_label),
         _pill(classes, label),
         # A drive with no receipt has no gate to report; borrowing the pre-gate
         # word for it would claim a receipt that never existed.
@@ -1100,12 +1184,12 @@ def _drive_chips(source: dict[str, Any]) -> str:
     return f'<p class="chips">{"".join(chips)}</p>'
 
 
-def _source_cards(sources: list[dict[str, Any]]) -> str:
+def _source_cards(sources: list[dict[str, Any]], drift: list[dict[str, Any]]) -> str:
     cards = []
     for source in sources:
         classes, _ = _SOURCE_STATES[source_state(source)]
         run = source.get("run") or {}
-        lines = [_drive_chips(source)]
+        lines = [_drive_chips(source, drift)]
         if run.get("drive_warning"):
             lines.append(f'<p class="warn">{_e(run["drive_warning"])}</p>')
         cards.append(
@@ -1157,12 +1241,17 @@ def _flow(steps: list[dict[str, Any]], identifier: str, *, done_line: str) -> st
     return f'<ol class="flow">{boxes}</ol><div class="next">{detail}</div>'
 
 
-def _drive_row(source: dict[str, Any], steps: list[dict[str, Any]], position: int) -> str:
+def _drive_row(
+    source: dict[str, Any],
+    steps: list[dict[str, Any]],
+    position: int,
+    drift: list[dict[str, Any]],
+) -> str:
     return (
         f'<article class="drive-row" id="drive-{position}" '
         f'data-drive="{_e(source.get("volume_label", "unknown"))}">'
         f'<h3 class="drive-name">{_e(source.get("volume_label", "unknown"))}</h3>'
-        f"{_drive_chips(source)}"
+        f"{_drive_chips(source, drift)}"
         f'{_flow(steps, f"now-d{position}", done_line="This drive is done: cubes exist, catalogued and recalibratable.")}'
         "</article>"
     )
@@ -1496,11 +1585,22 @@ def _select(identifier: str, label: str, options: list[tuple[str, str]], *, firs
     )
 
 
-def _text_field(identifier: str, label: str, value: str, *, note: str = "") -> str:
+def _text_field(
+    identifier: str, label: str, value: str, *, note: str = "", placeholder: str = ""
+) -> str:
+    """One text control.
+
+    A field with nothing to fill carries a placeholder and no ``value`` at all:
+    a baked example path is a claim about a machine this build never saw.
+    """
+
     hint = f'<small class="muted">{_e(note)}</small>' if note else ""
+    attributes = f' value="{_e(value)}"' if value else ""
+    if placeholder:
+        attributes += f' placeholder="{_e(placeholder)}"'
     return (
         f'<label class="field"><span>{_e(label)}</span>'
-        f'<input type="text" id="{_e(identifier)}" value="{_e(value)}">{hint}</label>'
+        f'<input type="text" id="{_e(identifier)}"{attributes}>{hint}</label>'
     )
 
 
@@ -1525,36 +1625,63 @@ def _filter_card(rows: list[dict[str, Any]], sources: list[dict[str, Any]]) -> s
     return _card("Filter the catalog", body)
 
 
-def _composer_card(
-    values: dict[str, str], drives: list[dict[str, str]], epochs: list[str], verdicts: list[str]
-) -> str:
-    drive_options = "".join(
-        f'<option value="{_e(drive["root"])}">{_e(drive["label"])}</option>' for drive in drives
-    )
-    epoch_options = "".join(f'<option value="{_e(item)}">{_e(item)}</option>' for item in epochs)
-    verdict_options = "".join(f'<option value="{_e(item)}">{_e(item)}</option>' for item in verdicts)
+def _epoch_options(epochs: list[str], registry: dict[str, Any]) -> str:
+    """The calibrations this build can name — or the one honest reason it cannot.
+
+    The registry maps shots to one immutable snapshot by date, so choosing a
+    calibration here is choosing it "for a drive or dates" without saying so
+    twice.
+    """
+
+    if epochs:
+        return "".join(f'<option value="{_e(item)}">{_e(item)}</option>' for item in epochs)
+    stated = {
+        "not supplied": "no registry supplied to this build",
+        "unreadable": "registry unreadable — the commands name it unread",
+    }.get(str(registry.get("status")), "this registry names no epoch")
+    return f'<option value="">{_e(stated)}</option>'
+
+
+def _composer_card(values: dict[str, str], epochs: list[str], registry: dict[str, Any]) -> str:
+    """Two questions, and every answer they decide folded away behind them.
+
+    The data folder and the calibration are the only two facts a person holds
+    that this build cannot read off a file; everything else is derived from
+    them and stays editable in the fold for the run that needs an exception.
+    """
+
     body = (
-        '<p class="muted">Pre-filled from this catalog and registry; Compose rewrites text only.</p>'
+        '<p class="muted">Point at the shots and the calibration; the rest is derived.</p>'
         '<div class="fields">'
-        f'<label class="field"><span>Drive</span><select id="f-drive">{drive_options}</select></label>'
-        f'<label class="field"><span>Epoch</span><select id="f-epoch">{epoch_options}</select></label>'
-        f'<label class="field"><span>Drift verdict</span><select id="f-verdict">{verdict_options}'
-        "</select></label>"
         + _text_field(
             "f-input",
-            "Input folder (raw SIF)",
-            values["input"],
+            "Data folder (this drive's SIF shots)",
+            "",
+            placeholder="the folder holding this drive's SIF shots",
             note="Not recorded by any catalog or receipt — the one field this page cannot fill.",
         )
-        + _text_field("f-output", "Output folder (cubes)", values["output"])
+        + '<label class="field"><span>Calibration</span>'
+        f'<select id="f-epoch">{_epoch_options(epochs, registry)}</select></label>'
+        + "</div>"
+        '<details class="fold-group" id="composer-advanced">'
+        "<summary>Advanced — every derived value, editable</summary>"
+        '<div class="fields">'
+        + _text_field(
+            "f-output", "Cubes folder", "", placeholder="the data folder, unless you say otherwise"
+        )
+        + _text_field("f-label", "Volume label", "", placeholder="the data folder's own name")
+        + _text_field(
+            "f-verdict",
+            "Drift evidence to write",
+            "",
+            placeholder=f"{values['verdict'].rsplit('/', 1)[-1]} in the data folder",
+        )
         + _text_field("f-registry", "Registry", values["registry"])
         + _text_field("f-calibrations", "Snapshot root", values["calibrations"])
         + _text_field("f-catalog", "Merged catalog", values["catalog"])
         + _text_field("f-plan", "Plan file to save", values["plan"])
         + _text_field("f-pattern", "SIF pattern", values["pattern"])
-        + _text_field("f-every", "Audit every Nth cube", values["every"])
-        + _text_field("f-bench", "Bench folder", values["bench"])
-        + "</div>"
+        + "</div></details>"
         '<p class="actions"><button type="button" id="compose">Compose</button></p>'
     )
     return _card("Compose a plan and commands", body, classes="rail-card--growing")
@@ -1702,6 +1829,11 @@ def _verdict_legend_card() -> str:
                 "a judged verdict, never aligned: the sample could not carry one.",
             ),
             (
+                "state-unmeasured",
+                "alignment unmeasured",
+                "no evidence in this build measures that drive — never a quiet aligned.",
+            ),
+            (
                 "state-unrecognized",
                 "unrecognized",
                 "a word this page does not know, never dressed as one it does.",
@@ -1830,8 +1962,11 @@ p { margin: .4rem 0; }
    empty rail beside the content. */
 body.no-left .rail-grid { grid-template-columns: minmax(0, 1fr) var(--rail-right); }
 .rail-card--growing { display: flex; flex: 1 1 auto; flex-direction: column; min-height: 0; }
-.rail-card--growing > .fields,
 .rail-card--growing > .sectnav { flex: 1 1 auto; min-height: 0; overflow-y: auto;
+  overscroll-behavior: contain; }
+/* An open fold spends only the space the rail can afford and scrolls inside
+   itself, so opening it never grows the card past the rail. */
+.rail-card--growing > .fold-group[open] { flex: 1 1 auto; min-height: 0; overflow-y: auto;
   overscroll-behavior: contain; }
 .content { display: flex; flex-direction: column; gap: var(--gap); }
 section.panel {
@@ -1865,6 +2000,10 @@ section.panel {
   border-radius: .3rem; }
 .pill { display: inline-block; border: 1px solid currentColor; border-radius: 999px;
   padding: 0 .5rem; font-size: .76rem; white-space: nowrap; }
+/* The wavelength-alignment verdict is the loudest fact on a drive: it leads the
+   chip row and is read before anything else on the card. */
+.pill.verdict-lead { font-size: .98rem; font-weight: 700; border-width: 2px;
+  padding: .05rem .6rem; }
 .state-missing-drive { color: var(--miss); }
 .state-unmeasured { color: var(--unmeasured); }
 .state-empty { color: var(--empty); }
@@ -1943,6 +2082,15 @@ button:hover { border-color: var(--accent); }
 .fields { display: flex; flex-direction: column; gap: .5rem; }
 .field { display: grid; gap: .2rem; font-size: .8rem; color: var(--muted); }
 .field input, .field select { width: 100%; color: var(--ink); }
+/* A headed group inside a card, never a second card: one rule above it, a
+   pressable head, and the derived fields flat underneath. */
+.fold-group { border-top: 1px solid var(--line); margin-top: .6rem; }
+.fold-group > summary { cursor: pointer; padding: .4rem .45rem; margin: .35rem 0 0;
+  border: 1px solid var(--line); border-radius: .3rem; background: var(--raised);
+  font-size: .78rem; text-transform: uppercase; letter-spacing: .05em; color: var(--muted);
+  position: sticky; top: 0; }
+.fold-group > summary:hover { border-color: var(--accent); }
+.fold-group[open] > summary { margin-bottom: .5rem; }
 .actions { display: flex; gap: .5rem; flex-wrap: wrap; }
 .sectnav { display: flex; flex-direction: column; gap: .15rem; }
 .sectnav-link { display: block; padding: .18rem .35rem; border-radius: .25rem;
@@ -2005,14 +2153,57 @@ function fill(template, values, shell) {
   return filled;
 }
 
+/* Which derived field the operator has taken over. A value typed in the
+   Advanced fold is theirs; the data folder never overwrites it again. */
+var derivedEdits = { output: false, label: false, verdict: false };
+var DERIVED_FIELDS = { output: 'f-output', label: 'f-label', verdict: 'f-verdict' };
+
+function folderPath(text) {
+  var trimmed = String(text === undefined || text === null ? '' : text)
+    .split('\\\\').join('/');
+  while (trimmed.length > 1 && trimmed.charAt(trimmed.length - 1) === '/') {
+    trimmed = trimmed.slice(0, -1);
+  }
+  return trimmed;
+}
+
+/* The other half of _derived_from_folder in reading_room.py: one data folder
+   decides these five values, and the two halves must answer the same. */
+function derivedFrom(folder) {
+  var marked = folder ? folder : DATA.unfilled;
+  var trimmed = folderPath(marked);
+  return {
+    input: marked,
+    output: marked,
+    cubes: marked,
+    label: trimmed.split('/').pop() || marked,
+    verdict: trimmed + '/' + DATA.evidence_name
+  };
+}
+
+function applyDerived() {
+  var control = byId('f-input');
+  var folder = control ? control.value.trim() : '';
+  var derived = derivedFrom(folder);
+  Object.keys(DERIVED_FIELDS).forEach(function (key) {
+    var field = byId(DERIVED_FIELDS[key]);
+    if (!field || derivedEdits[key]) { return; }
+    /* No data folder, nothing derived: the field goes back to its placeholder
+       rather than showing the marker as if it were an answer. */
+    field.value = folder ? derived[key] : '';
+  });
+  return derived;
+}
+
 function composerValues() {
   var values = {};
   Object.keys(DATA.values).forEach(function (key) { values[key] = DATA.values[key]; });
+  var derived = applyDerived();
+  Object.keys(derived).forEach(function (key) { values[key] = derived[key]; });
   var fields = {
-    input: 'f-input', output: 'f-output', registry: 'f-registry',
-    calibrations: 'f-calibrations', catalog: 'f-catalog', plan: 'f-plan',
-    pattern: 'f-pattern', every: 'f-every', bench: 'f-bench',
-    verdict: 'f-verdict', epoch: 'f-epoch'
+    output: 'f-output', label: 'f-label', verdict: 'f-verdict',
+    registry: 'f-registry', calibrations: 'f-calibrations', catalog: 'f-catalog',
+    plan: 'f-plan', pattern: 'f-pattern', epoch: 'f-epoch'
   };
   Object.keys(fields).forEach(function (key) {
     var control = byId(fields[key]);
@@ -2024,6 +2215,8 @@ function composerValues() {
 
 function compose() {
   var values = composerValues();
+  var unfilled = byId('unfilled-note');
+  if (unfilled) { unfilled.hidden = values.input !== DATA.unfilled; }
   var plan = byId('plan-out');
   if (plan) { plan.value = fill(DATA.plan_template, values, 'posix'); }
   DATA.commands.forEach(function (command) {
@@ -2173,7 +2366,12 @@ function wire() {
     send.addEventListener('click', function () {
       var drive = byId('send-drive');
       var output = byId('f-output');
-      if (drive && drive.value && output) { output.value = drive.value; }
+      if (drive && drive.value && output) {
+        /* Naming a drive here is an answer, so the data folder stops deciding
+           where the cubes go. */
+        output.value = drive.value;
+        derivedEdits.output = true;
+      }
       compose();
       pressTab('now');
     });
@@ -2189,13 +2387,15 @@ function wire() {
     filterCatalog();
   });
   byId('compose').addEventListener('click', compose);
-  var drive = byId('f-drive');
-  if (drive) {
-    drive.addEventListener('change', function () {
-      if (drive.value) { byId('f-output').value = drive.value; }
-      compose();
-    });
-  }
+  var folder = byId('f-input');
+  if (folder) { folder.addEventListener('input', compose); }
+  var epoch = byId('f-epoch');
+  if (epoch) { epoch.addEventListener('change', compose); }
+  Object.keys(DERIVED_FIELDS).forEach(function (key) {
+    var field = byId(DERIVED_FIELDS[key]);
+    if (!field) { return; }
+    field.addEventListener('input', function () { derivedEdits[key] = true; });
+  });
   document.addEventListener('click', function (event) {
     if (!event.target || !event.target.closest) { return; }
     var jump = event.target.closest('.xlink');
@@ -2269,7 +2469,7 @@ def _now_view(context: dict[str, Any]) -> str:
         _absent_line(row["source"], row["steps"]) for row in context["drive_rows"] if row["absent"]
     )
     connected = "".join(
-        _drive_row(row["source"], row["steps"], row["position"])
+        _drive_row(row["source"], row["steps"], row["position"], context["drift"])
         for row in context["drive_rows"]
         if not row["absent"]
     )
@@ -2295,9 +2495,11 @@ def _now_view(context: dict[str, Any]) -> str:
             "</section>",
             '<section class="panel" id="sec-plan"><h2>Composed plan and commands</h2>',
             "<p>Editable text, composed from the rail.</p>",
+            f'<p class="note" id="unfilled-note">Paste the data folder in the rail first: '
+            f"every line below carries {_e(UNFILLED_FOLDER)} until you do.</p>",
             "<h3>Plan TOML</h3>",
             f'<textarea class="plan-out" id="plan-out" spellcheck="false">{_e(plan_text)}</textarea>',
-            "<h3>Commands</h3>",
+            "<h3>Commands, in campaign order</h3>",
             _composed_commands(context["data"]["values"]),
             "</section>",
         ]
@@ -2324,10 +2526,7 @@ def _page(context: dict[str, Any]) -> str:
             _group(
                 "now",
                 _composer_card(
-                    context["data"]["values"],
-                    context["data"]["drives"],
-                    context["epochs"],
-                    context["verdict_paths"],
+                    context["data"]["values"], context["epochs"], context["registry"]
                 ),
             ),
             _group(
@@ -2371,7 +2570,7 @@ def _page(context: dict[str, Any]) -> str:
             _view(
                 "drives",
                 '<section class="panel" id="sec-drives-cards"><h2>Drives</h2>'
-                + _source_cards(context["sources"])
+                + _source_cards(context["sources"], context["drift"])
                 + "</section>"
                 + '<section class="panel" id="sec-catalog"><h2>Every cube</h2>'
                 + _catalog_table(context["rows"])
@@ -2389,6 +2588,9 @@ def _page(context: dict[str, Any]) -> str:
             _view(
                 "reading",
                 '<section class="panel" id="sec-reading-room"><h2>Reading room</h2>'
+                '<p>The canon travels inside this page; the documentation site is '
+                '<a href="https://queezz.github.io/echelle_spectra">'
+                "queezz.github.io/echelle_spectra</a>.</p>"
                 + _document_sections(context["documents"])
                 + "</section>",
             ),
@@ -2402,7 +2604,7 @@ def _page(context: dict[str, Any]) -> str:
         f"<style>{_CSS}</style></head><body>\n"
         f'<header class="topbar"><h1>Echelle campaign</h1>{_tab_bar()}'
         '<span class="tagline">Read-only. This page never executes commands, never starts a '
-        "worker, and reaches nothing outside itself.</span></header>\n"
+        "worker, and fetches nothing.</span></header>\n"
         '<div class="wrap"><div class="rail-grid">'
         f'<aside class="rail rail-left" id="rail-left" aria-label="Controls">{left}</aside>'
         f'<main class="content" id="content">{views}</main>'
@@ -2537,11 +2739,11 @@ def build_reading_room(
         )
     )
     epochs = [epoch for epoch in epochs if epoch]
+    evidence_name = _next_evidence_name(drift)
     values = _composer_values(
-        sources,
         catalog_path=catalog_path,
         registry=registry,
-        drift=drift,
+        evidence_name=evidence_name,
         epochs=epochs,
     )
     generated_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
@@ -2553,7 +2755,7 @@ def build_reading_room(
             source,
             evidence=evidence,
             anchor=anchor,
-            values=_drive_values(values, source, evidence=evidence),
+            values=_drive_values(values, source, evidence_name=evidence_name),
             merged=merged,
             catalog_path=_posix(catalog_path),
         )
@@ -2587,12 +2789,15 @@ def build_reading_room(
         "documents": _documents(document_paths),
         "registry": registry,
         "epochs": epochs,
-        "verdict_paths": [entry["path"] for entry in drift] or ["drift-evidence.json"],
         "source_count": len(sources),
         "cube_count": len(rows),
         "drift_count": len(drift),
         "data": {
             "values": values,
+            # The two facts the page's own derivation needs and the templates
+            # do not: the unfilled marker and the next free evidence name.
+            "unfilled": UNFILLED_FOLDER,
+            "evidence_name": evidence_name,
             "drives": [
                 {
                     "label": str(source.get("volume_label", "unknown")),

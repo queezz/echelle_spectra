@@ -68,9 +68,10 @@ it, and the receipt keeps that path and its digest:
 echelle process shots -o cubes --registry calibration_registry.toml --drift-verdict drift-evidence.json
 ```
 
-The composer in the left rail writes this as a plan file plus a short command,
-so the long argument list lives in a file you can read and keep beside the
-run.
+The composer in the left rail asks two things — the folder holding the SIF
+shots and the calibration to use — and derives everything else, writing this as
+a plan file plus a short command, so the long argument list lives in a file you
+can read and keep beside the run.
 
 ## 6. Catalog and re-read
 

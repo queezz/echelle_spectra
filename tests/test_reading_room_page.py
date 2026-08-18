@@ -531,7 +531,8 @@ def test_nothing_done_asks_for_the_bench_then_the_first_sample(tmp_path: Path) -
     row = _drive_rows(text)[0]
     name, state, primary = _first_not_done(_steps(row))
     assert (name, state, primary) == ("Sample N", "step-ready", True)
-    assert "--sample 20" in row
+    # The count is the CLI's to derive from what the folder holds, not the page's.
+    assert "--sample auto" in row
 
 
 def test_calibrated_only_closes_the_calibrate_stage(tmp_path: Path) -> None:
@@ -634,7 +635,7 @@ def test_the_read_only_sentence_is_said_once_in_the_banner(page: str) -> None:
     assert page.count("never executes commands") == 1
     assert "This page has no code path that runs" not in page
     # The composer preamble is one line, not a paragraph of instruction.
-    assert "Pre-filled from this catalog and registry; Compose rewrites text only." in page
+    assert "Point at the shots and the calibration; the rest is derived." in page
     assert "Nothing here runs; Compose only rewrites" not in page
 
 
@@ -656,6 +657,129 @@ def test_the_product_is_named_as_the_product(tmp_path: Path, page: str) -> None:
 
 
 # ---------------------------------------------------------------------------
+# The two-input front door
+# ---------------------------------------------------------------------------
+
+
+def _composer(text: str) -> str:
+    return _element(text, 'id="f-input"', "article")
+
+
+def _numbered_evidence(tmp_path: Path, number: str, cube: str = "sample-a.nc") -> Path:
+    path = tmp_path / f"drift-evidence-{number}.json"
+    path.write_text(
+        json.dumps(
+            {
+                "schema": DRIFT_SCHEMA,
+                "created_at": "2026-08-14T02:00:00+00:00",
+                "verdict": "aligned",
+                "snapshot_ids": ["20260812_cmos"],
+                "sampled_cubes": [{"cube": cube}],
+                "per_shot": [{"shot_number": "1", "cube": cube, "lines": 6}],
+                "lines": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    return path
+
+
+def test_the_composer_asks_two_questions_and_folds_every_derived_value(page: str) -> None:
+    card = _composer(page)
+    head, fold = card[: card.index("<details")], card[card.index("<details") :]
+    # Two visible controls: where the shots are, and which calibration to use.
+    assert head.count("<input") == 1 and head.count("<select") == 1
+    assert 'id="f-input"' in head and 'id="f-epoch"' in head
+    # Everything else is derived, and the fold that holds it opens closed.
+    tag = re.search(r'<details[^>]*id="composer-advanced"[^>]*>', card)
+    assert tag is not None and " open" not in tag.group()
+    assert "Advanced — every derived value, editable" in fold
+    for field in (
+        "f-output", "f-label", "f-verdict", "f-registry",
+        "f-calibrations", "f-catalog", "f-plan", "f-pattern",
+    ):
+        assert f'id="{field}"' in fold
+    # A card, not a card in a card, and its head is pressable.
+    assert '<article class="card' not in fold
+    assert ".fold-group > summary { cursor: pointer;" in page
+    # The fields this front door removed are gone from the page entirely.
+    for gone in ("f-drive", "f-every", "f-bench", "f-sample"):
+        assert f'id="{gone}"' not in page
+
+
+def test_no_example_drive_ships_with_the_page(page: str) -> None:
+    for literal in ("T:\\", "D:\\", "E:\\", "F:\\", "T:/", "D:/", "E:/", "F:/"):
+        assert literal not in page, f"a baked example drive {literal!r} shipped"
+    field = re.search(r'<input type="text" id="f-input"[^>]*>', page)
+    assert field is not None
+    # Nothing on this machine records the data folder, so the page fills nothing
+    # in: a placeholder asks, a value would claim.
+    assert "value=" not in field.group()
+    assert "placeholder=" in field.group()
+    assert 'value="shots"' not in page
+    # Until it is answered, every composed line says so in one place.
+    assert 'id="unfilled-note"' in page
+    assert page.count("Paste the data folder in the rail first") == 1
+
+
+def test_the_composed_sequence_reads_in_campaign_order(page: str) -> None:
+    order = [
+        page.index(f'id="{identifier}"')
+        for identifier in ("cmd-sample", "cmd-audit", "cmd-process", "cmd-bench")
+    ]
+    assert order == sorted(order), "sample, then check, then bulk; the bench is the aside"
+    sample = html.unescape(_element(page, 'id="cmd-sample"', "article"))
+    assert "--sample auto" in sample and "--sample 20" not in sample
+    assert "--central-index" in sample
+    audit = html.unescape(_element(page, 'id="cmd-audit"', "article"))
+    assert "echelle drift audit" in audit
+    assert "--every" not in audit, "the CLI derives the interval now"
+    # The gate is stated once, on the step it actually gates.
+    assert "refused until that evidence exists" in _element(page, 'id="cmd-process"', "article")
+
+
+def test_the_composed_audit_writes_the_next_free_evidence_name(tmp_path: Path) -> None:
+    given = _numbered_evidence(tmp_path, "001")
+    text = build_reading_room(
+        _one_drive_catalog(tmp_path, [_connected(tmp_path, "NIFS-A")]),
+        tmp_path / "web",
+        drift_paths=[given],
+    ).read_text(encoding="utf-8")
+    audit = _element(text, 'id="cmd-audit"', "article")
+    payload = html.unescape(re.findall(r'data-copy="([^"]*)"', audit)[1])
+    assert payload.endswith('drift-evidence-002.json"')
+    # Evidence is immutable: the composed command never names the file it read.
+    assert "drift-evidence-001.json" not in payload
+    assert "drift-evidence-002.json" in _composer(text)
+    # A build that was handed none starts at one.
+    fresh = build_reading_room(
+        _one_drive_catalog(tmp_path, [_connected(tmp_path, "NIFS-A")]), tmp_path / "web2"
+    ).read_text(encoding="utf-8")
+    assert "drift-evidence-001.json" in _element(fresh, 'id="cmd-audit"', "article")
+
+
+def test_the_alignment_verdict_leads_every_drive_card(page: str) -> None:
+    leading = re.findall(r'<p class="chips"><span class="pill ([^"]*)">([^<]*)<', page)
+    assert leading, "no chip row was rendered"
+    assert all("verdict-lead" in classes for classes, _ in leading)
+    cards = _element(page, 'id="sec-drives-cards"')
+    assert '<span class="pill verdict-shifted verdict-lead">shifted</span>' in cards
+    # A drive nothing measured stays unmeasured; it is never dressed as aligned.
+    assert 'verdict-lead">alignment unmeasured<' in cards
+    assert "aligned</span>" not in cards
+    assert ".pill.verdict-lead {" in page
+    # The Now tab's drive rows lead with the same fact.
+    assert 'verdict-lead">shifted<' in _drive_rows(page)[0]
+
+
+def test_the_reading_room_links_the_documentation_site_once(page: str) -> None:
+    link = '<a href="https://queezz.github.io/echelle_spectra">'
+    assert page.count(link) == 1
+    assert link in _view(page, "reading")
+    assert page.count("queezz.github.io/echelle_spectra") == 2, "one anchor, one label"
+
+
+# ---------------------------------------------------------------------------
 # Surviving F7 contracts
 # ---------------------------------------------------------------------------
 
@@ -663,7 +787,7 @@ def test_the_product_is_named_as_the_product(tmp_path: Path, page: str) -> None:
 def test_every_composed_command_carries_both_shell_shapes_and_a_full_payload(
     tmp_path: Path, page: str
 ) -> None:
-    for identifier in ("cmd-process", "cmd-audit", "cmd-bench"):
+    for identifier in ("cmd-sample", "cmd-audit", "cmd-process", "cmd-bench"):
         block = _element(page, f'id="{identifier}"', "article")
         assert "PowerShell" in block and "POSIX shell" in block
         assert f'id="{identifier}-powershell"' in block and f'id="{identifier}-posix"' in block
@@ -680,7 +804,9 @@ def test_every_composed_command_carries_both_shell_shapes_and_a_full_payload(
     windows = html.unescape(re.findall(r'data-copy="([^"]*)"', audit)[0])
     posix = html.unescape(re.findall(r'data-copy="([^"]*)"', audit)[1])
     assert windows.startswith("echelle drift audit") and posix.startswith("echelle drift audit")
-    assert "\\drive-a" in windows and "/drive-a" in posix
+    # Each shape writes the same path in its own shell's spelling.
+    assert "<data folder>\\drift-evidence" in windows
+    assert "<data folder>/drift-evidence" in posix
     process = page[page.index('id="cmd-process"') :]
     assert (
         html.unescape(re.findall(r'data-copy="([^"]*)"', process)[0])
@@ -823,12 +949,17 @@ def test_the_page_executes_nothing_and_reaches_nothing(page: str) -> None:
         "fetch(",
         "XMLHttpRequest",
         "http://",
-        "https://",
         "<script src",
         "<link ",
         "@import",
     ):
         assert forbidden not in page, f"the page must not contain {forbidden!r}"
+    # The page still fetches nothing of its own. One outbound address is allowed,
+    # and only as a link a reader may choose to follow: never as a request the
+    # page makes for itself.
+    for match in re.finditer("https://", page):
+        prefix = page[max(0, match.start() - len('<a href="')) : match.start()]
+        assert prefix == '<a href="', "https:// may appear only as a link target"
     assert "color-scheme: light dark;" in page
     assert "@media (prefers-color-scheme: dark)" in page
     # Every control keeps a resting border and fill.
