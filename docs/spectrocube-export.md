@@ -298,7 +298,7 @@ echelle-spectrocube "$Data\shots" --dry-run --verbose
 | `--calibration-source` | config/default | Absolute calibration source metadata |
 | `--no-drop-nonfinite-columns` | drop enabled | Keep non-finite wavelength columns instead of dropping them |
 | `--output-suffix` | `_spectrocube` | Batch output suffix before `.nc` |
-| `--pattern` | `*.SIF` | Glob for batch discovery (also tries `*.sif` as fallback) |
+| `--pattern` | `*.SIF` | Batch discovery glob. A plain filename pattern searches the whole source tree, skipping calibration folders (any `calibrations/`, or any folder holding a `snapshot.toml`); a pattern containing `/` or `**` is used exactly as typed. Also tries `*.sif` as fallback. |
 | `--overwrite` | *(skip existing)* | Replace existing output files |
 | `--dry-run` | — | Print plan without writing |
 | `--verbose` | — | Per-file current-progress output |
