@@ -1537,15 +1537,21 @@ are about to do.</p>
 </table>
 <hr>
 <h2 id="calibration-day-the-bench">Calibration day: the bench<a class="headerlink" href="#calibration-day-the-bench" title="Permanent link">¶</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>echelle-calib<span class="w"> </span>/data/incoming
+<p>Set your campaign root once; every command on this page reuses it.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nv">$Data</span> <span class="p">=</span> <span class="s2">"D:\NIFS"</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="n">echelle-calib</span> <span class="s2">"$Data\incoming"</span>
 </code></pre></div>
+<p>On macOS or Linux the same variable is <code>data="/Volumes/NIFS"</code> and the paths use
+forward slashes; the <a href="../operator-cheat-sheet/">operator cheat sheet</a> carries the
+whole loop in both shells.</p>
 <p>Drag SIFs onto the window. The bench triages each exposure the moment it lands
 (saturation, cosmic rays, headroom, histogram), takes the roles you assign by
 hand, identifies lines, fits the rigid alignment, compares the new sphere
 response against the previous one, and ends with one Save that writes an
 immutable, validated snapshot plus a hand-editable configuration bundle.</p>
 <p>By default both land inside the folder you launched it at —
-<code>/data/incoming/calibrations/</code> and <code>/data/incoming/calibration-configs/</code>. The
+<code>$Data\incoming\calibrations\</code>, settings bundles under its <code>configs\</code> subfolder. The
 Save tab shows both paths in full, and offers <strong>Open folder</strong> once something has
 been saved.</p>
 <p>→ <a href="../calibration-bench/">Live calibration bench</a> ·
@@ -1649,14 +1655,19 @@ calibration (that is the bench) or for converting a drive (that is
   you double-click to open — no server, nothing fetched. Rebuild it after a run
   to refresh what it shows.</li>
 </ul>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>echelle<span class="w"> </span>web<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="w">  </span>--catalog<span class="w"> </span>/data/all-years.json<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="w">  </span>--output<span class="w"> </span>/data/campaign-page<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="w">  </span>--registry<span class="w"> </span>/data/calibration_registry.toml<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="w">  </span>--calibrations<span class="w"> </span>/data/calibrations<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="w">  </span>--drift<span class="w"> </span>/data/epoch-drift.json
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="nv">$Data</span> <span class="p">=</span> <span class="s2">"D:\NIFS"</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="n">echelle</span> <span class="n">web</span> <span class="p">`</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>  <span class="p">-</span><span class="n">-catalog</span> <span class="s2">"$Data\all-years.json"</span> <span class="p">`</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>  <span class="p">-</span><span class="n">-output</span> <span class="s2">"$Data\campaign-page"</span> <span class="p">`</span>
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>  <span class="p">-</span><span class="n">-registry</span> <span class="s2">"$Data\calibration_registry.toml"</span> <span class="p">`</span>
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>  <span class="p">-</span><span class="n">-calibrations</span> <span class="s2">"$Data\calibrations"</span> <span class="p">`</span>
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>  <span class="p">-</span><span class="n">-drift</span> <span class="s2">"$Data\epoch-drift.json"</span>
 </code></pre></div>
-<p>Then open <code>/data/campaign-page/index.html</code>.</p>
+<p>Then open <code>$Data\campaign-page\index.html</code>.</p>
+<p>Every path above is checked before anything is built: a path that does not
+exist is answered by name, with the absolute path the command actually looked
+at and the flag that supplied it.</p>
 <hr>
 <h2 id="specialist-commands">Specialist commands<a class="headerlink" href="#specialist-commands" title="Permanent link">¶</a></h2>
 <p>For recalibration work outside the bench, and for QC:

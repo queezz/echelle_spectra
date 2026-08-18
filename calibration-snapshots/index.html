@@ -716,6 +716,17 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix="">
       
         <li class="md-nav__item">
+  <a href="#the-folder-holds-the-light-the-snapshot-holds-what-was-computed" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The folder holds the light; the snapshot holds what was computed
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#create-a-snapshot" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1410,6 +1421,17 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix="">
       
         <li class="md-nav__item">
+  <a href="#the-folder-holds-the-light-the-snapshot-holds-what-was-computed" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The folder holds the light; the snapshot holds what was computed
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#create-a-snapshot" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1463,38 +1485,95 @@
 
 
 <h1 id="calibration-snapshots">Calibration snapshots<a class="headerlink" href="#calibration-snapshots" title="Permanent link">¶</a></h1>
-<p>A calibration snapshot is one immutable folder containing the files needed to
+<p>A calibration snapshot is one immutable folder naming every file needed to
 extract and calibrate spectra. Its folder name is the identity used by cubes,
 registries, catalogs, and run receipts:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>calibrations/20260901_cmos/
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>├── snapshot.toml
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>├── pattern.txt
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>├── wavelength.txt
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>├── sphere.sif
-<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>├── sphere_bg.sif
-<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>├── integral.txt
-<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>└── lamps/
-<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>    ├── h2.sif
-<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>    └── thar.sif
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>20260901_calib/                        the calibration folder
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>├── sphere-0.1s-x3.sif                 raw frames, referenced from below
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>├── sphere-0.1s-x3-bg.sif
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>├── thar.sif
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>└── calibrations/20260901_cmos/        the snapshot
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>    ├── snapshot.toml
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>    ├── pattern.txt
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>    ├── wavelength.txt
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>    └── integral.txt
 </code></pre></div>
 <p>The ID format is <code>YYYYMMDD_&lt;detector&gt;[-rev]</code>. A refinement derived later from
 science lines can use a revision suffix such as <code>20260901_cmos-r1</code>.</p>
+<p><strong>A snapshot's <code>pattern.txt</code> and <code>wavelength.txt</code> always describe the same
+detector frame</strong>: when a bench save applies a solved rigid transform to the
+table, it applies the same transform to the pattern, so the order traces stay on
+the bands the table's own lines sit in. A snapshot carrying a corrected table
+beside an uncorrected pattern extracts every order off-centre — see
+<a href="../calibration-bench/#the-saved-snapshot-carries-the-measured-calibration">The saved snapshot carries the measured calibration</a>.
+A drift refinement (<code>-rN</code>) re-solves the wavelength table only and carries its
+base snapshot's pattern across unchanged, because its accepted shift was
+measured through that very pattern.</p>
+<h2 id="the-folder-holds-the-light-the-snapshot-holds-what-was-computed">The folder holds the light; the snapshot holds what was computed<a class="headerlink" href="#the-folder-holds-the-light-the-snapshot-holds-what-was-computed" title="Permanent link">¶</a></h2>
+<p>A snapshot records two kinds of artifact, and <code>snapshot.toml</code> says plainly which
+each one is:</p>
+<table>
+<thead>
+<tr>
+<th><code>kind</code></th>
+<th>Where the bytes are</th>
+<th>Which files</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>copied</code> (the default, written by saying nothing)</td>
+<td>inside the snapshot folder, at a relative path that cannot leave it</td>
+<td><code>pattern.txt</code>, <code>wavelength.txt</code>, <code>integral.txt</code></td>
+</tr>
+<tr>
+<td><code>referenced</code></td>
+<td>wherever they were measured, named by <code>path</code></td>
+<td>the sphere pair and every lamp signal and background SIF</td>
+</tr>
+</tbody>
+</table>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="k">[[artifacts]]</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="n">role</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"wavelength"</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="n">path</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"wavelength.txt"</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="n">sha256</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"1f0c…"</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="n">size_bytes</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">20416</span>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="k">[[artifacts]]</span>
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="n">role</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"sphere"</span>
+<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a><span class="n">kind</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"referenced"</span>
+<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a><span class="n">path</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"../../sphere-0.1s-x3.sif"</span>
+<a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a><span class="n">sha256</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"9ab4…"</span>
+<a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a><span class="n">size_bytes</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">398458880</span>
+<a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a><span class="n">source_name</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"sphere-0.1s-x3.sif"</span>
+</code></pre></div>
+<p>The digest is the identity either way. The path only says where the bytes live,
+and validation reads them there and hashes them again. A reference is stored
+relative to the snapshot folder when the source is inside the same calibration
+folder, so the whole folder can be moved or copied to another machine with no
+edit; a source from anywhere else is stored as an absolute path, because a
+relative path across unrelated trees would only pretend to be portable.</p>
+<p>Referencing is why raw frames are not duplicated. A calibration folder already
+holds its lamp and sphere SIFs — hundreds of megabytes of them — and a snapshot
+two levels below has nothing to gain from a second copy sitting beside the
+first. Older snapshots that do hold copies are still perfectly valid and are
+read exactly as before: an entry with no <code>kind</code> is a copied one.</p>
 <h2 id="create-a-snapshot">Create a snapshot<a class="headerlink" href="#create-a-snapshot" title="Permanent link">¶</a></h2>
 <p>The command copies source files into role-named locations, digests every file,
 writes <code>snapshot.toml</code>, validates the finished folder, and refuses to replace an
 existing snapshot:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="n">echelle</span> <span class="n">snapshot</span> <span class="n">create</span> <span class="n">20260901_cmos</span> <span class="p">`</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>  <span class="p">-</span><span class="n">-detector</span> <span class="n">cmos</span> <span class="p">`</span>
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>  <span class="p">-</span><span class="n">-pattern</span> <span class="n">pattern-source</span><span class="p">.</span><span class="n">txt</span> <span class="p">`</span>
-<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>  <span class="p">-</span><span class="n">-wavelength</span> <span class="n">wavelength-source</span><span class="p">.</span><span class="n">txt</span> <span class="p">`</span>
-<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>  <span class="p">-</span><span class="n">-sphere</span> <span class="n">sphere-source</span><span class="p">.</span><span class="n">sif</span> <span class="p">`</span>
-<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>  <span class="p">-</span><span class="n">-sphere-background</span> <span class="n">sphere-background-source</span><span class="p">.</span><span class="n">sif</span> <span class="p">`</span>
-<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>  <span class="p">-</span><span class="n">-integral</span> <span class="n">integrating-sphere-source</span><span class="p">.</span><span class="n">txt</span> <span class="p">`</span>
-<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>  <span class="p">-</span><span class="n">-lamp-used</span> <span class="n">H2</span> <span class="p">`</span>
-<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a>  <span class="p">-</span><span class="n">-lamp-used</span> <span class="n">Th-Ar</span> <span class="p">`</span>
-<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a>  <span class="p">-</span><span class="n">-lamp</span><span class="o">-file</span> <span class="n">H2</span><span class="p">=</span><span class="n">h2-source</span><span class="p">.</span><span class="n">sif</span> <span class="p">`</span>
-<a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a>  <span class="p">-</span><span class="n">-lamp</span><span class="o">-file</span> <span class="n">Th-Ar</span><span class="p">=</span><span class="n">thar-source</span><span class="p">.</span><span class="n">sif</span> <span class="p">`</span>
-<a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a>  <span class="p">-</span><span class="n">-notes</span> <span class="s2">"NIFS/LHD 2026 campaign"</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="n">echelle</span> <span class="n">snapshot</span> <span class="n">create</span> <span class="n">20260901_cmos</span> <span class="p">`</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>  <span class="p">-</span><span class="n">-detector</span> <span class="n">cmos</span> <span class="p">`</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>  <span class="p">-</span><span class="n">-pattern</span> <span class="n">pattern-source</span><span class="p">.</span><span class="n">txt</span> <span class="p">`</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>  <span class="p">-</span><span class="n">-wavelength</span> <span class="n">wavelength-source</span><span class="p">.</span><span class="n">txt</span> <span class="p">`</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>  <span class="p">-</span><span class="n">-sphere</span> <span class="n">sphere-source</span><span class="p">.</span><span class="n">sif</span> <span class="p">`</span>
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>  <span class="p">-</span><span class="n">-sphere-background</span> <span class="n">sphere-background-source</span><span class="p">.</span><span class="n">sif</span> <span class="p">`</span>
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>  <span class="p">-</span><span class="n">-integral</span> <span class="n">integrating-sphere-source</span><span class="p">.</span><span class="n">txt</span> <span class="p">`</span>
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>  <span class="p">-</span><span class="n">-lamp-used</span> <span class="n">H2</span> <span class="p">`</span>
+<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a>  <span class="p">-</span><span class="n">-lamp-used</span> <span class="n">Th-Ar</span> <span class="p">`</span>
+<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a>  <span class="p">-</span><span class="n">-lamp</span><span class="o">-file</span> <span class="n">H2</span><span class="p">=</span><span class="n">h2-source</span><span class="p">.</span><span class="n">sif</span> <span class="p">`</span>
+<a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a>  <span class="p">-</span><span class="n">-lamp</span><span class="o">-file</span> <span class="n">Th-Ar</span><span class="p">=</span><span class="n">thar-source</span><span class="p">.</span><span class="n">sif</span> <span class="p">`</span>
+<a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a>  <span class="p">-</span><span class="n">-notes</span> <span class="s2">"NIFS/LHD 2026 campaign"</span>
 </code></pre></div>
 <p>Use <code>--base-snapshot</code> when the new wavelength solution was aligned from an
 earlier snapshot. Optional shot/date validity, alignment-transform, and QC
@@ -1502,10 +1581,14 @@ summary arguments are shown by <code>echelle snapshot create --help</code>.</p>
 <p>The source files are opened read-only. Construction happens in a temporary
 sibling directory and the final folder appears only after every copy, digest,
 manifest write, and integrity check succeeds.</p>
+<p><code>echelle snapshot create</code> copies every role, which is what assembling a snapshot
+out of scattered files should do. The live bench references the raw frames
+instead, because it is standing in the folder that already holds them; see
+<a href="../calibration-bench/">the calibration bench</a>.</p>
 <h2 id="validate-or-inspect">Validate or inspect<a class="headerlink" href="#validate-or-inspect" title="Permanent link">¶</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="n">echelle</span> <span class="n">snapshot</span> <span class="n">validate</span> <span class="n">calibrations</span><span class="p">/</span><span class="n">20260901_cmos</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="n">echelle</span> <span class="n">snapshot</span> <span class="n">show</span> <span class="n">calibrations</span><span class="p">/</span><span class="n">20260901_cmos</span>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="n">echelle</span> <span class="n">status</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="n">echelle</span> <span class="n">snapshot</span> <span class="n">validate</span> <span class="n">calibrations</span><span class="p">/</span><span class="n">20260901_cmos</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="n">echelle</span> <span class="n">snapshot</span> <span class="n">show</span> <span class="n">calibrations</span><span class="p">/</span><span class="n">20260901_cmos</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="n">echelle</span> <span class="n">status</span>
 </code></pre></div>
 <p>Validation checks:</p>
 <ul>
@@ -1513,10 +1596,21 @@ manifest write, and integrity check succeeds.</p>
 <li>detector consistency with the snapshot ID;</li>
 <li>required roles (<code>pattern</code>, <code>wavelength</code>, <code>sphere</code>, <code>sphere_background</code>, and
   <code>integral</code>);</li>
-<li>relative paths that cannot leave the snapshot directory;</li>
-<li>presence, byte size, and SHA-256 digest of every artifact;</li>
+<li>relative paths that cannot leave the snapshot directory, for copied artifacts;</li>
+<li>presence, byte size, and SHA-256 digest of every artifact, copied or
+  referenced — a referenced source is re-read and re-hashed where it is named;</li>
 <li>base-snapshot identity and self-reference.</li>
 </ul>
+<p>A referenced source that has gone missing or changed is a plain validation
+failure that names the full path it looked in:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>Snapshot is invalid:
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>  - referenced sphere source not found: T:\2025-LHD-BH\Echelle\20260901_calib\sphere-0.1s-x3.sif
+</code></pre></div>
+<p>Relative references are read from the snapshot folder, never from the working
+directory, so <code>echelle snapshot validate</code> gives the same answer from anywhere.
+<code>echelle snapshot show</code> prints each referenced frame with the full path it
+resolves to, so you can see what a snapshot actually uses without opening the
+binder.</p>
 <p><code>snapshot.toml</code> begins with comments explaining that it remains ordinary
 hand-editable TOML. If it is edited, run the validator again. A changed artifact
 needs a new snapshot ID; an already used snapshot should never be silently
@@ -1533,10 +1627,10 @@ them with <code>echelle historical</code>. New campaign snapshots use the role-n
 convention from birth.</p>
 <p>A binder is evidence, not a snapshot: the registry reads only
 <code>echelle-snapshot/v1</code> with a <code>[validity]</code> table. Convert one with</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="n">echelle</span> <span class="n">snapshot</span> <span class="nb">import-historical</span> <span class="n">20250926_cmos</span> <span class="p">`</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>  <span class="p">-</span><span class="n">-calibrations</span> <span class="n">calibrations</span> <span class="p">`</span>
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>  <span class="p">-</span><span class="n">-artifact-root</span> <span class="n">local</span><span class="p">\</span><span class="n">20250926_calib</span> <span class="p">`</span>
-<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>  <span class="p">-</span><span class="n">-valid-from</span> <span class="n">2025</span><span class="p">-</span><span class="n">09</span><span class="p">-</span><span class="n">26</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="n">echelle</span> <span class="n">snapshot</span> <span class="nb">import-historical</span> <span class="n">20250926_cmos</span> <span class="p">`</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>  <span class="p">-</span><span class="n">-calibrations</span> <span class="n">calibrations</span> <span class="p">`</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>  <span class="p">-</span><span class="n">-artifact-root</span> <span class="n">local</span><span class="p">\</span><span class="n">20250926_calib</span> <span class="p">`</span>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a>  <span class="p">-</span><span class="n">-valid-from</span> <span class="n">2025</span><span class="p">-</span><span class="n">09</span><span class="p">-</span><span class="n">26</span>
 </code></pre></div>
 <p>which copies the named artifacts into an immutable, digested snapshot carrying
 the epoch you declare and an <code>[imported]</code> table naming the binder it came from.

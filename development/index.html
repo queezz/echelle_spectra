@@ -1227,6 +1227,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#refreshing-the-packaged-nist-caches" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Refreshing the packaged NIST caches
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#historical-html-docs" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1510,6 +1521,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#refreshing-the-packaged-nist-caches" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Refreshing the packaged NIST caches
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#historical-html-docs" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1582,6 +1604,27 @@ are documented in <a href="../portable-kit/">Portable NIFS kit</a> and the root
 <p>Do not build kit payloads or release archives in this checkout. Export a clean
 source copy into OS-local scratch and use <code>scripts.reproducible_build</code> there;
 assemble kits into a separate external destination with <code>scripts.nifs_kit</code>.</p>
+<hr>
+<h2 id="refreshing-the-packaged-nist-caches">Refreshing the packaged NIST caches<a class="headerlink" href="#refreshing-the-packaged-nist-caches" title="Permanent link">¶</a></h2>
+<p>The lamp overlays and the bench's expected-line annotations read cached NIST ASD
+exports from <code>src/echelle_spectra/resources/nist_asd_cache/</code>. A calibration run
+never queries NIST; refreshing the cache is a separate, deliberate act:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>python<span class="w"> </span>-m<span class="w"> </span>echelle_spectra.tools.nist_cache_refresh<span class="w">                 </span><span class="c1"># every packaged lamp</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>python<span class="w"> </span>-m<span class="w"> </span>echelle_spectra.tools.nist_cache_refresh<span class="w"> </span>--species<span class="w"> </span>NeI<span class="w"> </span>NeII<span class="w"> </span>--dry-run
+</code></pre></div>
+<p>Run it <strong>before travel</strong>, so an offline instrument carries current line data,
+and <strong>when the instrument's range moves</strong> — the packaged spans are 380–810 nm
+against a detector reaching ~401–802 nm, and a re-alignment that walks curated
+rows past a cache edge leaves those lines with no strength annotation, which
+silently removes them from both overlay views.</p>
+<p>The module carries the exact ASD query as its parameter block, recovered by
+replaying the web form until the response reproduced the packaged files byte for
+byte. It refuses to write anything that is not a tab-delimited export, so a
+malformed query cannot cache an HTML error page over packaged data. Widening a
+span writes new <code>nist_&lt;element&gt;_&lt;ion&gt;_&lt;low&gt;_&lt;high&gt;.csv</code> files and removes the
+narrower ones they supersede. It has no <code>echelle-*</code> console script on purpose:
+it reaches the network and rewrites packaged resources, which is maintenance,
+not an operator command.</p>
 <hr>
 <h2 id="historical-html-docs">Historical HTML docs<a class="headerlink" href="#historical-html-docs" title="Permanent link">¶</a></h2>
 <p>The <code>html-docs</code> branch contains the original static HTML documentation pages (<code>index.html</code> and <code>band_data.html</code>). That branch is <strong>historical</strong> — do not delete it during or after this migration. The new MkDocs site supersedes it but the old pages remain available for reference.</p>

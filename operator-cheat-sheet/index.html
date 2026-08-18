@@ -1955,13 +1955,13 @@ developer tools cannot be assumed.</p>
 </thead>
 <tbody>
 <tr>
-<td><code>echelle_spectra</code></td>
-<td>Single-SIF viewer: open one shot, see the image, the extracted orders, the calibrated spectrum, and the known-line overlays</td>
+<td><code>echelle_spectra [--calibration DIR]</code></td>
+<td>Single-SIF viewer: open one shot, see the image, the extracted orders, the calibrated spectrum, and the known-line overlays (<code>--calibration</code> points it at a saved snapshot folder, so old files are read through their own era's tables)</td>
 <td>Yes, for looking at a shot</td>
 </tr>
 <tr>
 <td><code>echelle-calib [FOLDER]</code></td>
-<td>Separate live calibration bench; drag SIFs onto it (FOLDER sets where the file dialog opens <strong>and</strong> where the two output folders are derived; <code>--watch</code> adds folder polling), triages every exposure, takes hand-assigned roles for any lamp, fits alignment, compares sphere response, and builds configuration/snapshot evidence</td>
+<td>Separate live calibration bench; drag SIFs onto it (FOLDER sets where the file dialog opens, where the two output folders are derived, and the acquisition date the snapshot identity is prefilled from; <code>--watch</code> adds folder polling), triages every exposure, takes hand-assigned roles for any lamp, fits alignment, compares sphere response, and builds configuration/snapshot evidence</td>
 <td>Yes, during calibration</td>
 </tr>
 <tr>
@@ -2071,13 +2071,13 @@ campaign data.</p>
 <a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a>  <span class="p">-</span><span class="n">-registry</span> <span class="s2">"$Data\calibration_registry.toml"</span> <span class="p">`</span>
 <a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a>  <span class="p">-</span><span class="n">-runs</span> <span class="s2">"$Data\runs"</span>
 <a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a>
-<a id="__codelineno-8-9" name="__codelineno-8-9" href="#__codelineno-8-9"></a><span class="c"># 2. Open the live bench on the acquisition folder, then drag SIFs onto it.</span>
+<a id="__codelineno-8-9" name="__codelineno-8-9" href="#__codelineno-8-9"></a><span class="c"># 2. Open the live bench on the calibration folder, then drag SIFs onto it.</span>
 <a id="__codelineno-8-10" name="__codelineno-8-10" href="#__codelineno-8-10"></a><span class="c">#    The two roots below are only needed because this loop keeps them one</span>
-<a id="__codelineno-8-11" name="__codelineno-8-11" href="#__codelineno-8-11"></a><span class="c">#    level up; without them the bench writes calibrations\ and</span>
-<a id="__codelineno-8-12" name="__codelineno-8-12" href="#__codelineno-8-12"></a><span class="c">#    calibration-configs\ inside the folder argument itself.</span>
-<a id="__codelineno-8-13" name="__codelineno-8-13" href="#__codelineno-8-13"></a><span class="p">&amp;</span> <span class="s2">".\.venv\Scripts\echelle-calib.exe"</span> <span class="s2">"$Data\incoming"</span> <span class="p">`</span>
+<a id="__codelineno-8-11" name="__codelineno-8-11" href="#__codelineno-8-11"></a><span class="c">#    level up; without them the bench writes everything it generates into</span>
+<a id="__codelineno-8-12" name="__codelineno-8-12" href="#__codelineno-8-12"></a><span class="c">#    calibrations\ inside the folder argument itself.</span>
+<a id="__codelineno-8-13" name="__codelineno-8-13" href="#__codelineno-8-13"></a><span class="p">&amp;</span> <span class="s2">".\.venv\Scripts\echelle-calib.exe"</span> <span class="s2">"$Data\20250926_calib"</span> <span class="p">`</span>
 <a id="__codelineno-8-14" name="__codelineno-8-14" href="#__codelineno-8-14"></a>  <span class="p">-</span><span class="n">-output-root</span> <span class="s2">"$Data\calibrations"</span> <span class="p">`</span>
-<a id="__codelineno-8-15" name="__codelineno-8-15" href="#__codelineno-8-15"></a>  <span class="p">-</span><span class="n">-config-root</span> <span class="s2">"$Data\calibration-configs"</span>
+<a id="__codelineno-8-15" name="__codelineno-8-15" href="#__codelineno-8-15"></a>  <span class="p">-</span><span class="n">-config-root</span> <span class="s2">"$Data\calibrations\configs"</span>
 <a id="__codelineno-8-16" name="__codelineno-8-16" href="#__codelineno-8-16"></a>
 <a id="__codelineno-8-17" name="__codelineno-8-17" href="#__codelineno-8-17"></a><span class="c"># 3. Recheck the snapshot produced by the completed bench procedure.</span>
 <a id="__codelineno-8-18" name="__codelineno-8-18" href="#__codelineno-8-18"></a><span class="p">.\</span><span class="n">echelle</span><span class="p">.</span><span class="n">ps1</span> <span class="n">snapshot</span> <span class="n">validate</span> <span class="s2">"$Data\calibrations\20260814_cmos"</span>
@@ -2138,13 +2138,13 @@ campaign data.</p>
 <a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a><span class="w">  </span>--registry<span class="w"> </span><span class="s2">"</span><span class="nv">$data</span><span class="s2">/calibration_registry.toml"</span><span class="w"> </span><span class="se">\</span>
 <a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a><span class="w">  </span>--runs<span class="w"> </span><span class="s2">"</span><span class="nv">$data</span><span class="s2">/runs"</span>
 <a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a>
-<a id="__codelineno-9-9" name="__codelineno-9-9" href="#__codelineno-9-9"></a><span class="c1"># 2. Open the live bench on the acquisition folder, then drag SIFs onto it.</span>
+<a id="__codelineno-9-9" name="__codelineno-9-9" href="#__codelineno-9-9"></a><span class="c1"># 2. Open the live bench on the calibration folder, then drag SIFs onto it.</span>
 <a id="__codelineno-9-10" name="__codelineno-9-10" href="#__codelineno-9-10"></a><span class="c1">#    The two roots below are only needed because this loop keeps them one</span>
-<a id="__codelineno-9-11" name="__codelineno-9-11" href="#__codelineno-9-11"></a><span class="c1">#    level up; without them the bench writes calibrations/ and</span>
-<a id="__codelineno-9-12" name="__codelineno-9-12" href="#__codelineno-9-12"></a><span class="c1">#    calibration-configs/ inside the folder argument itself.</span>
-<a id="__codelineno-9-13" name="__codelineno-9-13" href="#__codelineno-9-13"></a>./.venv/bin/echelle-calib<span class="w"> </span><span class="s2">"</span><span class="nv">$data</span><span class="s2">/incoming"</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-9-11" name="__codelineno-9-11" href="#__codelineno-9-11"></a><span class="c1">#    level up; without them the bench writes everything it generates into</span>
+<a id="__codelineno-9-12" name="__codelineno-9-12" href="#__codelineno-9-12"></a><span class="c1">#    calibrations/ inside the folder argument itself.</span>
+<a id="__codelineno-9-13" name="__codelineno-9-13" href="#__codelineno-9-13"></a>./.venv/bin/echelle-calib<span class="w"> </span><span class="s2">"</span><span class="nv">$data</span><span class="s2">/20250926_calib"</span><span class="w"> </span><span class="se">\</span>
 <a id="__codelineno-9-14" name="__codelineno-9-14" href="#__codelineno-9-14"></a><span class="w">  </span>--output-root<span class="w"> </span><span class="s2">"</span><span class="nv">$data</span><span class="s2">/calibrations"</span><span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-9-15" name="__codelineno-9-15" href="#__codelineno-9-15"></a><span class="w">  </span>--config-root<span class="w"> </span><span class="s2">"</span><span class="nv">$data</span><span class="s2">/calibration-configs"</span>
+<a id="__codelineno-9-15" name="__codelineno-9-15" href="#__codelineno-9-15"></a><span class="w">  </span>--config-root<span class="w"> </span><span class="s2">"</span><span class="nv">$data</span><span class="s2">/calibrations/configs"</span>
 <a id="__codelineno-9-16" name="__codelineno-9-16" href="#__codelineno-9-16"></a>
 <a id="__codelineno-9-17" name="__codelineno-9-17" href="#__codelineno-9-17"></a><span class="c1"># 3. Recheck the completed snapshot.</span>
 <a id="__codelineno-9-18" name="__codelineno-9-18" href="#__codelineno-9-18"></a>./echelle<span class="w"> </span>snapshot<span class="w"> </span>validate<span class="w"> </span><span class="s2">"</span><span class="nv">$data</span><span class="s2">/calibrations/20260814_cmos"</span>
@@ -2206,14 +2206,24 @@ audit wrote. A run with an explicit <code>--config</code> calibration and no reg
 legal and is recorded as <code>ungated (no registry)</code>.</p>
 <h2 id="where-the-bench-writes">Where the bench writes<a class="headerlink" href="#where-the-bench-writes" title="Permanent link">¶</a></h2>
 <p><code>echelle-calib</code> derives both of its output folders from the folder argument it
-was launched at. Launch it at <code>D:\NIFS\incoming</code> and it writes:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>D:\NIFS\incoming\calibrations\&lt;snapshot-id&gt;\        the immutable snapshot
-<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>D:\NIFS\incoming\calibration-configs\&lt;snapshot-id&gt;\ campaign/alignment/export settings
+was launched at. Launch it at <code>D:\NIFS\20250926_calib</code> and it writes:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>D:\NIFS\20250926_calib\calibrations\&lt;snapshot-id&gt;\         the immutable snapshot
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>D:\NIFS\20250926_calib\calibrations\configs\&lt;snapshot-id&gt;\ campaign/alignment/export settings
 </code></pre></div>
-<p>That is the fix for a bench started from a shortcut scattering its output into
-whatever directory the shortcut happened to begin in. To put them somewhere
-else — the trip loop above keeps them one level up, beside the shots —
-<code>--output-root</code> and <code>--config-root</code> override each independently.</p>
+<p>Inside, because that folder is the calibration: the measured lamp and sphere
+frames and the calibration computed from them, side by side in the one folder
+that holds it all. That is also the fix for a bench started from a shortcut
+scattering its output into whatever directory the shortcut happened to begin
+in. Everything the bench generates then lives under one tidy <code>calibrations\</code>
+folder — the snapshot identities, plus a <code>configs\</code> subfolder for the settings
+bundles — so a calibration folder gains one generated child, not two. To put
+them somewhere else — the trip loop above keeps them one level up, beside the
+shots — <code>--output-root</code> and <code>--config-root</code> override each independently.</p>
+<p>The snapshot identity the Save tab prefills is <code>YYYYMMDD_&lt;detector&gt;</code> dated by
+<strong>acquisition</strong>: the <code>YYYYMMDD</code> leading the launch folder's name, else the date
+in the loaded SIFs' headers, else today with the Save tab saying it could not
+be derived and must be checked. <code>--snapshot-id</code>, and your own typing in the ID
+field, always win.</p>
 <p>Either way the Save tab states both paths <strong>in full</strong>, so you can read where
 the files will go before pressing anything, and once a snapshot is saved an
 <strong>Open folder</strong> button appears beside the confirmation and shows it in the file

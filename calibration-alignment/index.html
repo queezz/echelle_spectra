@@ -1603,9 +1603,11 @@ tables by itself.</p>
 </code></pre></div>
 <p>Common lamp presets can also be resolved from cached NIST ASD exports. Presets
 include <code>thar</code>, <code>hg</code>, <code>ne</code>, <code>he</code>, <code>ar</code>, <code>th</code>, <code>h</code>, and <code>h2</code>; ion stages I and II
-are included where useful. The package bundles small curated ThAr, Hg, and Ne
-caches covering 578-640 nm for Fulcher-alpha calibration review, so those presets
-can be used without an explicit cache directory in that window:</p>
+are included where useful. The package bundles ThAr, Hg, and Ne caches covering
+380-810 nm — the whole range the instrument reaches, with margin — so those
+presets can be used without an explicit cache directory anywhere on the
+detector. Regenerate them with <code>python -m echelle_spectra.tools.nist_cache_refresh</code>, which
+carries the exact NIST ASD query:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>echelle-nist-overlay<span class="w"> </span><span class="se">\</span>
 <a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="w">  </span>src/echelle_spectra/resources/calibration_files/ThAr-0.3s-x3_20240305.sif<span class="w"> </span><span class="se">\</span>
 <a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="w">  </span>--lamp<span class="w"> </span>thar<span class="w"> </span><span class="se">\</span>
@@ -1616,7 +1618,8 @@ can be used without an explicit cache directory in that window:</p>
 </code></pre></div>
 <p>Use <code>--line-list-dir</code> for lamps or wavelength ranges not present in the bundled
 cache. The CLI still requires cached NIST ASD exports; it does not query NIST
-during a calibration run. Use <code>echelle-nist-overlay --list-lamps</code> to inspect the
+during a calibration run — refreshing the cache is a deliberate act performed by
+<code>echelle_spectra.tools.nist_cache_refresh</code>, not a side effect of calibrating. Use <code>echelle-nist-overlay --list-lamps</code> to inspect the
 built-in presets.</p>
 <p>The overlay writes:</p>
 <ul>

@@ -1192,6 +1192,34 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#echelle_spectra.tools.pattern_extraction.SpherePatternExtraction" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        SpherePatternExtraction
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="SpherePatternExtraction">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#echelle_spectra.tools.pattern_extraction.SpherePatternExtraction.n_orders" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        n_orders
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#echelle_spectra.tools.pattern_extraction.amplification_curve" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1280,10 +1308,43 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#echelle_spectra.tools.pattern_extraction.extract_pattern_from_sphere" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        extract_pattern_from_sphere
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#echelle_spectra.tools.pattern_extraction.fit_order_traces" class="md-nav__link">
     <span class="md-ellipsis">
       
         fit_order_traces
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#echelle_spectra.tools.pattern_extraction.fit_sampling_to_width" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        fit_sampling_to_width
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#echelle_spectra.tools.pattern_extraction.pattern_row_offsets" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        pattern_row_offsets
       
     </span>
   </a>
@@ -1787,6 +1848,34 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#echelle_spectra.tools.pattern_extraction.SpherePatternExtraction" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        SpherePatternExtraction
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="SpherePatternExtraction">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#echelle_spectra.tools.pattern_extraction.SpherePatternExtraction.n_orders" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        n_orders
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#echelle_spectra.tools.pattern_extraction.amplification_curve" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1875,10 +1964,43 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#echelle_spectra.tools.pattern_extraction.extract_pattern_from_sphere" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        extract_pattern_from_sphere
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#echelle_spectra.tools.pattern_extraction.fit_order_traces" class="md-nav__link">
     <span class="md-ellipsis">
       
         fit_order_traces
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#echelle_spectra.tools.pattern_extraction.fit_sampling_to_width" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        fit_sampling_to_width
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#echelle_spectra.tools.pattern_extraction.pattern_row_offsets" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        pattern_row_offsets
       
     </span>
   </a>
@@ -2304,6 +2426,81 @@ or a future CLI can choose how to load SIF/TIFF/FITS data.</p>
 
 </div>
 
+<div class="doc doc-object doc-class">
+
+
+
+<h2 id="echelle_spectra.tools.pattern_extraction.SpherePatternExtraction" class="doc doc-heading">
+            <code>SpherePatternExtraction</code>
+
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-dataclass"><code>dataclass</code></small>
+  </span>
+
+<a href="#echelle_spectra.tools.pattern_extraction.SpherePatternExtraction" class="headerlink" title="Permanent link">¶</a></h2>
+
+
+    <div class="doc doc-contents ">
+
+
+
+        <p>One pattern extracted from a sphere image, and how it was arrived at.</p>
+<p>The diagnostics travel with the table because both callers report them: the
+CLI prints the trial scan it walked, and the bench says in one sentence how
+far the extracted traces moved from the pattern it was wearing.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+<div class="doc doc-object doc-attribute">
+
+
+
+<h3 id="echelle_spectra.tools.pattern_extraction.SpherePatternExtraction.n_orders" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">n_orders</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-property"><code>property</code></small>
+  </span>
+
+<a href="#echelle_spectra.tools.pattern_extraction.SpherePatternExtraction.n_orders" class="headerlink" title="Permanent link">¶</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Number of orders in the extracted table.</p>
+
+    </div>
+
+</div>
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
 
 <div class="doc doc-object doc-function">
 
@@ -2455,6 +2652,35 @@ around each expected order position.</p>
 <div class="doc doc-object doc-function">
 
 
+<h2 id="echelle_spectra.tools.pattern_extraction.extract_pattern_from_sphere" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">extract_pattern_from_sphere</span><span class="p">(</span><span class="n">image</span><span class="p">,</span> <span class="n">prior_pattern</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">config</span><span class="o">=</span><span class="n">PatternExtractionConfig</span><span class="p">(),</span> <span class="n">threshold_values</span><span class="o">=</span><span class="n">DEFAULT_TRIAL_THRESHOLDS</span><span class="p">,</span> <span class="n">column_start_values</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">search_radius_px</span><span class="o">=</span><span class="n">DEFAULT_SEARCH_RADIUS_PX</span><span class="p">,</span> <span class="n">use_prior</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span></code>
+
+<a href="#echelle_spectra.tools.pattern_extraction.extract_pattern_from_sphere" class="headerlink" title="Permanent link">¶</a></h2>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Extract one order-pattern table from a sphere image, prior-guided.</p>
+<p>This is the whole extraction, in one call, for every caller that has a
+sphere image in hand: <code>echelle-pattern</code> and the calibration bench's own
+"extract pattern from this sphere" both come through here, so the table the
+bench stands on and the table the CLI writes are produced by the same code
+on the same settings.</p>
+<p>The threshold scan chooses its own peak threshold and sampled columns; the
+prior, when one is given, then decides which peak belongs to which order.
+When no trial finds the expected order count — a dim frame, an unusual
+sensor, a fixture — the prior alone can still carry the fit, because the
+guided search returns exactly one peak per prior trace by construction.
+Without a prior that case has nothing to fall back on and raises.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
 <h2 id="echelle_spectra.tools.pattern_extraction.fit_order_traces" class="doc doc-heading">
             <code class="highlight language-python"><span class="n">fit_order_traces</span><span class="p">(</span><span class="n">detections</span><span class="p">,</span> <span class="n">ncols</span><span class="p">,</span> <span class="n">config</span><span class="o">=</span><span class="n">PatternExtractionConfig</span><span class="p">())</span></code>
 
@@ -2464,6 +2690,47 @@ around each expected order position.</p>
     <div class="doc doc-contents ">
 
         <p>Fit polynomial traces through detected order peaks and build a pattern table.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h2 id="echelle_spectra.tools.pattern_extraction.fit_sampling_to_width" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">fit_sampling_to_width</span><span class="p">(</span><span class="n">config</span><span class="p">,</span> <span class="n">ncols</span><span class="p">)</span></code>
+
+<a href="#echelle_spectra.tools.pattern_extraction.fit_sampling_to_width" class="headerlink" title="Permanent link">¶</a></h2>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Shrink a sampled-column plan until it fits a detector this wide.</p>
+<p>The packaged defaults (ten columns, 150 px apart) describe the real 2560 px
+CMOS frame and are left exactly alone by it.  A narrower image — a test
+fixture, a cropped sensor — would otherwise refuse the whole extraction over
+a sampling plan nobody chose deliberately, so the step is reduced to the
+widest one that still lands every sample on the detector.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h2 id="echelle_spectra.tools.pattern_extraction.pattern_row_offsets" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">pattern_row_offsets</span><span class="p">(</span><span class="n">pattern</span><span class="p">,</span> <span class="n">reference</span><span class="p">)</span></code>
+
+<a href="#echelle_spectra.tools.pattern_extraction.pattern_row_offsets" class="headerlink" title="Permanent link">¶</a></h2>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Row differences <code>pattern - reference</code> for two tables of one shape.</p>
 
 
     </div>

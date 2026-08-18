@@ -711,10 +711,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#the-configuration-bundle-calibration-configsid" class="md-nav__link">
+  <a href="#the-configuration-bundle-calibrationsconfigsid" class="md-nav__link">
     <span class="md-ellipsis">
       
-        The configuration bundle — calibration-configs/&lt;id&gt;/
+        The configuration bundle — calibrations/configs/&lt;id&gt;/
       
     </span>
   </a>
@@ -1522,10 +1522,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#the-configuration-bundle-calibration-configsid" class="md-nav__link">
+  <a href="#the-configuration-bundle-calibrationsconfigsid" class="md-nav__link">
     <span class="md-ellipsis">
       
-        The configuration bundle — calibration-configs/&lt;id&gt;/
+        The configuration bundle — calibrations/configs/&lt;id&gt;/
       
     </span>
   </a>
@@ -1677,12 +1677,8 @@ processing ever reads.</p>
 <td>The wavelength solution. <strong>Already rigid-corrected</strong>: the shift the bench solved is baked in at Save, so the file is the calibration the bench measured, not the table it started from.</td>
 </tr>
 <tr>
-<td><code>sphere.sif</code> + <code>sphere_bg.sif</code></td>
-<td>The integrating-sphere exposure and its background.</td>
-</tr>
-<tr>
 <td><code>integral.txt</code></td>
-<td>The sphere's own spectral reference. Together with the sphere pair, these three give the absolute-factor curve.</td>
+<td>The sphere's own spectral reference. Together with the referenced sphere pair, these give the absolute-factor curve.</td>
 </tr>
 <tr>
 <td><code>alignment.toml</code></td>
@@ -1690,7 +1686,13 @@ processing ever reads.</p>
 </tr>
 </tbody>
 </table>
-<h3 id="the-configuration-bundle-calibration-configsid">The configuration bundle — <code>calibration-configs/&lt;id&gt;/</code><a class="headerlink" href="#the-configuration-bundle-calibration-configsid" title="Permanent link">¶</a></h3>
+<p>The raw frames are <strong>not</strong> in here. The sphere pair and every lamp SIF stay in
+the calibration folder two levels up, and the binder records the path back to
+each one with its size and SHA-256. The folder holds the light; the snapshot
+holds what was computed from it, and points back. Validation re-reads and
+re-hashes each referenced frame where it is named, so a moved or edited frame
+is a refusal, not a silent substitution.</p>
+<h3 id="the-configuration-bundle-calibrationsconfigsid">The configuration bundle — <code>calibrations/configs/&lt;id&gt;/</code><a class="headerlink" href="#the-configuration-bundle-calibrationsconfigsid" title="Permanent link">¶</a></h3>
 <p>Commented, hand-editable text you can open and change. Nothing here is
 digested, and nothing here is read by a registry-driven run.</p>
 <table>
@@ -1718,7 +1720,7 @@ digested, and nothing here is read by a registry-driven run.</p>
 <div class="admonition note">
 <p class="admonition-title">Where the two folders land</p>
 <p>With no flags, both are created <strong>inside the folder you launched the bench
-at</strong>: <code>&lt;folder&gt;/calibrations/</code> and <code>&lt;folder&gt;/calibration-configs/</code>. Pass
+at</strong>: <code>&lt;folder&gt;/calibrations/</code> with the settings bundles in its <code>configs/</code> subfolder. Pass
 <code>--output-root</code> and <code>--config-root</code> to send them elsewhere. The bench's Save
 tab always shows both in full, so you can read where they will go before you
 press anything.</p>
@@ -1727,7 +1729,7 @@ press anything.</p>
 <h2 id="the-flow">The flow<a class="headerlink" href="#the-flow" title="Permanent link">¶</a></h2>
 <pre class="mermaid"><code>flowchart TD
     B["Calibration bench&lt;br/&gt;echelle-calib"] --&gt;|Save| S["calibrations/ID/&lt;br/&gt;snapshot.toml, pattern.txt,&lt;br/&gt;wavelength.txt, sphere pair,&lt;br/&gt;integral.txt, alignment.toml"]
-    B --&gt;|Save| C["calibration-configs/ID/&lt;br/&gt;campaign.toml, alignment.toml,&lt;br/&gt;export.toml"]
+    B --&gt;|Save| C["calibrations/configs/ID/&lt;br/&gt;campaign.toml, alignment.toml,&lt;br/&gt;export.toml"]
     S --&gt; R["Calibration epoch registry&lt;br/&gt;calibration_registry.toml"]
     R --&gt;|"one snapshot per shot"| P["echelle process"]
     C -.-&gt;|"export.toml, bypasses the registry"| P
@@ -1739,11 +1741,15 @@ press anything.</p>
 <hr>
 <h2 id="the-normal-route-through-the-registry">The normal route: through the registry<a class="headerlink" href="#the-normal-route-through-the-registry" title="Permanent link">¶</a></h2>
 <p>This is how a campaign drive is processed.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>echelle<span class="w"> </span>process<span class="w"> </span>/data/shots<span class="w"> </span>-o<span class="w"> </span>/data/cubes<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="w">  </span>--registry<span class="w"> </span>/data/calibration_registry.toml<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="w">  </span>--calibrations<span class="w"> </span>/data/calibrations<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="w">  </span>--drift-verdict<span class="w"> </span>/data/epoch-drift.json
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nv">$Data</span> <span class="p">=</span> <span class="s2">"D:\NIFS"</span>   <span class="c"># your campaign root, set once</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="n">echelle</span> <span class="k">process</span> <span class="s2">"$Data\shots"</span> <span class="n">-o</span> <span class="s2">"$Data\cubes"</span> <span class="p">`</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>  <span class="p">-</span><span class="n">-registry</span> <span class="s2">"$Data\calibration_registry.toml"</span> <span class="p">`</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>  <span class="p">-</span><span class="n">-calibrations</span> <span class="s2">"$Data\calibrations"</span> <span class="p">`</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>  <span class="p">-</span><span class="n">-drift-verdict</span> <span class="s2">"$Data\epoch-drift.json"</span>
 </code></pre></div>
+<p>The <a href="../operator-cheat-sheet/">operator cheat sheet</a> carries this loop in both
+PowerShell and a POSIX shell.</p>
 <p>The registry is an ordered list of calibration epochs with inclusive date and
 shot bounds. For every SIF, <code>echelle process</code> reads the <strong>shot number</strong> out of
 the file's own name and the <strong>acquisition date</strong> out of the path components
@@ -1755,8 +1761,9 @@ needed to tell two epochs apart is a refusal too.</p>
 <ul>
 <li><code>pattern.txt</code> gives the extraction geometry;</li>
 <li><code>wavelength.txt</code> gives the wavelength solution;</li>
-<li><code>sphere.sif</code>, <code>sphere_bg.sif</code> and <code>integral.txt</code> give the absolute-factor
-  curve applied to the counts.</li>
+<li><code>integral.txt</code> and the referenced sphere pair give the absolute-factor curve
+  applied to the counts — the run opens the sphere frames in the calibration
+  folder the binder points at.</li>
 </ul>
 <p>A registry-backed run is also <strong>gated</strong>: it needs either <code>--sample N</code> (a first,
 explicitly unverified sample) or <code>--drift-verdict</code> (the evidence a
@@ -1792,8 +1799,8 @@ than the calibration behind it can support.</p>
 </div>
 <hr>
 <h2 id="the-other-route-config">The other route: <code>--config</code><a class="headerlink" href="#the-other-route-config" title="Permanent link">¶</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>echelle<span class="w"> </span>process<span class="w"> </span>/data/shots<span class="w"> </span>-o<span class="w"> </span>/data/cubes<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="w">  </span>--config<span class="w"> </span>/data/calibration-configs/20260814_cmos/export.toml
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="n">echelle</span> <span class="k">process</span> <span class="s2">"$Data\shots"</span> <span class="n">-o</span> <span class="s2">"$Data\cubes"</span> <span class="p">`</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>  <span class="p">-</span><span class="n">-config</span> <span class="s2">"$Data\calibrations\configs\20260814_cmos\export.toml"</span>
 </code></pre></div>
 <p>Here you name the calibration yourself instead of letting the registry choose
 it. <code>export.toml</code> carries three sections:</p>
@@ -1867,7 +1874,7 @@ campaign drive.</p>
 </tr>
 <tr>
 <td>The absolute intensity factors</td>
-<td><code>sphere.sif</code> + <code>sphere_bg.sif</code> + <code>integral.txt</code> in the snapshot</td>
+<td><code>integral.txt</code> in the snapshot, plus the sphere pair it references in the calibration folder</td>
 <td>the sphere exposures of that bench session</td>
 </tr>
 <tr>

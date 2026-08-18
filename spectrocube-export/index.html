@@ -2065,11 +2065,14 @@ context:</p>
 range plus dropped-column counts in SpectroCube metadata.</p>
 <h3 id="epoch-registry-export">Epoch-registry export<a class="headerlink" href="#epoch-registry-export" title="Permanent link">¶</a></h3>
 <p>Use a registry when one source or batch must select calibration by shot/date:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>echelle-spectrocube<span class="w"> </span>/data/shots<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="w">  </span>--registry<span class="w"> </span>/data/calibration_registry.toml<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="w">  </span>--calibrations<span class="w"> </span>/data/calibrations<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="w">  </span>--units<span class="w"> </span>wmsr<span class="w"> </span>-o<span class="w"> </span>/data/cubes
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="nv">$Data</span> <span class="p">=</span> <span class="s2">"D:\NIFS"</span>   <span class="c"># your campaign root, set once</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="n">echelle-spectrocube</span> <span class="s2">"$Data\shots"</span> <span class="p">`</span>
+<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a>  <span class="p">-</span><span class="n">-registry</span> <span class="s2">"$Data\calibration_registry.toml"</span> <span class="p">`</span>
+<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a>  <span class="p">-</span><span class="n">-calibrations</span> <span class="s2">"$Data\calibrations"</span> <span class="p">`</span>
+<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a>  <span class="p">-</span><span class="n">-units</span> <span class="n">wmsr</span> <span class="n">-o</span> <span class="s2">"$Data\cubes"</span>
 </code></pre></div>
+<p>On macOS or Linux set <code>data="/Volumes/NIFS"</code> instead and use forward slashes.</p>
 <p>The registry is calibration authority and cannot be mixed with snapshot-ID,
 camera, calibration-directory, or per-file calibration overrides. Registry and
 snapshot validation happens before extraction; a missing identity, no match,
@@ -2096,14 +2099,14 @@ pair and export absolute spectral radiance:</p>
 <a id="__codelineno-10-10" name="__codelineno-10-10" href="#__codelineno-10-10"></a>  <span class="n">-o</span> <span class="n">local</span><span class="p">\</span><span class="n">193778_Echelle_spectrocube_wmsr</span><span class="p">.</span><span class="n">nc</span>
 </code></pre></div>
 <h3 id="batch-folder-export">Batch folder export<a class="headerlink" href="#batch-folder-export" title="Permanent link">¶</a></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="c1"># Export all .SIF files in a folder, save .nc files alongside them</span>
-<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>echelle-spectrocube<span class="w"> </span>/data/shots/<span class="w"> </span>--units<span class="w"> </span>wm
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="c"># Export all .SIF files in a folder, save .nc files alongside them</span>
+<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="n">echelle-spectrocube</span> <span class="s2">"$Data\shots"</span> <span class="p">-</span><span class="n">-units</span> <span class="n">wm</span>
 <a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a>
-<a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a><span class="c1"># Save to a separate output directory</span>
-<a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a>echelle-spectrocube<span class="w"> </span>/data/shots/<span class="w"> </span>--units<span class="w"> </span>wmsr<span class="w"> </span>-o<span class="w"> </span>/data/nc/
+<a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a><span class="c"># Save to a separate output directory</span>
+<a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a><span class="n">echelle-spectrocube</span> <span class="s2">"$Data\shots"</span> <span class="p">-</span><span class="n">-units</span> <span class="n">wmsr</span> <span class="n">-o</span> <span class="s2">"$Data\nc"</span>
 <a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a>
-<a id="__codelineno-11-7" name="__codelineno-11-7" href="#__codelineno-11-7"></a><span class="c1"># Preview what would happen (no files written)</span>
-<a id="__codelineno-11-8" name="__codelineno-11-8" href="#__codelineno-11-8"></a>echelle-spectrocube<span class="w"> </span>/data/shots/<span class="w"> </span>--dry-run<span class="w"> </span>--verbose
+<a id="__codelineno-11-7" name="__codelineno-11-7" href="#__codelineno-11-7"></a><span class="c"># Preview what would happen (no files written)</span>
+<a id="__codelineno-11-8" name="__codelineno-11-8" href="#__codelineno-11-8"></a><span class="n">echelle-spectrocube</span> <span class="s2">"$Data\shots"</span> <span class="p">-</span><span class="n">-dry-run</span> <span class="p">-</span><span class="n">-verbose</span>
 </code></pre></div>
 <h3 id="full-option-reference">Full option reference<a class="headerlink" href="#full-option-reference" title="Permanent link">¶</a></h3>
 <table>
@@ -2256,7 +2259,7 @@ installed package under <code>resources/calibration_files/</code> (or supplied v
 files, so the cost is equivalent to opening the GUI once.</p>
 <p>If the <code>.sif</code> sphere files are not bundled with your installation (they are
 large binaries), point to a local copy:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>echelle-spectrocube<span class="w"> </span>/data/shots/<span class="w"> </span>--calibration-dir<span class="w"> </span>/lab/calibration_files/
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="n">echelle-spectrocube</span> <span class="s2">"$Data\shots"</span> <span class="p">-</span><span class="n">-calibration-dir</span> <span class="s2">"&lt;lab-calibration-files&gt;"</span>
 </code></pre></div>
 <p>The same <code>--camera</code> flag selects either the CCD or CMOS calibration file
 set (matching the radio button in the GUI).</p>

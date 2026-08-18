@@ -1509,6 +1509,11 @@ prior. This searches near each reference trace and returns one peak per order:</
 <p>This is not a full trace-tracking algorithm, but it is useful when the new
 geometry is mostly a shifted version of the previous calibration.</p>
 <h2 id="cli-workflow">CLI Workflow<a class="headerlink" href="#cli-workflow" title="Permanent link">¶</a></h2>
+<p>The live calibration bench can also extract a pattern without leaving the
+GUI: when the sphere's order bands do not fit the chosen pattern, the bench
+offers <strong>Extract pattern from this sphere</strong> and rebases the session on the
+result — same extraction core as the CLI below. See the
+<a href="../calibration-bench/">calibration bench guide</a>.</p>
 <p>Use <code>echelle-pattern</code> when the notebook settings are known and the task is just
 to run the calibration workflow. Without <code>--output</code>, the command prints
 diagnostics and does not write a pattern file:</p>

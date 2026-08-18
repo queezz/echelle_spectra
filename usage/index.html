@@ -682,6 +682,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#opening-files-through-a-saved-calibration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Opening files through a saved calibration
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#when-the-instrument-has-moved-a-little" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1443,6 +1454,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#opening-files-through-a-saved-calibration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Opening files through a saved calibration
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#when-the-instrument-has-moved-a-little" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1529,6 +1551,40 @@ running <code>echelle process</code>:</p>
 <p>Steps 2 and 4 are the calibration. Where the files behind them come from, and
 what a finished cube records about them, is
 <a href="../calibration-to-cube/">From calibration to cube</a>.</p>
+<hr>
+<h2 id="opening-files-through-a-saved-calibration">Opening files through a saved calibration<a class="headerlink" href="#opening-files-through-a-saved-calibration" title="Permanent link">¶</a></h2>
+<p>By default the viewer reads every file through the packaged CCD and CMOS
+tables — today's calibration. Frames from an earlier era were taken on an
+instrument that has since moved, so today's tables put the order traces and the
+line boxes beside the blobs instead of on them.</p>
+<p>Point the viewer at that era's snapshot and it sees the files through those
+eyes instead:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="n">echelle_spectra</span> <span class="p">-</span><span class="n">-calibration</span> <span class="s2">"&lt;calibrations&gt;\20190314_cmos"</span>
+</code></pre></div>
+<p>Replace <code>&lt;calibrations&gt;</code> with your own snapshot root — <code>D:\NIFS\calibrations</code>
+on Windows, <code>/Volumes/NIFS/calibrations</code> on macOS.</p>
+<p>The folder is a calibration snapshot — the one holding <code>snapshot.toml</code> next to
+<code>pattern.txt</code> and <code>wavelength.txt</code>. Snapshots are made by the bench and listed
+by <code>echelle status</code>; see <a href="../calibration-snapshots/">Calibration snapshots</a>.</p>
+<p>The <strong>Calibration</strong> selector in the control column is the in-GUI form of this —
+it switches between the packaged CCD and CMOS tables and any snapshot folder you
+browse to, live, without reopening the file — and the flag simply preconfigures
+it at launch.</p>
+<p>What changes:</p>
+<ul>
+<li>The title bar names the snapshot: <strong>Echelle viewer — 20190314_cmos</strong>, and the
+  info panel repeats it beside each loaded frame. Without the flag, nothing
+  about the window changes.</li>
+<li>The order pattern, the line overlays, the cursor link, and the spectrum's
+  wavelength axis all come from that snapshot, because they all read the one
+  calibration the window loaded.</li>
+<li>The camera is fixed to the detector the snapshot was made for, and the CCD /
+  CMOS buttons are greyed out: a snapshot is one detector's calibration, and
+  there is no second one loaded to flip to.</li>
+</ul>
+<p>If the folder is not a snapshot, or the snapshot is missing a table or fails
+its digest check, the viewer says which problem it hit and exits. It never
+falls back to the packaged tables behind your back.</p>
 <hr>
 <h2 id="when-the-instrument-has-moved-a-little">When the instrument has moved a little<a class="headerlink" href="#when-the-instrument-has-moved-a-little" title="Permanent link">¶</a></h2>
 <p>For a small detector or optics shift, fit a rigid correction rather than

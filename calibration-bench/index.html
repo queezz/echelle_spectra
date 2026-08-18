@@ -878,6 +878,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#the-identity-is-dated-by-acquisition-not-by-computation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The identity is dated by acquisition, not by computation
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#reading-the-bench" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -998,6 +1009,17 @@
     <span class="md-ellipsis">
       
         Sphere factors and insufficient data
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-pattern-the-light-does-not-fit-and-the-press-that-fixes-it" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The pattern the light does not fit, and the press that fixes it
       
     </span>
   </a>
@@ -1592,6 +1614,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#the-identity-is-dated-by-acquisition-not-by-computation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The identity is dated by acquisition, not by computation
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#reading-the-bench" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1719,6 +1752,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#the-pattern-the-light-does-not-fit-and-the-press-that-fixes-it" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The pattern the light does not fit, and the press that fixes it
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#save-the-alignment-settings-then-save-the-snapshot" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1799,11 +1843,26 @@ hand, and the procedure is derived from what you actually loaded.</p>
 derived from (see <a href="#where-the-bench-writes">Where the bench writes</a>).</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>echelle-calib<span class="w"> </span>path/to/todays-calibration-folder
 </code></pre></div>
+<p><strong>Open calibration folder…</strong> on the <strong>Files</strong> tab does the same thing without a
+restart, which is what a trip actually looks like: one bench, folder after
+folder. Picking a folder derives both output roots inside it, re-dates the
+snapshot identity from its name, loads and triages every SIF in it through the
+ordinary drop path, and re-aims the file dialogs and the optional watch. The
+current session — files, roles, anchors, factors, generated settings — is
+cleared, and the bench asks first when any of it was not saved. The pattern and
+wavelength tables you chose stay chosen: they are your decision, not the
+folder's, and the band guard judges them against the new sphere. The <strong>Bench
+state</strong> strip names the folder the bench is open at.</p>
+<p>The folder picker is Qt's own rather than the Windows one, deliberately: the
+native folder dialog hides files, so a folder full of SIFs reads "No items match
+your search" and the only way to recognise it is to open it twice. This one
+lists the files greyed out — you can see what is in a folder before choosing it,
+and still only choose the folder.</p>
 <p>The accepted 2025 CMOS pattern and aligned wavelength table, packaged
 integrating-sphere reference, and historical 2024 sphere pair are defaults.
 Override them explicitly when rehearsing another detector or campaign:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>echelle-calib<span class="w"> </span>path/to/calibration-folder<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="w">  </span>--pattern<span class="w"> </span>path/to/pattern.txt<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="w">  </span>--pattern<span class="w"> </span>pattern_CMOS_20240305.txt<span class="w"> </span><span class="se">\</span>
 <a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="w">  </span>--wavelength<span class="w"> </span>path/to/wavelength.txt<span class="w"> </span><span class="se">\</span>
 <a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="w">  </span>--integral<span class="w"> </span>path/to/integrating-sphere.txt<span class="w"> </span><span class="se">\</span>
 <a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="w">  </span>--previous-sphere<span class="w"> </span>path/to/previous-sphere.sif<span class="w"> </span><span class="se">\</span>
@@ -1812,8 +1871,16 @@ Override them explicitly when rehearsing another detector or campaign:</p>
 <a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="w">  </span>--snapshot-id<span class="w"> </span>20260901_cmos<span class="w"> </span><span class="se">\</span>
 <a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="w">  </span>--valid-from<span class="w"> </span><span class="m">2026</span>-09-01<span class="w"> </span><span class="se">\</span>
 <a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="w">  </span>--output-root<span class="w"> </span>path/to/calibrations<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a><span class="w">  </span>--config-root<span class="w"> </span>path/to/calibration-configs
+<a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a><span class="w">  </span>--config-root<span class="w"> </span>path/to/calibrations/configs
 </code></pre></div>
+<p><code>--pattern</code> and <code>--wavelength</code> take a path <strong>or the bare filename of a packaged
+table</strong> — <code>--pattern pattern_CMOS_20240305.txt</code> is enough, and the packaged
+<code>calibration_files\</code> folder (subfolders included) is searched by name. A real
+path always wins; a name that is neither is refused with the packaged names that
+would have worked. Either way the bench prints the absolute path it resolved,
+and shows it on the <strong>Bench state</strong> panel while it runs — and the pattern is no
+longer fixed for the session, see <a href="#the-pattern-the-light-does-not-fit-and-the-press-that-fixes-it">the pattern the light does not
+fit</a>.</p>
 <p><code>--lamp</code> names lamps to <em>suggest</em>, not to demand; any name is accepted and none
 is ever required. Load files at start-up with a repeatable <code>--file</code>, and enable
 the optional folder watch with <code>--watch</code>:</p>
@@ -1823,15 +1890,27 @@ the optional folder watch with <code>--watch</code>:</p>
 configuration, and snapshot controls.</p>
 <h2 id="where-the-bench-writes">Where the bench writes<a class="headerlink" href="#where-the-bench-writes" title="Permanent link">¶</a></h2>
 <p>Both output roots are <strong>derived from the folder argument</strong>. Launched at
-<code>D:\NIFS\incoming</code>, the bench writes:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>D:\NIFS\incoming\calibrations\&lt;snapshot-id&gt;\         the immutable snapshot
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>D:\NIFS\incoming\calibration-configs\&lt;snapshot-id&gt;\  the settings bundle
+<code>T:\2025-LHD-BH\Echelle\20250926_calib</code>, the bench writes:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>…\20250926_calib\calibrations\&lt;snapshot-id&gt;\          the immutable snapshot
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>…\20250926_calib\calibrations\configs\&lt;snapshot-id&gt;\  the settings bundle
 </code></pre></div>
-<p>The folder argument is the calibration's own folder, and it is where you go
-looking for what the bench wrote — so that is what the roots hang off. Nothing
-is scattered into whatever directory a shortcut happened to start in any more.
-With no folder argument at all there is nothing better than the working
-directory, and the bench falls back to it.</p>
+<p>The folder argument is the calibration's own folder: the lamp and sphere frames
+that were measured, and the calibration computed from them, side by side in the
+one folder that holds it all. It is also where you go looking for what the bench
+wrote — so that is what the roots hang off, and nothing is scattered into
+whatever directory a shortcut happened to start in. With no folder argument at
+all there is nothing better than the working directory, and the bench falls back
+to it.</p>
+<p>Because that folder already holds the raw frames, the snapshot <strong>references
+them where they lie and never copies them</strong>: it records the path back to each
+sphere and lamp SIF beside the SHA-256 and size that say the frames are still
+the ones it measured.</p>
+<p>Everything the bench generates lives under that single <code>calibrations\</code> folder:
+the snapshot identity folders, and one <code>configs\</code> subfolder holding the settings
+bundles. A calibration folder therefore gains exactly one generated child, not
+two. Nothing that reads a calibrations root is confused by <code>configs\</code>: snapshot
+enumeration keys on a child's <code>snapshot.toml</code>, and the epoch registry resolves
+the snapshot IDs it was given by name.</p>
 <p><code>--output-root</code> and <code>--config-root</code> still override each root independently, and
 an overriding path is made absolute so the window can be honest about it. A
 network path stays intact: only path joins are used, so a <code>\\server\share</code>
@@ -1841,6 +1920,26 @@ only when they will not fit, one hover or one click into the <em>Why this readin
 dock away from being read exactly. Once a snapshot is saved, an <strong>Open folder</strong>
 button appears beside the confirmation and shows the saved folder in the
 system's own file manager, so no path has to be retyped.</p>
+<h2 id="the-identity-is-dated-by-acquisition-not-by-computation">The identity is dated by acquisition, not by computation<a class="headerlink" href="#the-identity-is-dated-by-acquisition-not-by-computation" title="Permanent link">¶</a></h2>
+<p>A calibration belongs to the day its images were <strong>taken</strong>. When it is computed
+is bookkeeping, not physics — and <code>20240305_cmos</code>, <code>20250926_cmos</code> and every
+other epoch in the registry are already named that way. So the bench prefills
+the snapshot identity as <code>YYYYMMDD_&lt;detector&gt;</code> from the acquisition date, and
+looks for it in this order:</p>
+<ol>
+<li>a leading <code>YYYYMMDD</code> in the launch folder's own name — <code>20250926_calib</code>
+   gives <code>20250926_cmos</code>;</li>
+<li>failing that, the acquisition date the loaded SIF headers carry
+   (<code>ExperimentTime</code>), filled in as soon as the first frame lands;</li>
+<li>failing both, today's date as a placeholder, with the Save tab's <em>Why this
+   reading</em> text saying no acquisition date could be derived and that it must
+   be checked before saving.</li>
+</ol>
+<p><code>--snapshot-id</code> always wins, and so does typing in the <strong>ID</strong> field: once you
+have typed there, a later frame never overwrites it. The epoch a saved snapshot
+declares follows the identity's own date, so a snapshot computed months later
+still starts its epoch on the day it was measured; <code>--valid-from YYYY-MM-DD</code>
+overrides that.</p>
 <h2 id="reading-the-bench">Reading the bench<a class="headerlink" href="#reading-the-bench" title="Permanent link">¶</a></h2>
 <p>Text here is data, not decoration, and the bench is built to be read across a
 full-screen window without leaning in:</p>
@@ -1889,7 +1988,11 @@ is draggable; whatever you drag is what the rest of the session opens with:</p>
 renamed later, appear after the fact, and get retried:</p>
 <ul>
 <li><strong>drag and drop</strong> one or many SIFs onto the window — the same drop machinery
-  the main GUI uses; dropping a folder queues the SIFs inside it;</li>
+  the main GUI uses; dropping a folder queues the SIFs inside it. There is no
+  dashed drop panel telling you so: the empty table is the invitation, and the
+  space it used to spend belongs to the file list;</li>
+<li><strong>Open calibration folder…</strong> loads a whole folder and moves the session to
+  it, as launching there would (see <a href="#start-a-campaign">Start a campaign</a>);</li>
 <li><strong>Add SIF files…</strong> opens an ordinary file dialog in the current folder;</li>
 <li><code>--watch</code> additionally polls a folder and loads each newly stable SIF. This is
   a convenience, never a requirement.</li>
@@ -1993,7 +2096,8 @@ bench is a future refinement, and one calibration is enough to ship.</p>
 <p>Every row that is not yet possible names what would unblock it, so no surface is
 ever dead: the sphere factors need only the sphere pair, the lamp rows need only
 any one classified lamp, and triage needs only a file. With nothing loaded, the
-drop target and the <strong>Add SIF files…</strong> button are the primary surface.</p>
+<strong>Open calibration folder…</strong> and <strong>Add SIF files…</strong> buttons are the primary
+surface — as is dropping files anywhere on the window.</p>
 <p>A checked item always names its supporting filename or numerical result.
 Changing any classification invalidates comparison/configuration/save readiness
 rather than leaving stale green checks.</p>
@@ -2036,7 +2140,10 @@ never add or remove a line. Earlier rounds drew sticks from the curated table
 while filling the panel from the caches interpolated onto the order, which is
 how order 7 could label a NeI 640.225 the panel had never heard of and order 6
 could show three labelled Ne sticks under "0 expected Ne lines in this order":
-the packaged Ne cache spans 580.4–638.3 nm and the curated table does not.</p>
+the packaged Ne cache then spanned only 580.4–638.3 nm and the curated table
+does not. The caches now cover 380–810 nm, so they annotate nearly every
+curated row — but the panel is still the curated rows, and would be even if the
+caches were empty.</p>
 <p>Accepted anchors use the curated calibration table and the established fitting,
 saturation, detector-point, and rigid-transform functions. A low selected-anchor
 RMS does not replace wavelength-table QC or Balmer/Fulcher plasma validation.</p>
@@ -2087,6 +2194,46 @@ bench never calls this aligned or invents a ratio. A candidate-factor failure is
 <p>The packaged default comparison uses the historical 2024 CMOS sphere pair
 because no packaged 2025 sphere pair is available. It is software rehearsal
 evidence, not a claim about a new lamp response.</p>
+<h2 id="the-pattern-the-light-does-not-fit-and-the-press-that-fixes-it">The pattern the light does not fit, and the press that fixes it<a class="headerlink" href="#the-pattern-the-light-does-not-fit-and-the-press-that-fixes-it" title="Permanent link">¶</a></h2>
+<p>The bench cannot see a vertical detector shift through its fit: an anchor is a
+dispersion measurement whose detector row is read <em>out of the reference
+pattern</em>, so a pattern from the wrong era passes the fit, the residuals and the
+save in silence. The sphere is the one frame that lights every order, so its own
+band centres are what the bench holds the chosen pattern against. When they
+disagree by more than about two rows the Sphere factors view, the Procedure's
+reference row and the save panel all say so — "order bands sit 5.3 rows below
+the chosen pattern".</p>
+<p><strong>The answer is a press, not a restart.</strong> Beside that reading, under the factor
+curves:</p>
+<ul>
+<li><strong>Extract pattern from this sphere</strong> fits an order-pattern table to the
+  assigned sphere pair — signal minus background, the current pattern as the
+  prior — through <code>extract_pattern_from_sphere()</code>, the very function
+  <code>echelle-pattern</code> calls. With no background assigned it fits the signal alone
+  and says so. The fit runs off the event loop, like every other campaign task.</li>
+<li><strong>Choose pattern file…</strong> stands the bench on any pattern table you name, on
+  exactly the same terms. The extraction is the one-press special case.</li>
+</ul>
+<p>The extracted table is <strong>written first</strong>, under the campaign's own generated
+folder, and its absolute path is printed in the message:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>…\20250926_calib\calibrations\patterns\pattern_extracted_&lt;acquisition-date&gt;.txt
+</code></pre></div>
+<p>Nothing is overwritten: a second extraction on the same day is a second file.
+The bench then rebases the live session on it, and says what that cost:</p>
+<ul>
+<li>every order is extracted again on the new geometry, the traces over the
+  detector image are redrawn, and the band guard is re-measured against the new
+  pattern — it should now read quiet, which is the acceptance;</li>
+<li><strong>anchors are cleared</strong>, because they were fitted on the old geometry;
+  auto-anchor re-runs them in seconds, and the notice says exactly that;</li>
+<li>the sphere factors, the settings bundle and the save state are reset, because
+  they were computed over the old pattern's bands;</li>
+<li>roles, loaded files and the pattern file it came from are untouched.</li>
+</ul>
+<p>Which pattern the bench is wearing is a reading like any other: its absolute
+path is on the <strong>Bench state</strong> panel and beside the factor curves, and the
+snapshot saves the pattern the bench ended up wearing, corrected by any solved
+transform in the usual way.</p>
 <h2 id="save-the-alignment-settings-then-save-the-snapshot">Save the alignment settings, then save the snapshot<a class="headerlink" href="#save-the-alignment-settings-then-save-the-snapshot" title="Permanent link">¶</a></h2>
 <p>The <strong>Save alignment settings</strong> button comes first: it writes the solved
 alignment, the roles you assigned, and the campaign's own settings into a new
@@ -2094,10 +2241,10 @@ identity directory. Existing files are never overwritten silently — the bench
 says they are already there and offers a separate, deliberate <strong>Regenerate</strong>
 press, because that press discards any hand edits.</p>
 <p>The directory it writes contains:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>calibration-configs/20260901_cmos/
-<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>├── campaign.toml
-<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>├── alignment.toml
-<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a>└── export.toml
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>calibrations/configs/20260901_cmos/
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>├── campaign.toml
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>├── alignment.toml
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a>└── export.toml
 </code></pre></div>
 <p>All three files begin with explanatory comments, contain source filenames rather
 than machine paths, parse as ordinary TOML, and remain freely hand-editable. The
@@ -2110,23 +2257,32 @@ shape and snapshot role filenames.</p>
 marked as inherited. Review those values before the next LHD campaign; see
 <a href="../calibration-to-cube/">From calibration to cube</a>.</p>
 <p><strong>Save and validate snapshot</strong> calls <code>create_snapshot()</code> from the established
-snapshot API. That API copies read-only source inputs into an atomic staging
-directory, digests them, validates them, and refuses to replace an existing
-identity. The bench then calls <code>load_snapshot()</code> explicitly for the completed
-snapshot and reports <strong>VALIDATED</strong> only after that validator succeeds. Lamp signal
-and background SIFs are both retained under <code>lamps/</code> with their explicit family.
-The bench does not build a competing manifest or duplicate validation rules.</p>
+snapshot API. That API writes the computed files into an atomic staging
+directory, digests every input, validates the result, and refuses to replace an
+existing identity. The bench then calls <code>load_snapshot()</code> explicitly for the
+completed snapshot and reports <strong>VALIDATED</strong> only after that validator succeeds.
+Every raw frame — the sphere pair and both the signal and background SIF of each
+lamp — is digested where it lies and recorded as a reference with its explicit
+family. The bench does not build a competing manifest or duplicate validation
+rules.</p>
 <h2 id="the-saved-snapshot-carries-the-measured-calibration">The saved snapshot carries the measured calibration<a class="headerlink" href="#the-saved-snapshot-carries-the-measured-calibration" title="Permanent link">¶</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>calibrations/20260901_cmos/
-<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>├── snapshot.toml
-<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>├── pattern.txt
-<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a>├── wavelength.txt   # base table moved by the solved transform
-<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a>├── alignment.toml   # transform, RMS, fitted-line count
-<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a>├── integral.txt
-<a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a>├── sphere.sif
-<a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a>├── sphere_bg.sif
-<a id="__codelineno-8-9" name="__codelineno-8-9" href="#__codelineno-8-9"></a>└── lamps/
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>20260901_calib/                        the calibration folder you launched on
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>├── sphere-0.1s-x3.sif                 the frames stay here, and only here
+<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a>├── sphere-0.1s-x3-bg.sif
+<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a>├── ThAr-0.3s-x3.sif
+<a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a>├── ThAr-0.3s-x3-bg.sif
+<a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a>└── calibrations/20260901_cmos/
+<a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a>    ├── snapshot.toml   # …and this points back at them, with their digests
+<a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a>    ├── pattern.txt     # base pattern moved by the same solved transform
+<a id="__codelineno-9-9" name="__codelineno-9-9" href="#__codelineno-9-9"></a>    ├── wavelength.txt  # base table moved by the solved transform
+<a id="__codelineno-9-10" name="__codelineno-9-10" href="#__codelineno-9-10"></a>    ├── alignment.toml  # transform, RMS, fitted-line count
+<a id="__codelineno-9-11" name="__codelineno-9-11" href="#__codelineno-9-11"></a>    └── integral.txt
 </code></pre></div>
+<p>The snapshot holds what the bench computed and points at what it read. Moving
+or copying the whole calibration folder keeps every reference true, because a
+reference to a frame in the same folder is stored relative to the snapshot
+(<code>../../sphere-0.1s-x3.sif</code>). Moving the snapshot folder out on its own does
+not, and validation says so by the full path it looked in.</p>
 <p>The snapshot's <code>wavelength.txt</code> is not a copy of the base table. Before
 <code>create_snapshot()</code> runs, the bench applies the solved rigid transform to every
 curated row of the base table with the same <code>apply_rigid_correction_to_lines()</code>
@@ -2140,14 +2296,26 @@ base bytes are copied instead. The message panel and the procedure checklist say
 which of the two happened and how far the largest row moved, and the manifest's
 <code>[alignment]</code> table records <code>wavelength_correction_applied</code> alongside the solved
 <code>dx_px</code>, <code>dy_px</code>, and rotation.</p>
+<p>The snapshot's <code>pattern.txt</code> is corrected with that same transform, through
+<code>apply_rigid_correction_to_pattern()</code> and the shared
+<code>write_corrected_pattern_table()</code> that <code>echelle-align --save</code> also writes its
+pattern with, and the manifest records <code>pattern_correction_applied</code> and
+<code>pattern_max_shift_px</code> beside the wavelength pair. <strong>The bench's own live view
+and the snapshot it saves disagree by design: the bench measures the raw frames
+against the <em>reference</em> pattern and table, which is what makes a shift
+measurable at all, while the snapshot describes the <em>data</em> — both files moved
+onto the detector the bench just measured.</strong> A transform that moves no trace by
+a measurable row copies the base pattern's bytes instead, byte for byte.</p>
 <p>The snapshot folder also gains an <code>alignment.toml</code> in the established alignment
 settings shape, so <code>load_alignment_settings()</code> reads the transform back from the
 snapshot itself. The reviewable configuration bundle under <code>--config-root</code> keeps
 its own richer <code>alignment.toml</code>, which additionally lists every accepted anchor.</p>
 <p>Every saved snapshot carries a <code>[validity]</code> table so it is usable in a
 calibration epoch registry without hand editing. The epoch is open-ended and
-starts on the acquisition date; <code>--valid-from YYYY-MM-DD</code> states another start,
-and the default is today.</p>
+starts on the acquisition date the snapshot identity is named for — see
+<a href="#the-identity-is-dated-by-acquisition-not-by-computation">The identity is dated by acquisition</a>
+— so the day of computation never leaks into it; <code>--valid-from YYYY-MM-DD</code>
+states another start.</p>
 <p>A save failure preserves classifications, comparison, anchors, and the settings
 already written. Correct the identity or missing input and retry. Those settings
 must carry the same identity as the snapshot, which prevents a corrected save

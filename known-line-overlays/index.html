@@ -920,6 +920,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Sources and conventions">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#why-relative-intensity-is-not-nists-number-verbatim" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Why relative intensity is not NIST's number verbatim
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -927,6 +944,45 @@
     <span class="md-ellipsis">
       
         GUI use
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="GUI use">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#which-lines-are-selected-and-which-of-them-get-named" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Which lines are selected, and which of them get named
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#cursor-link" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Cursor link
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#detector-image-levels" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Detector image levels
       
     </span>
   </a>
@@ -1418,6 +1474,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Sources and conventions">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#why-relative-intensity-is-not-nists-number-verbatim" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Why relative intensity is not NIST's number verbatim
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -1425,6 +1498,45 @@
     <span class="md-ellipsis">
       
         GUI use
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="GUI use">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#which-lines-are-selected-and-which-of-them-get-named" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Which lines are selected, and which of them get named
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#cursor-link" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Cursor link
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#detector-image-levels" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Detector image levels
       
     </span>
   </a>
@@ -1498,10 +1610,29 @@ without losing those provenance fields.</p>
 <tr>
 <td>ThAr, Ne, Hg</td>
 <td>Atomic and ionic lamp lines</td>
-<td>Package-cached exports from the <a href="https://physics.nist.gov/asd">NIST Atomic Spectra Database</a>. Observed air wavelengths are preferred, with Ritz air values used when no observation is present. Relative intensity is normalized within each spectrum in the existing loader.</td>
+<td>Package-cached exports from the <a href="https://physics.nist.gov/asd">NIST Atomic Spectra Database</a>, covering 380–810 nm. Observed air wavelengths are preferred, with Ritz air values used when no observation is present. Relative intensity is normalized within each spectrum and then scaled by ionization stage, so a lamp's species can be ranked against one another — see below.</td>
 </tr>
 </tbody>
 </table>
+<h3 id="why-relative-intensity-is-not-nists-number-verbatim">Why relative intensity is not NIST's number verbatim<a class="headerlink" href="#why-relative-intensity-is-not-nists-number-verbatim" title="Permanent link">¶</a></h3>
+<p>NIST prints each spectrum's <code>Rel. Int.</code> on the scale its own source reference
+used, and those scales do not line up between ionization stages. Ne I and Ne II
+come from different line references and top out at 100000 and 400; Hg is worse
+and inverted, with Hg II printed against a 25,000,000 maximum while Hg I's
+strongest line in the same range is 12,000.</p>
+<p>So neither reading works on its own. Normalizing per spectrum makes every
+stage's brightest line 1.0, which is how Ne II rows a neon lamp barely excites
+came to outrank Ne I lines and put marks on dark detector. Pooling the raw
+numbers across stages would hand a mercury lamp over to Hg II.</p>
+<p><code>relative_intensity</code> is therefore the per-spectrum fraction scaled by
+<code>LAMP_STAGE_WEIGHTS</code> — 1.0 for the neutral stage, 0.1 for singly ionized — a
+stated lamp-physics prior rather than a claim about the database. A
+low-pressure discharge radiates overwhelmingly in its neutral spectrum, and its
+ions appear roughly a decade or two down: weakly, but really, which is why the
+curated 20240305 table anchors on Hg II 794.4555 nm and marks it OK. Read the
+field as a selection aid; do not take a line ratio off two of them.</p>
+<p>Regenerate the caches with <code>python -m echelle_spectra.tools.nist_cache_refresh</code>, which writes
+down the exact ASD query that produced them.</p>
 <p>The Fulcher table is deliberately a position/identification aid. Molecular
 deblending, intensity extraction, and population analysis remain in the Fulcher
 packages.</p>
@@ -1512,12 +1643,61 @@ Enabling a family draws color-coded vertical markers on both main spectrum
 plots and compact labels on the calibrated plot.</p>
 <p>The renderer follows the visible wavelength range:</p>
 <ul>
-<li>broad views retain only labels that have enough horizontal room;</li>
+<li>every selected line keeps its marker; only the <strong>text</strong> is rationed when the
+  view has no horizontal room for it, so a line without a label is still a
+  visible invitation to zoom;</li>
 <li>zooming reveals the local molecular structure and progressively weaker NIST
   rows;</li>
 <li>disabling a family removes every marker immediately;</li>
 <li>pan and zoom never alter the selected families.</li>
 </ul>
+<h3 id="which-lines-are-selected-and-which-of-them-get-named">Which lines are selected, and which of them get named<a class="headerlink" href="#which-lines-are-selected-and-which-of-them-get-named" title="Permanent link">¶</a></h3>
+<p>For a lamp family the selected set is a <strong>union</strong>: the cached NIST rows strong
+enough for a view that wide, plus every row the curated wavelength table
+<code>Th_wavelength_CMOS_20240305.txt</code> marks <code>OK</code> for that lamp. A curated row is a
+line somebody found on this instrument, fitted, and signed for, and it does not
+lose a selection contest to a database strength number. That was the defect the
+owner reported from the field on 2026-08-17: Ne I 594.48, 609.62, 653.29,
+667.83 and 671.70 are unmissable in a real neon lamp, all five sit below the
+broad-view strength floor of <code>0.08</code>, and all five went unmarked. Curated rows
+carry <code>SpectralLine.curated</code>; the six vetted Th I lines the packaged cache has
+no counterpart for are carried under the curated table's own provenance and
+with no <code>relative_intensity</code>, because inventing one would be exactly the
+database claim they are not.</p>
+<p>Curation buys standing, not licence. The curated table carries no OK-marked
+Ne II row, so the neon ion suppression is untouched: one Ne II line is selected
+across the whole detector, the same one as before.</p>
+<p>Which of the selected sticks can carry text is a separate question, answered
+against the <strong>measured</strong> trace on screen. When the view is too crowded to name
+everything, the labels go to the lines with the largest measured peak beside
+them, not to the ones the database calls strongest — the evidence for "this
+line matters in this frame" is already plotted. With no spectrum loaded the
+cached strengths rank them, as they always did.</p>
+<h2 id="cursor-link">Cursor link<a class="headerlink" href="#cursor-link" title="Permanent link">¶</a></h2>
+<p>A sixth checkbox, <strong>Cursor link</strong>, ties the two views together through the same
+calibration geometry read forwards instead of backwards. Hovering the detector
+image finds the order whose band the cursor row falls in, reads that order's
+sampled solution at the cursor column, and marks the resulting wavelength on
+both spectrum plots; hovering a spectrum marks where the stitched trace read
+that wavelength from the sensor. The status bar names the order and wavelength,
+for example <code>order 9 · 601.83 nm</code>. A cursor in the gutter between the outermost
+trace and the edge of the sensor belongs to no order and is reported as
+nothing rather than as the nearest guess.</p>
+<p>It is off by default and off costs nothing: no scene event filter is connected
+until it is switched on. Switched on, mouse moves are rate-limited to ~30 Hz
+through <code>pyqtgraph.SignalProxy</code>, and each view owns one pooled marker item that
+is moved and hidden rather than rebuilt.</p>
+<h2 id="detector-image-levels">Detector image levels<a class="headerlink" href="#detector-image-levels" title="Permanent link">¶</a></h2>
+<p>The image's automatic display levels are echelle-aware
+(<code>echelle_spectra.tools.detector_display</code>). An echelle frame is one enormous
+near-background mass with a few dozen line blobs two to three decades above it,
+so a symmetric quantile window lands entirely inside the background — the
+1st–99th percentile rule the viewer used to apply gives 96–149 counts on the
+owner's bright Ne frame, which is the grey wash he reported. The rule is now
+black at the background floor (the median of a strided subsample) and white at
+the 99.9th percentile, so the strong lines clip and the faint ones keep their
+contrast. It runs when the displayed frame changes and at no other time: a
+histogram region the operator has dragged survives every redraw of that frame.</p>
 <p>The screenshots below use a synthetic spectrum solely to make the UI states
 and marker behavior reproducible; they are not physics-validation evidence.</p>
 <p>Disabled normal use stays visually identical to the established spectrum view:</p>
@@ -1527,9 +1707,13 @@ and marker behavior reproducible; they are not physics-validation evidence.</p>
 <p>Zooming exposes the local line structure:</p>
 <p><a class="glightbox" data-type="image" data-width="auto" data-height="auto" href="../assets/known-line-overlays/fulcher-zoom.png" data-desc-position="bottom"><img alt="Fulcher Q-branch labels after zooming to 600–616 nm" src="../assets/known-line-overlays/fulcher-zoom.png"></a></p>
 <p><a class="glightbox" data-type="image" data-width="auto" data-height="auto" href="../assets/known-line-overlays/ne-zoom.png" data-desc-position="bottom"><img alt="NIST Ne I and Ne II labels after zooming to 580–610 nm" src="../assets/known-line-overlays/ne-zoom.png"></a></p>
-<p>The NIST caches currently cover roughly <code>578–640 nm</code>; their lamp overlays are
-therefore empty outside that packaged interval. Balmer and Fulcher tables cover
-their own listed wavelengths.</p>
+<p>The NIST caches cover <code>380–810 nm</code>, which brackets the ~401–802 nm the CMOS
+wavelength solution reaches, so a lamp overlay has something to say anywhere on
+the detector. They covered only <code>578–640 nm</code> — the Fulcher window — through
+v0.10, which left every lamp overlay empty outside that interval and, less
+visibly, left strong lines just past the edge with no strength annotation and
+therefore filtered out of both views. Balmer and Fulcher tables cover their own
+listed wavelengths.</p>
 <h2 id="relationship-to-line-validation">Relationship to line validation<a class="headerlink" href="#relationship-to-line-validation" title="Permanent link">¶</a></h2>
 <p><code>echelle-validate-lines</code> now reads the same bundled Balmer and Fulcher records
 as the GUI. An external legacy Fulcher matrix can still be supplied with
