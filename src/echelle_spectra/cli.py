@@ -50,6 +50,10 @@ def _build_parser() -> argparse.ArgumentParser:
     commands.add_parser(
         "web", help="Build the read-only campaign page: stepper, drives, calibration, reading room."
     )
+    commands.add_parser(
+        "serve",
+        help="Serve the campaign page on loopback so it can browse folders and set a home.",
+    )
     commands.add_parser("historical", help="Validate bundled historical manifests.")
     return parser
 
@@ -197,6 +201,10 @@ def main(argv: list[str] | None = None) -> int:
 
         result = process_main(remainder, prog="echelle process")
         return 0 if result is None else int(result)
+    if command == "serve":
+        from .campaign_server import serve_main
+
+        return int(serve_main(remainder, prog="echelle serve"))
     if command in {"catalog", "txt", "recal-cube", "drift", "web", "historical"}:
         from . import campaign_tools_cli
 
