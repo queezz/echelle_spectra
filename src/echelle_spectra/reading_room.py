@@ -3034,7 +3034,11 @@ button:hover { border-color: var(--accent); }
 .doc-body { font-size: .93rem; }
 .doc-body pre { background: var(--raised); border: 1px solid var(--line); border-radius: .3rem;
   padding: .5rem .6rem; overflow-x: auto; }
-.doc-body code { background: var(--raised); border-radius: .2rem; padding: 0 .2rem; }
+/* A packaged doc holds inline code like a long resource path with no space in
+   it; without a break opportunity that token widens the whole page at narrow
+   widths. Let it wrap, the same way .scan-line lets a long UNC root wrap. */
+.doc-body code { background: var(--raised); border-radius: .2rem; padding: 0 .2rem;
+  overflow-wrap: anywhere; }
 .doc-body pre code { background: none; padding: 0; }
 .cube-row.hidden-row { display: none; }
 /* One rule covers every jump target on the page, because every jump target's

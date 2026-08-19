@@ -1087,6 +1087,17 @@ def test_the_how_to_bakes_in_no_real_path_only_the_placeholder_convention(
         assert forbidden not in howto
 
 
+def test_inline_doc_code_may_wrap_so_a_long_path_never_widens_the_page(page: str) -> None:
+    """A packaged doc's inline code -- a long resource path with no space in it --
+    must be allowed to wrap, or it forces a horizontal page scroll at narrow
+    widths (measured at 760px). The rule lives on .doc-body code, the same
+    overflow-wrap idiom .scan-line already uses for long UNC roots."""
+
+    match = re.search(r"\.doc-body code\s*\{([^}]*)\}", page)
+    assert match, ".doc-body code rule is missing"
+    assert "overflow-wrap" in match.group(1)
+
+
 def test_the_reading_room_links_the_documentation_site_once(page: str) -> None:
     link = '<a href="https://queezz.github.io/echelle_spectra">'
     assert page.count(link) == 1
