@@ -19,6 +19,7 @@ from echelle_spectra.calibration_registry import REGISTRY_SCHEMA
 from echelle_spectra.reading_room import (
     _SOURCE_NOTES,
     SNAPSHOT_SCAN_BUDGET,
+    SNAPSHOT_SCAN_DEPTH,
     _derived_from_folder,
     _saved_snapshots,
     build_reading_room,
@@ -966,6 +967,126 @@ def test_the_alignment_verdict_leads_every_drive_card(page: str) -> None:
     assert 'verdict-lead">shifted<' in _drive_rows(page)[0]
 
 
+# ---------------------------------------------------------------------------
+# The illustrated how-to
+# ---------------------------------------------------------------------------
+#
+# "why do we need to make a separate explainer? That should be the default UX...
+# Or at least the campaign's reading room should have this. Kind how-to with
+# illustrations. Not the textbook." (queezz, 2026-08-19.)
+
+
+_HOWTO_ANCHORS = (
+    "sec-howto",
+    "sec-howto-eyes",
+    "sec-howto-flow",
+    "sec-howto-letters",
+    "sec-howto-checklist",
+)
+
+
+def _howto(page: str) -> str:
+    return _element(page, 'id="sec-howto"')
+
+
+def test_the_how_to_leads_the_reading_room_with_its_own_anchors(page: str) -> None:
+    reading = _view(page, "reading")
+    # It leads: a person needs the pictures before the canon, not after it.
+    assert reading.index('id="sec-howto"') < reading.index('id="sec-reading-room"')
+    for anchor in _HOWTO_ANCHORS:
+        assert f'id="{anchor}"' in reading
+    # Registered where the room indexes its sections, in the room's own rail
+    # pattern -- the page's general pin already demands a link for every sec-
+    # anchor; this one demands the order too.
+    rail = _rail_group(page, "rail-right", "reading")
+    positions = [rail.index(f'href="#{anchor}"') for anchor in _HOWTO_ANCHORS]
+    assert positions == sorted(positions)
+    assert rail.index('href="#sec-howto"') < rail.index('href="#sec-reading-room"')
+    # One bordered region with headed groups inside it, never a card in a card.
+    howto = _howto(page)
+    assert howto.startswith('<section class="panel howto" id="sec-howto">')
+    assert "<article" not in howto
+    assert re.findall(r'<h3 id="(sec-howto-[a-z]+)"', howto) == [
+        "sec-howto-eyes",
+        "sec-howto-flow",
+        "sec-howto-letters",
+        "sec-howto-checklist",
+    ]
+
+
+def test_the_how_to_teaches_with_figures_rather_than_paragraphs(page: str) -> None:
+    howto = _howto(page)
+    figures = re.findall(r"<figure class=\"figure\">(.*?)</figure>", howto, re.S)
+    assert len(figures) == 3
+    for figure in figures:
+        assert '<svg viewBox="' in figure, "a figure that does not scale by its own viewBox"
+        assert 'role="img"' in figure and 'aria-label="' in figure
+        assert "<figcaption>" in figure
+        # Hand-drawn primitives on the page's own ink, and the one accent group
+        # spent through the page's own variable.
+        assert 'stroke="currentColor"' in figure
+        assert 'class="accent"' in figure
+        assert "<rect" in figure and "<text" in figure and "<path" in figure
+        # Wide content scrolls inside its own box: a drawing squeezed to a
+        # phone's width would render its labels at a few pixels, and the page
+        # body must never gain a sideways scrollbar to avoid that.
+        assert figure.startswith('<div class="scroll-x">')
+    assert ".figure svg { display: block; width: 100%; min-width: 40rem;" in page
+    # The three drawings the owner asked for, named by what they show.
+    labels = re.findall(r'aria-label="([^"]+)"', howto)
+    assert len(labels) == 3
+    assert "echelle status looks from the folder you stand in" in labels[0]
+    assert "the drift verdict gates what follows" in labels[1]
+    assert "the same folder from every machine" in labels[2]
+    assert ".figure .accent { color: var(--accent); }" in page
+    # The drawing prints the scan's own numbers, never hand-typed glyphs: a
+    # picture is the last place anyone would look for a drifted constant.
+    assert f"({SNAPSHOT_SCAN_DEPTH} levels, {SNAPSHOT_SCAN_BUDGET} entries)" in howto
+    assert "SCAN_DEPTH" not in howto and "SCAN_BUDGET" not in howto
+    # Kind and short: the pictures carry the mechanism, so no part of the
+    # how-to turns back into the textbook hum.
+    assert "mermaid" not in page.lower()
+    assert "<img" not in page and "base64" not in page
+
+
+def test_the_how_to_checklist_answers_the_calibrations_question(page: str) -> None:
+    checklist = _element(_howto(page), 'id="sec-howto-checklist"', "h3")
+    howto = _howto(page)
+    items = re.findall(r"<li>(.*?)</li>", howto[howto.index('id="sec-howto-checklist"') :], re.S)
+    assert len(items) == 4
+    joined = html.unescape(" ".join(items))
+    # The checklist names the campaign file by its one real name.
+    assert "the campaign file (campaign.toml)" in joined
+    assert "echelle-campaign.toml" not in joined
+    assert "calibrations line" in joined
+    assert f"{SNAPSHOT_SCAN_DEPTH} levels down" in joined
+    assert f"stops after {SNAPSHOT_SCAN_BUDGET} entries" in joined
+    assert "a folder holding snapshot.toml" in joined
+    assert "echelle status" in joined
+    assert checklist  # the heading itself is the jump target the rail names
+
+
+def test_the_how_to_bakes_in_no_real_path_only_the_placeholder_convention(
+    page: str,
+) -> None:
+    """Placeholders only: no hostname, no address, no drive letter of anyone's.
+
+    The page's own no-baked-drives pin already refuses a literal drive; this
+    one refuses the rest of a real machine and pins what stands in for them.
+    """
+
+    howto = _howto(page)
+    # A drive letter is the subject of one figure and is still never a literal:
+    # the page's own placeholder convention carries it.
+    assert "&lt;letter&gt;:\\NIFS" in howto
+    assert not re.search(r"[A-Za-z]:\\", html.unescape(howto)), "a real drive letter got in"
+    assert r"\\NAS\share\NIFS" in howto
+    # No host, no address, no user profile.
+    assert not re.search(r"\b\d{1,3}(\.\d{1,3}){3}\b", howto), "an IP address got in"
+    for forbidden in ("queezz", "Dropbox", "workdata", "10.10.10"):
+        assert forbidden not in howto
+
+
 def test_the_reading_room_links_the_documentation_site_once(page: str) -> None:
     link = '<a href="https://queezz.github.io/echelle_spectra">'
     assert page.count(link) == 1
@@ -1393,20 +1514,108 @@ def test_a_thin_binder_says_not_recorded_rather_than_inventing(tmp_path: Path) -
     assert "0.0" not in card and "0 px" not in card
 
 
+#: The three sentences an empty snapshot scan may say, verbatim.  They are the
+#: contract: the owner spent a day hunting a snapshot the page could see all
+#: along because the select said only that it had none, never where it looked.
+_UNSET_LINE = "This campaign names no calibrations root, so no folder was scanned for snapshots."
+
+
+def _missing_line(root: Path) -> str:
+    return f"No snapshots under {root.as_posix()} — that folder does not exist on this machine."
+
+
+def _empty_line(root: Path) -> str:
+    return f"{root.as_posix()} holds no snapshot within {SNAPSHOT_SCAN_DEPTH} levels."
+
+
+def _select_region(page: str) -> str:
+    """The composer's calibration select and whatever stands under it."""
+
+    card = _composer(page)
+    return card[card.index('<select id="f-epoch"') : card.index("<details")]
+
+
 def test_no_snapshot_root_and_an_empty_one_are_different_facts(tmp_path: Path) -> None:
+    """Three conditions a root can be in, and three different sentences.
+
+    The middle one is the whole point: a root that is simply not on this
+    machine used to read exactly like a root that answered and held nothing,
+    which is what a mapped drive letter from another box looks like.
+    """
+
     nothing = build_reading_room(
         _bare_catalog(tmp_path, "no-root.json"), tmp_path / "web-no-root"
     ).read_text(encoding="utf-8")
-    assert "was given no snapshot root" in nothing
-    assert "No snapshot folder was found" not in nothing
+    assert _UNSET_LINE in nothing
+    assert "holds no snapshot within" not in nothing
+    assert "does not exist on this machine" not in nothing
 
     empty = tmp_path / "empty-root"
     empty.mkdir()
     swept = build_reading_room(
         _bare_catalog(tmp_path, "empty.json"), tmp_path / "web-empty", calibrations_root=empty
     ).read_text(encoding="utf-8")
-    assert "No snapshot folder was found" in swept
-    assert "was given no snapshot root" not in swept
+    assert _escaped(_empty_line(empty)) in swept
+    assert _UNSET_LINE not in swept
+    assert "does not exist on this machine" not in swept
+
+    gone = tmp_path / "mapped-elsewhere"
+    absent = build_reading_room(
+        _bare_catalog(tmp_path, "gone.json"), tmp_path / "web-gone", calibrations_root=gone
+    ).read_text(encoding="utf-8")
+    assert _escaped(_missing_line(gone)) in absent
+    assert _UNSET_LINE not in absent
+    assert "holds no snapshot within" not in absent
+
+
+def test_the_empty_select_names_the_root_it_scanned_and_its_condition(
+    tmp_path: Path,
+) -> None:
+    """The line lives at the select it emptied, not on some other tab.
+
+    "No snapshots" is the answer that cost a day; "no snapshots under THIS
+    folder, which is not on this machine" is the answer that ends it.
+    """
+
+    gone = tmp_path / "mapped-elsewhere"
+    page = build_reading_room(
+        _bare_catalog(tmp_path, "beside.json"), tmp_path / "web-beside", calibrations_root=gone
+    ).read_text(encoding="utf-8")
+    region = _select_region(page)
+    assert _escaped(_missing_line(gone)) in region
+    # One line, in a state class the page already owns -- no new hue for it.
+    assert region.count('class="note scan-line') == 1
+    assert 'class="note scan-line state-missing-drive"' in region
+    # And the same fact, in the same words, is what the Calibration tab says
+    # where it would otherwise list snapshots: one wording, two rooms, and a
+    # reader never meets both at once.
+    assert page.count(_escaped(_missing_line(gone))) == 2
+    assert _escaped(_missing_line(gone)) in _view(page, "calibration")
+
+
+def test_the_scan_line_is_silent_once_the_scan_finds_something(tmp_path: Path) -> None:
+    root = tmp_path / "cal"
+    _snapshot_folder(root / "20190314_cmos", "20190314_cmos")
+    page = build_reading_room(
+        _bare_catalog(tmp_path, "found.json"), tmp_path / "web-found", calibrations_root=root
+    ).read_text(encoding="utf-8")
+    assert 'class="note scan-line' not in page
+    for silent in (_UNSET_LINE, "does not exist on this machine", "holds no snapshot within"):
+        assert silent not in page
+
+
+def test_the_scan_line_says_the_depth_the_walk_actually_uses(tmp_path: Path) -> None:
+    """The sentence counts levels, so it reads the constant the walk spends."""
+
+    from echelle_spectra import reading_room
+
+    assert reading_room._saved_snapshots.__kwdefaults__["depth"] == SNAPSHOT_SCAN_DEPTH
+    empty = tmp_path / "empty-root"
+    empty.mkdir()
+    page = build_reading_room(
+        _bare_catalog(tmp_path, "depth.json"), tmp_path / "web-depth", calibrations_root=empty
+    ).read_text(encoding="utf-8")
+    assert f"within {SNAPSHOT_SCAN_DEPTH} levels" in page
 
 
 def test_an_unreadable_binder_is_its_own_state(tmp_path: Path) -> None:

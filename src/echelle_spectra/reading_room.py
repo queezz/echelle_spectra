@@ -76,6 +76,27 @@ except ModuleNotFoundError:  # pragma: no cover - Python 3.9/3.10
 #: with no repository checkout still opens a complete reading room.
 PACKAGED_DOCUMENTS = ("vocabulary.md", "procedure.md", "provenance.md")
 
+#: How many directories one page build may look at while hunting snapshots, and
+#: how many levels below the calibrations root it descends.  Both are declared
+#: here, at the top, because the page says them out loud in its own how-to and
+#: in the line it prints when a scan comes back empty: an operator told "no
+#: snapshot within 3 levels" can count the levels themselves, and a sentence
+#: carrying a hand-typed number would start lying the day a default moved.
+#: The walk that spends them lives beside :func:`_saved_snapshots`.
+SNAPSHOT_SCAN_BUDGET = 400
+SNAPSHOT_SCAN_DEPTH = 3
+
+#: What the scan found the calibrations root to be.  Four states, never three:
+#: a root nobody named, a root this machine cannot see, a root that exists and
+#: holds no snapshot, and a root that holds some.  The middle two used to read
+#: as one sentence -- "no snapshot folder was found under <root>" -- which is
+#: exactly the sentence the owner's mapped drive letter told him on 2026-08-18
+#: while his snapshots sat on the NAS the letter no longer pointed at.
+ROOT_UNSET = "unset"
+ROOT_MISSING = "missing"
+ROOT_EMPTY = "empty"
+ROOT_HOLDS = "holds"
+
 
 # ---------------------------------------------------------------------------
 # Markdown
@@ -1954,6 +1975,52 @@ def _absolute_facts(manifest: dict[str, Any]) -> str:
     return _facts(rows)
 
 
+#: The state class each empty scan is rendered in.  All three already exist on
+#: this page: a root nobody named is unmeasured, a root this machine cannot see
+#: is the same fact a missing drive is, and a root that answered and held
+#: nothing is empty.  Permuting the existing ramp, never adding a hue.
+_ROOT_CLASSES = {
+    ROOT_UNSET: "state-unmeasured",
+    ROOT_MISSING: "state-missing-drive",
+    ROOT_EMPTY: "state-empty",
+}
+
+
+def _scan_sentence(registry: dict[str, Any]) -> str:
+    """Where the snapshot scan looked and what it found there, in one line.
+
+    The empty string when it found snapshots: this sentence exists for the
+    moment of confusion and says nothing the rest of the time.
+
+    Three cases, never two.  Yesterday's page said, in effect, "no snapshots"
+    while the owner's snapshots sat on the NAS, because his campaign file named
+    a mapped drive letter from another machine and the page never said WHERE it
+    had looked (queezz, 2026-08-18).  A letter is per-machine; the page cannot
+    know that folder is the wrong one, but it can always say that the folder it
+    scanned is not on this machine, which is the fact that ends the hunt.
+    """
+
+    state = str(registry.get("root_state") or "")
+    root = str(registry.get("calibrations") or "")
+    if state == ROOT_UNSET:
+        return "This campaign names no calibrations root, so no folder was scanned for snapshots."
+    if state == ROOT_MISSING:
+        return f"No snapshots under {root} — that folder does not exist on this machine."
+    if state == ROOT_EMPTY:
+        return f"{root} holds no snapshot within {SNAPSHOT_SCAN_DEPTH} levels."
+    return ""
+
+
+def _scan_line(registry: dict[str, Any]) -> str:
+    """That sentence as the one line under the calibration select."""
+
+    sentence = _scan_sentence(registry)
+    if not sentence:
+        return ""
+    state = _ROOT_CLASSES[str(registry["root_state"])]
+    return f'<p class="note scan-line {state}">{_e(sentence)}</p>'
+
+
 def _snapshot_card(record: dict[str, Any]) -> str:
     """One snapshot in the owner's reading order: place, sources, bench."""
 
@@ -2000,20 +2067,17 @@ def _snapshot_card(record: dict[str, Any]) -> str:
 
 
 def _snapshot_section(context: dict[str, Any]) -> str:
-    """The calibrations this build can actually read, or why it read none."""
+    """The calibrations this build can actually read, or why it read none.
+
+    The "why it read none" half is the same sentence the composer's select
+    carries, in the same three cases: one fact, one wording, and the two places
+    a reader can meet it are never on screen at once.
+    """
 
     registry = context["registry"]
     records = context["snapshots"]
     if not records:
-        if not registry.get("scanned"):
-            return (
-                '<p class="note state-unmeasured">This build was given no snapshot root, so it '
-                "cannot say which calibrations exist.</p>"
-            )
-        return (
-            '<p class="note state-empty">No snapshot folder was found under '
-            f'{_e(registry.get("calibrations") or "the snapshot root")}.</p>'
-        )
+        return _scan_line(registry)
     lead = (
         '<p class="muted">A binder records no exposure time; the frame name is what carries '
         "it.</p>"
@@ -2077,6 +2141,232 @@ def _document_sections(documents: list[dict[str, str]]) -> str:
             f'<div class="doc-body">{document["html"]}</div></article>'
         )
     return "".join(parts)
+
+
+# ---------------------------------------------------------------------------
+# The illustrated how-to
+# ---------------------------------------------------------------------------
+#
+# The owner's standing verdict on this page is that structure teaches and text
+# states, and that a surface which explains itself in prose everywhere is "a
+# textbook in disguise".  A how-to is the one place explanation belongs -- and
+# he asked for this one to be kind and visual rather than another wall of
+# paragraphs: "Kind how-to with illustrations. Not the textbook" (2026-08-19).
+#
+# So: three figures and a checklist, two lines of prose apiece, and the drawing
+# carries the mechanism.  Every figure is hand-authored SVG built from <rect>,
+# <line>, <path> and <text> primitives -- no library, nothing fetched, no icon
+# set's path data.  Each scales by its own viewBox, strokes and fills on
+# currentColor so the page's ink is the whole palette in both schemes, and one
+# ``accent`` group per figure is where the page's own --accent is spent.  No
+# element inside a figure carries an id: the page's anchor namespace is the
+# sec- prefix and a figure must not put anything else into it.
+#
+# The paths drawn here are placeholders and only placeholders -- \\NAS\share
+# shapes and a <letter>: stand-in.  A real machine's paths are the operator's
+# business and never this repository's.
+
+_FIGURE_EYES = r"""<svg viewBox="0 0 660 340" role="img" aria-label="Three tools looking from three different places: echelle status looks from the folder you stand in, one level down; the campaign page looks from the campaign file&#8217;s own keys; the bench looks at the folder you opened and saves where the campaign file points.">
+<g fill="none" stroke="currentColor" stroke-width="1.2">
+<rect x="16" y="20" width="176" height="68" rx="6"/>
+<rect x="16" y="136" width="176" height="68" rx="6"/>
+<rect x="16" y="252" width="176" height="68" rx="6"/>
+<rect x="296" y="12" width="348" height="84" rx="6"/>
+<rect x="296" y="244" width="348" height="84" rx="6"/>
+<line x1="198" y1="54" x2="284" y2="54"/>
+<line x1="198" y1="170" x2="284" y2="170"/>
+<line x1="198" y1="286" x2="284" y2="286"/>
+</g>
+<g fill="currentColor">
+<path d="M290 54 L280 49 L280 59 Z"/>
+<path d="M290 170 L280 165 L280 175 Z"/>
+<path d="M290 286 L280 281 L280 291 Z"/>
+<text x="30" y="50" font-size="13" font-weight="600">echelle status</text>
+<text x="30" y="70" font-size="11.5" opacity="0.75">in a terminal</text>
+<text x="30" y="166" font-size="13" font-weight="600">the campaign page</text>
+<text x="30" y="186" font-size="11.5" opacity="0.75">this page</text>
+<text x="30" y="282" font-size="13" font-weight="600">the bench</text>
+<text x="30" y="302" font-size="11.5" opacity="0.75">echelle-calib &lt;folder&gt;</text>
+<text x="204" y="46" font-size="10.5" opacity="0.7">looks from</text>
+<text x="204" y="162" font-size="10.5" opacity="0.7">looks from</text>
+<text x="204" y="278" font-size="10.5" opacity="0.7">looks at</text>
+<text x="308" y="38" font-size="12" font-weight="600">the folder you stand in</text>
+<text x="308" y="60" font-size="11" font-family="ui-monospace, monospace">.\calibrations &#8212; one level only</text>
+<text x="308" y="82" font-size="11" opacity="0.7">it never opens the campaign file</text>
+<text x="308" y="270" font-size="12" font-weight="600">the folder you opened</text>
+<text x="308" y="292" font-size="11" opacity="0.75">and it saves where the campaign file points</text>
+<text x="308" y="314" font-size="11" opacity="0.7">it says where, before it saves</text>
+</g>
+<g class="accent">
+<rect x="296" y="128" width="348" height="84" rx="6" fill="none" stroke="currentColor" stroke-width="1.6"/>
+<text x="308" y="154" font-size="12" font-weight="600" fill="currentColor">the campaign file&#8217;s own keys</text>
+</g>
+<g fill="currentColor">
+<text x="308" y="176" font-size="11" font-family="ui-monospace, monospace">calibrations = &#8230;  (SCAN_DEPTH levels, SCAN_BUDGET entries)</text>
+<text x="308" y="198" font-size="11" opacity="0.7">the data-folder picker does not move this root</text>
+</g>
+</svg>"""
+
+_FIGURE_FLOW = r"""<svg viewBox="0 0 660 230" role="img" aria-label="The campaign in order: the bench makes a snapshot, whose validity dates matter; the registry says which shots it covers; process --sample converts a few cubes; the drift verdict gates what follows; then bulk convert, catalog, and this page.">
+<g fill="none" stroke="currentColor" stroke-width="1.2">
+<rect x="14" y="18" width="136" height="56" rx="6"/>
+<rect x="178" y="18" width="136" height="56" rx="6"/>
+<rect x="342" y="18" width="136" height="56" rx="6"/>
+<rect x="506" y="18" width="136" height="56" rx="6"/>
+<rect x="178" y="146" width="136" height="56" rx="6"/>
+<rect x="342" y="146" width="136" height="56" rx="6"/>
+<rect x="506" y="146" width="136" height="56" rx="6"/>
+<line x1="152" y1="46" x2="170" y2="46"/>
+<line x1="316" y1="46" x2="334" y2="46"/>
+<line x1="480" y1="46" x2="498" y2="46"/>
+<line x1="152" y1="174" x2="170" y2="174"/>
+<line x1="316" y1="174" x2="334" y2="174"/>
+<line x1="480" y1="174" x2="498" y2="174"/>
+<path d="M574 76 C574 112 400 108 82 130"/>
+</g>
+<g fill="currentColor">
+<path d="M176 46 L166 41 L166 51 Z"/>
+<path d="M340 46 L330 41 L330 51 Z"/>
+<path d="M504 46 L494 41 L494 51 Z"/>
+<path d="M176 174 L166 169 L166 179 Z"/>
+<path d="M340 174 L330 169 L330 179 Z"/>
+<path d="M504 174 L494 169 L494 179 Z"/>
+<text x="26" y="42" font-size="12" font-weight="600">bench</text>
+<text x="26" y="62" font-size="10.5" opacity="0.7">lamps + sphere</text>
+<text x="190" y="42" font-size="12" font-weight="600">snapshot</text>
+<text x="190" y="62" font-size="10.5" opacity="0.7">check validity dates</text>
+<text x="354" y="42" font-size="12" font-weight="600">registry</text>
+<text x="354" y="62" font-size="10.5" opacity="0.7">which shots it covers</text>
+<text x="518" y="42" font-size="12" font-weight="600">process --sample</text>
+<text x="518" y="62" font-size="10.5" opacity="0.7">a few real cubes</text>
+<text x="190" y="170" font-size="12" font-weight="600">bulk convert</text>
+<text x="190" y="190" font-size="10.5" opacity="0.7">detached, receipts</text>
+<text x="354" y="170" font-size="12" font-weight="600">catalog</text>
+<text x="354" y="190" font-size="10.5" opacity="0.7">build, then merge</text>
+<text x="518" y="170" font-size="12" font-weight="600">the page</text>
+<text x="518" y="190" font-size="10.5" opacity="0.7">you are reading it</text>
+</g>
+<g class="accent">
+<rect x="14" y="146" width="136" height="56" rx="6" fill="none" stroke="currentColor" stroke-width="1.6"/>
+<path d="M82 138 L77 128 L87 128 Z" fill="currentColor" stroke="none"/>
+<text x="26" y="170" font-size="12" font-weight="600" fill="currentColor">drift verdict</text>
+<text x="26" y="190" font-size="10.5" fill="currentColor">it gates what follows</text>
+<text x="252" y="104" font-size="11" fill="currentColor">no verdict, no bulk run</text>
+</g>
+</svg>"""
+
+_FIGURE_LETTERS = r"""<svg viewBox="0 0 660 200" role="img" aria-label="A mapped letter points at a different folder on each machine, while one UNC share name points at the same folder from every machine.">
+<g fill="none" stroke="currentColor" stroke-width="1.2">
+<rect x="16" y="44" width="108" height="40" rx="6"/>
+<rect x="16" y="114" width="108" height="40" rx="6"/>
+<rect x="192" y="44" width="122" height="40" rx="6"/>
+<rect x="192" y="114" width="122" height="40" rx="6"/>
+<line x1="128" y1="64" x2="182" y2="64"/>
+<line x1="128" y1="134" x2="182" y2="134"/>
+<rect x="346" y="44" width="108" height="40" rx="6"/>
+<rect x="346" y="114" width="108" height="40" rx="6"/>
+<line x1="458" y1="64" x2="512" y2="64"/>
+<line x1="458" y1="134" x2="512" y2="134"/>
+</g>
+<g fill="currentColor">
+<path d="M188 64 L178 59 L178 69 Z"/>
+<path d="M188 134 L178 129 L178 139 Z"/>
+<path d="M518 64 L508 59 L508 69 Z"/>
+<path d="M518 134 L508 129 L508 139 Z"/>
+<text x="16" y="28" font-size="12" font-weight="600">a mapped letter</text>
+<text x="28" y="69" font-size="11.5">this machine</text>
+<text x="28" y="139" font-size="11.5">that machine</text>
+<text x="130" y="103" font-size="11" font-family="ui-monospace, monospace">&lt;letter&gt;:\NIFS</text>
+<text x="204" y="69" font-size="11.5">one folder</text>
+<text x="204" y="139" font-size="11.5">a different one</text>
+<text x="16" y="184" font-size="11" opacity="0.7">one name, two places</text>
+<text x="358" y="69" font-size="11.5">this machine</text>
+<text x="358" y="139" font-size="11.5">that machine</text>
+<text x="346" y="184" font-size="11" opacity="0.7">one name, one place</text>
+</g>
+<g class="accent">
+<text x="346" y="28" font-size="12" font-weight="600" fill="currentColor">a UNC path</text>
+<rect x="518" y="44" width="126" height="110" rx="6" fill="none" stroke="currentColor" stroke-width="1.6"/>
+<text x="530" y="103" font-size="11" font-family="ui-monospace, monospace" fill="currentColor">\\NAS\share\NIFS</text>
+</g>
+</svg>"""
+
+
+def _figure(svg: str, caption: str) -> str:
+    """One drawing and the one sentence that says what it shows.
+
+    The two markers the drawings leave for this function are the scan's own
+    numbers.  A figure that prints "3 levels, 400 entries" as hand-typed glyphs
+    is a picture that starts lying the day either default moves, and a picture
+    is the last place anyone would think to look for that drift.
+    """
+
+    drawn = svg.replace("SCAN_DEPTH", str(SNAPSHOT_SCAN_DEPTH)).replace(
+        "SCAN_BUDGET", str(SNAPSHOT_SCAN_BUDGET)
+    )
+    return (
+        '<figure class="figure">'
+        f'<div class="scroll-x">{drawn}</div>'
+        f"<figcaption>{_e(caption)}</figcaption></figure>"
+    )
+
+
+def _howto_section() -> str:
+    """The kind illustrated how-to: three pictures, a checklist, and no lecture.
+
+    It leads the reading room because it is what a person needs before the
+    canon, not after it.  It travels with the package -- static build and served
+    build alike -- because it is teaching, not a served convenience.
+    """
+
+    checks = [
+        "Open the campaign file (campaign.toml) and read its calibrations line. "
+        "Does that folder exist on THIS machine? A letter mapped on another one does not.",
+        f"The scan goes {SNAPSHOT_SCAN_DEPTH} levels down from that root and stops after "
+        f"{SNAPSHOT_SCAN_BUDGET} entries. Deeper or wider than that, and this page cannot "
+        "see it.",
+        "A snapshot is a folder holding snapshot.toml. A folder of lamp frames with no "
+        "binder in it is not one yet — the bench writes the binder.",
+        "Stand in the campaign folder and run echelle status. It looks from where you "
+        "stand, so what it lists there is what this page is looking at.",
+    ]
+    return "".join(
+        [
+            '<section class="panel howto" id="sec-howto"><h2>How it works</h2>',
+            "<p>Three pictures and a checklist. Everything else is in the canon below.</p>",
+            '<h3 id="sec-howto-eyes">Three tools, three pairs of eyes</h3>',
+            "<p>Three tools read this campaign and none of them starts from the same place. "
+            "That is not a fault to fix; it is the thing to know.</p>",
+            _figure(
+                _FIGURE_EYES,
+                "Where each tool starts looking. Most surprises are one of these three "
+                "starting points, not a missing file.",
+            ),
+            '<h3 id="sec-howto-flow">The campaign, from lamps to this page</h3>',
+            "<p>One calibration for the campaign, then one pass per drive. The verdict in "
+            "the middle is a gate, not a report.</p>",
+            _figure(
+                _FIGURE_FLOW,
+                "Left to right, then round: nothing converts in bulk until a drift verdict "
+                "exists for the sample it was measured on.",
+            ),
+            '<h3 id="sec-howto-letters">Drive letters are per-machine; UNC paths are not</h3>',
+            "<p>A drive letter is a mapping one machine made, so the same letter means a "
+            "different folder — or nothing at all — on the next machine. A UNC path names "
+            "the share itself, so it means the same folder everywhere, including on the "
+            "machine serving this page.</p>",
+            _figure(
+                _FIGURE_LETTERS,
+                "Write the share's own name in the campaign file and every machine reads "
+                "the same folder.",
+            ),
+            '<h3 id="sec-howto-checklist">When the page can\u2019t see your calibrations</h3>',
+            '<ol class="howto-check">'
+            + "".join(f"<li>{_e(item)}</li>" for item in checks)
+            + "</ol>",
+            "</section>",
+        ]
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -2196,8 +2486,22 @@ def _composer_card(
     that this build cannot read off a file; everything else is derived from
     them and stays editable in the fold for the run that needs an exception.
     Served, the data folder also carries the Browse button into the picker.
+
+    One exception to "everything else stays in the fold", and it is the fold's
+    own rule rather than a hole in it: when the scan came back empty from a root
+    this machine cannot see, or from one holding nothing, the snapshot root is
+    no longer a derived value -- it is the answer the reader has to give.  The
+    served page therefore stands its field, and the picker on it, next to the
+    line that names the problem, because a control that fixes a stated problem
+    belongs beside the words that state it.  With snapshots in hand, or with no
+    root named at all (there is nothing to re-point at), it stays folded away.
     """
 
+    root_state = str(registry.get("root_state") or "")
+    promote = served and root_state in (ROOT_MISSING, ROOT_EMPTY)
+    snapshot_root = _text_field(
+        "f-calibrations", "Snapshot root", values["calibrations"], browse=served
+    )
     body = (
         '<p class="muted">Point at the shots and the calibration; the rest is derived.</p>'
         '<div class="fields">'
@@ -2210,6 +2514,10 @@ def _composer_card(
         )
         + '<label class="field"><span>Calibration</span>'
         f'<select id="f-epoch">{_epoch_options(epochs, registry)}</select></label>'
+        # Where the scan looked, said at the select it emptied -- and, served,
+        # with the field that re-points it standing right underneath.
+        + _scan_line(registry)
+        + (snapshot_root if promote else "")
         # A list cut short by the scan budget says so, once and quietly, right
         # where it is read: a short list that looks complete is the same lie as
         # an empty one.
@@ -2235,7 +2543,7 @@ def _composer_card(
             placeholder=f"{values['verdict'].rsplit('/', 1)[-1]} in the data folder",
         )
         + _text_field("f-registry", "Registry", values["registry"], browse=served)
-        + _text_field("f-calibrations", "Snapshot root", values["calibrations"], browse=served)
+        + ("" if promote else snapshot_root)
         + _text_field("f-catalog", "Merged catalog", values["catalog"])
         + _text_field("f-plan", "Plan file to save", values["plan"])
         + _text_field("f-pattern", "SIF pattern", values["pattern"])
@@ -2563,6 +2871,9 @@ section.panel {
    metadata -- build stamps, shell names, card headings -- and nothing else. */
 .muted { color: var(--muted); font-size: .92rem; }
 .note { border-left: .2rem solid var(--line); padding-left: .6rem; color: var(--muted); }
+/* Where the snapshot scan looked. A calibrations root is routinely a long UNC
+   path, so it wraps inside the rail rather than widening it. */
+.scan-line { overflow-wrap: anywhere; }
 .chips { display: flex; flex-wrap: wrap; gap: .3rem; align-items: center; margin: .35rem 0; }
 .chip { display: inline-block; border: 1px solid var(--line); border-radius: .3rem;
   background: var(--raised); padding: 0 .4rem; font-size: .9rem; white-space: nowrap; }
@@ -2703,6 +3014,23 @@ button:hover { border-color: var(--accent); }
   padding: .45rem .6rem; cursor: pointer; border-radius: .4rem; }
 .drill-body { padding: 0 .6rem .6rem; }
 .drill-exit { position: sticky; bottom: 0; background: var(--panel); padding: .4rem 0; }
+/* The illustrated how-to. Its figures scale by their own viewBox, so one width
+   rule fits every window, and every stroke and glyph inside them is
+   currentColor: the page's ink is the whole palette in both schemes and the one
+   accent group is the only colour spent. */
+.howto h3 { margin-top: 1.2rem; font-size: 1rem; }
+.howto h3:first-of-type { margin-top: .7rem; }
+.figure { margin: .6rem 0 .2rem; }
+/* A drawing has a size below which its labels stop being words. Under that
+   width the figure scrolls inside its own box -- the same rule wide tables
+   follow here -- rather than shrinking to 4px type or widening the page. */
+.figure .scroll-x { max-width: 46rem; }
+.figure svg { display: block; width: 100%; min-width: 40rem; max-width: 46rem; height: auto;
+  color: var(--ink); }
+.figure .accent { color: var(--accent); }
+.figure figcaption { color: var(--muted); font-size: .9rem; margin-top: .3rem; max-width: 46rem; }
+.howto-check { margin: .5rem 0 .2rem; padding-left: 1.3rem; }
+.howto-check > li { margin-bottom: .4rem; }
 .doc-body { font-size: .93rem; }
 .doc-body pre { background: var(--raised); border: 1px solid var(--line); border-radius: .3rem;
   padding: .5rem .6rem; overflow-x: auto; }
@@ -3552,7 +3880,15 @@ def _page(context: dict[str, Any]) -> str:
             ("sec-cal-epochs", "Epochs"),
             ("sec-drift", "Drift evidence"),
         ],
+        # The how-to leads: it is what a person needs before the canon, not
+        # after it, and each of its parts is its own jump target so the index
+        # can carry a reader straight to the picture they came back for.
         "reading": [
+            ("sec-howto", "How it works"),
+            ("sec-howto-eyes", "Three tools, three pairs of eyes"),
+            ("sec-howto-flow", "The campaign, from lamps to this page"),
+            ("sec-howto-letters", "Drive letters are per-machine"),
+            ("sec-howto-checklist", "When the page can’t see your calibrations"),
             ("sec-reading-room", "Reading room"),
             *[(document["anchor"], document["title"]) for document in context["documents"]],
         ],
@@ -3630,7 +3966,8 @@ def _page(context: dict[str, Any]) -> str:
             ),
             _view(
                 "reading",
-                '<section class="panel" id="sec-reading-room"><h2>Reading room</h2>'
+                _howto_section()
+                + '<section class="panel" id="sec-reading-room"><h2>Reading room</h2>'
                 '<p>The canon travels inside this page; the documentation site is '
                 '<a href="https://queezz.github.io/echelle_spectra">'
                 "queezz.github.io/echelle_spectra</a>.</p>"
@@ -3782,11 +4119,25 @@ def _documents(document_paths: tuple[str | Path, ...] | list[str | Path]) -> lis
     return documents
 
 
-#: How many directories one page build may look at while hunting snapshots.
-#: The walk runs on the request thread of the served page and a calibrations
-#: root is routinely a NAS share, where every entry is a network round trip; a
-#: budget is what keeps a wide root from holding the page open indefinitely.
-SNAPSHOT_SCAN_BUDGET = 400
+# The walk that spends SNAPSHOT_SCAN_BUDGET and SNAPSHOT_SCAN_DEPTH (declared at
+# the top of this module, because the page prints both numbers): it runs on the
+# request thread of the served page and a calibrations root is routinely a NAS
+# share, where every entry is a network round trip, so a budget is what keeps a
+# wide root from holding the page open indefinitely.
+
+
+def _root_state(calibrations_root: str | Path | None, records: list[dict[str, Any]]) -> str:
+    """Name the scanned root's condition, so the page can say where it looked."""
+
+    if not calibrations_root:
+        return ROOT_UNSET
+    if records:
+        return ROOT_HOLDS
+    try:
+        reachable = Path(calibrations_root).is_dir()
+    except OSError:  # pragma: no cover - a refused mount answers neither way
+        reachable = False
+    return ROOT_EMPTY if reachable else ROOT_MISSING
 
 
 def _snapshot_record(folder: Path) -> dict[str, Any]:
@@ -3845,7 +4196,7 @@ def _keep_snapshot(found: dict[str, dict[str, Any]], record: dict[str, Any]) -> 
 
 
 def _saved_snapshots(
-    calibrations_root: str | Path | None, *, depth: int = 3
+    calibrations_root: str | Path | None, *, depth: int = SNAPSHOT_SCAN_DEPTH
 ) -> tuple[list[dict[str, Any]], bool]:
     """The snapshots a calibrations root actually holds, registry or not.
 
@@ -3907,6 +4258,9 @@ def _registry_context(
     ``records`` is every snapshot folder the walk reached, read from its own
     binder; ``saved`` is the ids alone, which is all the composer's select and
     the calibrate stage ever need.  Both come from one walk.
+
+    ``root_state`` is what that walk found the root itself to be, which is the
+    half a page with an empty select needs and could not previously say.
     """
 
     if registry_path is None:
@@ -3921,11 +4275,15 @@ def _registry_context(
             "saved": [record["id"] for record in records],
             "saved_truncated": truncated,
             "scanned": bool(calibrations_root),
+            "root_state": _root_state(calibrations_root, records),
             "calibrations": _posix(calibrations_root) if calibrations_root else "",
         }
     from .calibration_registry import CalibrationRegistryError, load_calibration_registry
 
     path = Path(registry_path)
+    # A registry with no calibrations key still names a root by implication, and
+    # the page says which one: naming the derived folder is the whole point when
+    # the answer is "that folder is not on this machine".
     root = Path(calibrations_root) if calibrations_root else path.parent / "calibrations"
     try:
         registry = load_calibration_registry(path, snapshots_root=root)
@@ -3941,6 +4299,7 @@ def _registry_context(
             "saved": [record["id"] for record in records],
             "saved_truncated": truncated,
             "scanned": True,
+            "root_state": _root_state(root, records),
             "calibrations": _posix(root),
         }
     records, truncated = _saved_snapshots(root)
@@ -3952,6 +4311,7 @@ def _registry_context(
         "saved": [record["id"] for record in records],
         "saved_truncated": truncated,
         "scanned": True,
+        "root_state": _root_state(registry.snapshots_root, records),
         "epochs": [epoch.snapshot_id for epoch in registry.epochs],
         # The bounds each epoch already declares, carried through so the page
         # can say whether one covers today rather than only counting them.

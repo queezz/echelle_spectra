@@ -237,6 +237,98 @@ def test_the_served_build_puts_browse_beside_the_data_folder_field(served_page: 
     assert ".field-row .browse { flex: 0 0 auto; white-space: nowrap; }" in served_page
 
 
+def _composer_halves(page: str) -> tuple[str, str]:
+    """The composer card split at its Advanced fold: what shows, what folds."""
+
+    start = page.rindex("<article", 0, page.index('id="f-input"'))
+    card = page[start : page.index("</article>", start)]
+    return card[: card.index("<details")], card[card.index("<details") :]
+
+
+def _built(tmp_path: Path, out: str, **extra: object) -> str:
+    return build_reading_room(
+        _catalog(tmp_path), tmp_path / out, **extra  # type: ignore[arg-type]
+    ).read_text(encoding="utf-8")
+
+
+def _with_snapshot(tmp_path: Path) -> Path:
+    root = tmp_path / "cal"
+    folder = root / "20190314_cmos"
+    folder.mkdir(parents=True)
+    (folder / "snapshot.toml").write_text('id = "20190314_cmos"\n', encoding="utf-8")
+    return root
+
+
+def test_the_snapshot_root_comes_out_of_the_fold_when_the_scan_came_back_empty(
+    tmp_path: Path,
+) -> None:
+    """The control that fixes the problem stands beside the words naming it.
+
+    A snapshot root is a derived value right up until the scan finds nothing
+    under it; then it is the answer the reader has to give, and burying it two
+    presses down in Advanced is the page making them hunt for the fix it just
+    told them they need.
+    """
+
+    gone = tmp_path / "mapped-elsewhere"
+    head, fold = _composer_halves(_built(tmp_path, "web-gone", served=True, calibrations_root=gone))
+    assert 'id="f-calibrations"' in head and 'id="f-calibrations"' not in fold
+    # It arrives with its picker, directly under the line that named the root.
+    assert head.index("scan-line") < head.index('id="f-calibrations"')
+    assert 'data-browse="f-calibrations"' in head
+    # An existing-but-empty root is the same call.
+    empty = tmp_path / "empty-root"
+    empty.mkdir()
+    head, fold = _composer_halves(
+        _built(tmp_path, "web-empty", served=True, calibrations_root=empty)
+    )
+    assert 'id="f-calibrations"' in head and 'id="f-calibrations"' not in fold
+
+
+def test_the_promotion_answers_to_the_scan_and_never_to_the_server_alone(
+    tmp_path: Path,
+) -> None:
+    """Three ways not to promote, each for its own reason."""
+
+    # Snapshots in hand: nothing is wrong, so nothing is promoted.
+    head, fold = _composer_halves(
+        _built(tmp_path, "web-found", served=True, calibrations_root=_with_snapshot(tmp_path))
+    )
+    assert 'id="f-calibrations"' in fold and 'id="f-calibrations"' not in head
+    # No root named at all: there is no root to re-point, so the field stays
+    # where every other derived value lives.
+    head, fold = _composer_halves(_built(tmp_path, "web-unset", served=True))
+    assert 'id="f-calibrations"' in fold and 'id="f-calibrations"' not in head
+    # A static build has no picker to promote and never grows one.
+    gone = tmp_path / "mapped-elsewhere"
+    static = _built(tmp_path, "web-static-gone", calibrations_root=gone)
+    head, fold = _composer_halves(static)
+    assert 'id="f-calibrations"' in fold and 'id="f-calibrations"' not in head
+    assert "Browse" not in static
+    # It still says where it looked; only the control is server-side.
+    assert "does not exist on this machine" in static
+
+
+def test_the_illustrated_how_to_is_packaged_teaching_not_a_served_extra(
+    tmp_path: Path,
+) -> None:
+    """Both builds carry it, in the same bytes: it teaches, it does not fetch."""
+
+    static = _built(tmp_path, "web-howto-static")
+    served = _built(tmp_path, "web-howto-served", served=True)
+    sections = []
+    for page in (static, served):
+        start = page.index('<section class="panel howto" id="sec-howto">')
+        end = page.index('<section class="panel" id="sec-reading-room">')
+        sections.append(page[start:end])
+        assert page.count('role="img"') == 3
+    assert sections[0] == sections[1]
+    # The figures are inline and reach nothing: no namespace declaration to
+    # smuggle a URL in, no external asset, no script inside a drawing.
+    assert "xmlns" not in sections[0]
+    assert "<script" not in sections[0] and "<image" not in sections[0]
+
+
 def test_the_served_build_carries_the_picker_dialog(served_page: str) -> None:
     assert '<div class="picker" id="picker" hidden>' in served_page
     assert 'role="dialog" aria-modal="true"' in served_page
