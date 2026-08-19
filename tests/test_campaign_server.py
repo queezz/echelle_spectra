@@ -265,6 +265,10 @@ def test_choosing_a_folder_writes_one_commented_campaign_toml(
     assert 'output = "campaign-page"' in text
     assert 'registry = "calibration_registry.toml"' in text
     assert 'calibrations = "calibrations"' in text
+    # The template teaches the notes key, because the key IS the convention and
+    # this file is the one thing an operator setting up a campaign reads.
+    assert "served at /notes/" in text
+    assert '# notes = "echelle-notes"' in text
     # Nothing else was created; the server writes one file and no folders.
     assert sorted(item.name for item in home.iterdir()) == ["campaign.toml"]
 
@@ -414,6 +418,265 @@ def test_the_zero_state_composes_against_the_home_and_never_the_stand_in(
     # Nothing anywhere on the page points at the stand-in.
     assert "empty-catalog.json" not in body
     assert "echelle-serve-" not in body
+
+
+# ---------------------------------------------------------------------------
+# The operator's own pages: served out of the campaign home, never shipped
+# ---------------------------------------------------------------------------
+#
+# The whole point of the mechanism is that the owner's data map -- which names
+# the topology of a NAS -- travels with him and never enters this repository.
+# So these tests write a notes folder somewhere on disk, point a campaign.toml
+# at it, and assert on the wire: what is served, what is refused, and that
+# nothing enumerates.  There is no default folder to test, on purpose: the
+# ``notes`` key is the only way any of this becomes live.
+
+
+def _notes_home(
+    tmp_path: Path,
+    files: dict[str, str],
+    *,
+    folder: str = "shared-notes",
+    key: str | None = "shared-notes",
+) -> Path:
+    """A campaign home pointed at a notes folder holding exactly these files."""
+
+    home = _ready_home(tmp_path)
+    if key is not None:
+        home.write_text(
+            home.read_text(encoding="utf-8") + f'notes = "{key}"\n', encoding="utf-8"
+        )
+    notes = tmp_path / folder
+    notes.mkdir(parents=True, exist_ok=True)
+    for name, text in files.items():
+        (notes / name).write_text(text, encoding="utf-8")
+    return home
+
+
+def _raw_get(client: _Client, route: str) -> tuple[int, str]:
+    """One GET whose request line is exactly this text, unnormalized.
+
+    ``urlopen`` is the wrong instrument for a traversal test: the escapes under
+    test must reach the server spelled the way an attacker spelled them.
+    """
+
+    return client.raw("GET", route, headers={"Host": f"127.0.0.1:{client.server.port}"})
+
+
+def test_a_note_is_served_from_the_campaign_home_with_no_store(tmp_path: Path) -> None:
+    home = _notes_home(tmp_path, {"where-echelle-looks.html": "<h1>the map</h1>"})
+    with _serve(home) as client:
+        status, body, headers = client.get("/notes/where-echelle-looks.html")
+    assert status == 200
+    assert headers["Content-Type"] == "text/html; charset=utf-8"
+    assert headers["Cache-Control"] == "no-store"
+    assert body == "<h1>the map</h1>"
+
+
+def test_notes_are_served_only_as_the_types_the_allowlist_names(tmp_path: Path) -> None:
+    """Markdown and text are shown, as text: nothing here renders his page."""
+
+    home = _notes_home(
+        tmp_path,
+        {"map.md": "# where echelle looks", "sheet.css": "body{}", "read.txt": "plain"},
+    )
+    with _serve(home) as client:
+        status, body, headers = client.get("/notes/map.md")
+        assert status == 200
+        assert headers["Content-Type"] == "text/plain; charset=utf-8"
+        assert body == "# where echelle looks"
+        assert client.get("/notes/read.txt")[2]["Content-Type"] == "text/plain; charset=utf-8"
+        assert client.get("/notes/sheet.css")[2]["Content-Type"] == "text/css; charset=utf-8"
+
+
+@pytest.mark.parametrize(
+    "route",
+    [
+        "/notes/..%2F..%2Fcampaign.toml",
+        "/notes/..%5C..%5Ccampaign.toml",
+        "/notes/%2E%2E%2Fcampaign.toml",
+        "/notes//etc/passwd",
+        "/notes/C:%5CWindows%5Cwin.ini",
+        "/notes/C:campaign.toml",
+        "/notes/sub/page.html",
+        "/notes/%2E%2E",
+        "/notes/secret.toml",
+        "/notes/absent.html",
+    ],
+)
+def test_a_note_request_that_leaves_the_folder_or_the_allowlist_is_refused(
+    tmp_path: Path, route: str
+) -> None:
+    """One plain file name out of one allowlist, or nothing.
+
+    The refusals all read alike on purpose: a 404 that distinguished "escaped"
+    from "wrong extension" from "not there" would answer questions about the
+    machine that nobody outside this folder is owed.
+    """
+
+    home = _notes_home(tmp_path, {"page.html": "<p>ok</p>", "secret.toml": "nas = 'private'"})
+    (tmp_path / "shared-notes" / "sub").mkdir()
+    (tmp_path / "shared-notes" / "sub" / "page.html").write_text("<p>deep</p>", encoding="utf-8")
+    with _serve(home) as client:
+        status, body = _raw_get(client, route)
+        # The page that IS servable proves the folder itself is reachable, so a
+        # refusal above is the sandbox and not a mis-set-up fixture.
+        assert client.get("/notes/page.html")[0] == 200
+    assert status == 404
+    assert "nas = " not in body
+    assert "no such note" in json.loads(body)["error"]
+
+
+def test_a_symlink_out_of_the_notes_folder_is_refused(tmp_path: Path) -> None:
+    """The escape a name alone cannot show: resolve, then compare."""
+
+    home = _notes_home(tmp_path, {"page.html": "<p>ok</p>"})
+    outside = tmp_path / "outside.html"
+    outside.write_text("<p>the NAS topology</p>", encoding="utf-8")
+    link = tmp_path / "shared-notes" / "escape.html"
+    try:
+        link.symlink_to(outside)
+    except (OSError, NotImplementedError):  # pragma: no cover - no symlink privilege
+        pytest.skip("this account may not create symlinks")
+    with _serve(home) as client:
+        status, body = _raw_get(client, "/notes/escape.html")
+        # And it is not offered in the header either: the link list is filtered
+        # through the very same resolver the endpoint uses.
+        page = client.get("/")[1]
+    assert status == 404
+    assert "NAS topology" not in body
+    assert "escape.html" not in page
+
+
+def test_the_notes_folder_publishes_no_listing(tmp_path: Path) -> None:
+    home = _notes_home(tmp_path, {"one.html": "<p>1</p>", "two.html": "<p>2</p>"})
+    with _serve(home) as client:
+        for route in ("/notes/", "/notes"):
+            status, body = _raw_get(client, route)
+            assert status == 404
+            message = json.loads(body)["error"]
+            assert "no index" in message
+            assert "notes" in message
+            # A listing is a listing however politely it is worded.
+            assert "one.html" not in body
+            assert "two.html" not in body
+
+
+def test_the_notes_route_is_behind_the_same_origin_guard(tmp_path: Path) -> None:
+    """The guard runs before routing, so it covers this route by construction.
+
+    Worth a test all the same: this route is the one that reads a file the
+    operator chose, and a page in another tab reading it would be the exact
+    leak the notes folder exists to avoid.
+    """
+
+    home = _notes_home(tmp_path, {"page.html": "<p>the NAS topology</p>"})
+    with _serve(home) as client:
+        status, body = client.raw("GET", "/notes/page.html", headers={"Host": "evil.example"})
+        assert status == 403
+        assert "NAS topology" not in body
+        status, body = client.raw(
+            "GET",
+            "/notes/page.html",
+            headers={"Host": f"127.0.0.1:{client.server.port}", "Origin": "https://evil.example"},
+        )
+        assert status == 403
+        assert "NAS topology" not in body
+        # The listing refusal is behind it too, and so is a bare /notes.
+        assert client.raw("GET", "/notes/", headers={"Host": "evil.example"})[0] == 403
+
+
+def test_a_cold_start_has_no_notes_to_serve(client: _Client) -> None:
+    assert _raw_get(client, "/notes/anything.html")[0] == 404
+
+
+def test_the_notes_key_is_the_only_way_in(tmp_path: Path) -> None:
+    """No key, no notes: there is deliberately no folder that goes live on its
+    own, however conventionally it is named."""
+
+    home = _notes_home(tmp_path, {"page.html": "<p>the NAS topology</p>"}, key=None)
+    # A folder named exactly what an implicit convention would have picked.
+    (tmp_path / "notes").mkdir()
+    (tmp_path / "notes" / "page.html").write_text("<p>the NAS topology</p>", encoding="utf-8")
+    with _serve(home) as client:
+        assert campaign_server.notes_root(home) is None
+        assert campaign_server.note_pages(home) == []
+        status, body = _raw_get(client, "/notes/page.html")
+        assert "/notes/" not in client.get("/")[1]
+    assert status == 404
+    assert "NAS topology" not in body
+    assert "names no notes folder" in json.loads(body)["error"]
+
+
+def test_the_notes_key_is_read_relative_to_the_campaign_file(tmp_path: Path) -> None:
+    home = _notes_home(
+        tmp_path, {"map.html": "<p>relative</p>"}, folder="pages/mine", key="pages/mine"
+    )
+    assert campaign_server.notes_root(home) == (tmp_path / "pages" / "mine")
+    with _serve(home) as client:
+        assert client.get("/notes/map.html")[1] == "<p>relative</p>"
+
+
+def test_the_notes_key_may_point_clean_outside_the_campaign(tmp_path: Path) -> None:
+    """The whole point: one shared folder, any number of campaigns naming it."""
+
+    shared = tmp_path / "elsewhere" / "echelle-notes"
+    shared.mkdir(parents=True)
+    (shared / "map.html").write_text("<p>shared</p>", encoding="utf-8")
+    homes = []
+    for index in (1, 2):
+        root = tmp_path / f"campaign-{index}"
+        root.mkdir()
+        _catalog(root)
+        home = root / "campaign.toml"
+        home.write_text(
+            f'catalog = "{CATALOG_NAME}"\noutput = "campaign-page"\n'
+            f'notes = "{shared.as_posix()}"\n',
+            encoding="utf-8",
+        )
+        homes.append(home)
+    for home in homes:
+        assert campaign_server.notes_root(home) == shared
+        with _serve(home) as client:
+            assert client.get("/notes/map.html")[1] == "<p>shared</p>"
+            assert '<a href="/notes/map.html">Campaign notes</a>' in client.get("/")[1]
+    # Not one byte of the shared folder was copied into either campaign.
+    for home in homes:
+        assert not (home.parent / "map.html").exists()
+
+
+def test_a_named_folder_that_is_not_there_is_simply_no_notes(tmp_path: Path) -> None:
+    """A key naming a disconnected share is a quiet page, never a traceback."""
+
+    home = _ready_home(tmp_path)
+    home.write_text(home.read_text(encoding="utf-8") + 'notes = "not-here"\n', encoding="utf-8")
+    with _serve(home) as client:
+        assert campaign_server.note_pages(home) == []
+        assert "/notes/" not in client.get("/")[1]
+        assert _raw_get(client, "/notes/map.html")[0] == 404
+
+
+def test_the_header_links_the_notes_only_when_the_folder_holds_a_page(
+    tmp_path: Path,
+) -> None:
+    """One quiet link, and only once there is something behind it."""
+
+    home = _notes_home(tmp_path, {})
+    notes = tmp_path / "shared-notes"
+    with _serve(home) as client:
+        assert "/notes/" not in client.get("/")[1]
+        # An asset alone is not a page, so it earns no link.
+        (notes / "sheet.css").write_text("body{}", encoding="utf-8")
+        assert "/notes/" not in client.get("/")[1]
+        (notes / "where-echelle-looks.html").write_text("<p>x</p>", encoding="utf-8")
+        body = client.get("/")[1]
+    assert '<a href="/notes/where-echelle-looks.html">Campaign notes</a>' in body
+    # The link is a link, not a copy: nothing of the note's own text travels.
+    assert "sheet.css" not in body
+
+
+def test_the_page_and_the_server_name_the_same_notes_address() -> None:
+    assert reading_room.NOTES_ENDPOINT == campaign_server.NOTES_ROUTE
 
 
 # ---------------------------------------------------------------------------

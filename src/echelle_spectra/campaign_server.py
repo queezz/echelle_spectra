@@ -20,7 +20,13 @@ stays exactly as strict as the static page it serves:
 * it writes into the campaign in two places: ``POST /api/home`` creates a
   ``campaign.toml`` in a folder the operator picked, never over one that
   already exists and never creating the folder itself, and a launch writes its
-  own marker and log into the campaign's runs area beside the receipts.
+  own marker and log into the campaign's runs area beside the receipts;
+* it serves the folder campaign.toml's ``notes`` key names, and only that
+  folder, at ``GET /notes/<name>``, so the operator's private how-to pages are
+  one click from the campaign page without any of them living in this
+  repository or being copied into a campaign home.  No key, no notes.  That
+  route reads and never writes, serves one plain file name out of an extension
+  allowlist, resolves and compares before opening anything, and lists nothing.
 
 That is not the same as writing nothing else.  ``GET /`` rebuilds the campaign
 page on every request, and building it creates the configured output folder and
@@ -56,7 +62,7 @@ import time
 from collections.abc import Sequence
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import Any
 from urllib.parse import parse_qs, unquote, urlsplit
 
@@ -90,6 +96,8 @@ output = "campaign-page"
 registry = "calibration_registry.toml"
 # The snapshot root the registry names its epochs from.
 calibrations = "calibrations"
+# Your own how-to pages, served at /notes/. Without this line there are none.
+# notes = "echelle-notes"
 """
 
 SETUP_PLACEHOLDER = "<h1>setup</h1>"
@@ -117,6 +125,37 @@ LAUNCH_SCHEMA = "echelle-launch/v1"
 #: a night's worth of lines.
 LOG_TAIL_BYTES = 8192
 LOG_TAIL_LINES = 12
+
+#: The address the operator's own pages answer on -- the only folder outside the
+#: built page this server ever reads a file out of, and one that exists only
+#: because a campaign.toml said so.  There is deliberately NO default location
+#: and no magic folder name: a folder that becomes live because of where it sits
+#: is a convention somebody has to already know, and the owner would rather read
+#: the answer in the file he edits.  ``notes = "<folder>"`` is the whole of it.
+#:
+#: ``reading_room.NOTES_ENDPOINT`` is the same string on the page's side, and a
+#: test pins the two together rather than letting one import the other at
+#: module scope.
+NOTES_ROUTE = "/notes/"
+
+#: What ``/notes/`` will serve, and what it answers with.  An allowlist, not a
+#: guessing table: an extension not spelled here is not served at all, so no
+#: request can talk this server into handing back a ``.toml``, a ``.json``, a
+#: ``.sif``, or anything else that folder happens to hold.  Markdown and
+#: text are served as plain text deliberately -- the browser shows them, and
+#: nothing this server hands over is ever interpreted as a document it wrote.
+NOTE_TYPES: dict[str, str] = {
+    ".html": "text/html; charset=utf-8",
+    ".htm": "text/html; charset=utf-8",
+    ".svg": "image/svg+xml",
+    ".png": "image/png",
+    ".css": "text/css; charset=utf-8",
+    ".txt": "text/plain; charset=utf-8",
+    ".md": "text/plain; charset=utf-8",
+}
+
+#: The extensions the header link may point at: a page, never an asset.
+NOTE_PAGE_SUFFIXES = (".html", ".htm")
 
 RUN_RUNNING = "running"
 RUN_FINISHED = "finished"
@@ -190,6 +229,12 @@ def home_values(home: Path) -> dict[str, Any]:
         "output": _relative_to(home, document.get("output", "campaign-page")),
         "registry": _relative_to(home, document.get("registry", "calibration_registry.toml")),
         "calibrations": _relative_to(home, document.get("calibrations", "calibrations")),
+        # The operator's own pages, and None unless this file names them.
+        # Resolved like every other path here, which is what lets one shared
+        # folder -- on this disk, on a network share -- answer for every
+        # campaign home on the machine instead of each home holding its own
+        # copy of the same how-to pages.
+        "notes": _relative_to(home, document.get("notes")),
         "drift": drift,
     }
 
@@ -313,6 +358,146 @@ def adopt_or_write_home(folder: str | os.PathLike[str]) -> tuple[str, Path]:
     except OSError as exc:
         raise HomeError(f"cannot write {target}: {exc.strerror or exc}") from None
     return "written", target
+
+
+# ---------------------------------------------------------------------------
+# The operator's own pages, out of the folder his campaign.toml names
+# ---------------------------------------------------------------------------
+#
+# The owner keeps his own how-to pages -- his data map, which names the topology
+# of a NAS this repository must never learn -- and wants them one click from the
+# campaign page while he is travelling.  So campaign.toml may name a ``notes``
+# folder and this server serves it: the convention ships, the notes never do,
+# and nothing is copied into a campaign home to make it work.  One folder, many
+# campaigns pointing at it, is the whole intended shape.
+#
+# The key is also the only way in.  There is no default folder and no magic
+# name: a folder that goes live because of where it sits is a rule somebody has
+# to already know, and the owner would rather read it in the file he edits.
+#
+# Serving a folder of files the operator chose is the one place here where a
+# request names something on disk, so the naming is as narrow as it can be made:
+# ONE plain file name, no separators of either slash, no drive, no traversal, an
+# extension out of :data:`NOTE_TYPES`, and -- after all of that -- the resolved
+# path's parent compared against the resolved notes folder, which is what a
+# symlink pointing out of the folder fails.  There is no directory listing at
+# any depth: what the folder holds is the operator's business, and a page that
+# enumerates it is a page that reports his filing to whoever asks.
+
+
+def notes_root(home: Path) -> Path | None:
+    """The folder ``/notes/`` serves for this campaign, or None if it names none.
+
+    ``notes = ...`` in campaign.toml names it, read exactly like every other
+    path in that file: relative to campaign.toml, or taken as written when it
+    is absolute -- a second disk, a network share.  No key, no notes: the
+    config line is the whole convention, so nothing is scanned, nothing is
+    linked, and the route answers nothing.
+
+    That key is also why this is not simply a subfolder of the campaign: the
+    owner keeps ONE folder of his own pages and points every campaign home at
+    it, so a new campaign gains the pages without a file being copied into it.
+    """
+
+    return home_values(home)["notes"]
+
+
+def _notes_base(home: Path | None) -> Path | None:
+    """The notes folder as the filesystem really has it, or None for no folder.
+
+    Resolved once here so every later comparison is real-path against real-path
+    and a link somewhere in the folder's own ancestry cannot make an escape
+    look like a match.
+    """
+
+    configured = None if home is None else notes_root(home)
+    if configured is None:
+        return None
+    try:
+        base = configured.resolve()
+    except OSError:  # pragma: no cover - an unreadable mount point
+        return None
+    return base if base.is_dir() else None
+
+
+def note_type(name: str) -> str | None:
+    """The content type one note name earns, or None if it earns none."""
+
+    return NOTE_TYPES.get(os.path.splitext(name)[1].casefold())
+
+
+def _note_name(raw: str) -> str | None:
+    """Reduce what a request asked for to one plain file name, or refuse it.
+
+    Judged on the TEXT, before any Path is built from it: on Linux
+    ``..\\secret`` is a single legal file name and on Windows it is traversal,
+    and a sandbox that means two different things on two machines is not one.
+    So no separator of either kind, no drive letter, no traversal spelling, and
+    an extension out of :data:`NOTE_TYPES` -- everything else is refused here
+    and never reaches the filesystem at all.
+    """
+
+    text = (raw or "").strip()
+    if not text or "\x00" in text or text in (os.curdir, os.pardir):
+        return None
+    if "/" in text or "\\" in text or PureWindowsPath(text).drive:
+        return None
+    return text if note_type(text) is not None else None
+
+
+def _note_in(base: Path, name: str) -> Path | None:
+    """The real file one name may serve out of an already-resolved folder."""
+
+    text = _note_name(name)
+    if text is None:
+        return None
+    try:
+        resolved = (base / text).resolve()
+    except OSError:  # pragma: no cover - a name this filesystem cannot express
+        return None
+    # The escape a name alone cannot show: a symlink or junction inside the
+    # folder pointing at a file outside it.  Compared case-insensitively where
+    # the filesystem is, because both sides came off the same resolver.
+    if os.path.normcase(str(resolved.parent)) != os.path.normcase(str(base)):
+        return None
+    # Regular files only: a directory, a device, or a pipe is not a note.
+    return resolved if resolved.is_file() else None
+
+
+def resolve_note(home: Path | None, name: str) -> Path | None:
+    """Return the real file ``/notes/<name>`` may serve, or None to refuse.
+
+    Every refusal is the same answer -- None, and a plain 404 above -- because
+    telling a caller *which* rule it broke tells it what is there.  The sandbox
+    is the same wherever ``notes`` points: it is anchored on the folder the
+    campaign named, never on the campaign home.
+    """
+
+    base = _notes_base(home)
+    return None if base is None else _note_in(base, name)
+
+
+def note_pages(home: Path | None) -> list[str]:
+    """Every servable note PAGE the campaign's notes folder holds, in order.
+
+    Filtered through the very resolver the endpoint uses rather than by a second
+    rule, so the header can never offer a link the endpoint would then refuse.
+    """
+
+    base = _notes_base(home)
+    if base is None:
+        return []
+    found = []
+    try:
+        with os.scandir(base) as entries:
+            for entry in entries:
+                if not entry.name.casefold().endswith(NOTE_PAGE_SUFFIXES):
+                    continue
+                if _note_in(base, entry.name) is not None:
+                    found.append(entry.name)
+    except OSError:  # pragma: no cover - the folder vanished mid-read
+        return []
+    return sorted(found, key=lambda item: (item.casefold(), item))
 
 
 # ---------------------------------------------------------------------------
@@ -736,6 +921,7 @@ def build_page(
     *,
     load_from: Path | None = None,
     launches: dict[str, Any] | None = None,
+    notes: Sequence[str] | None = None,
 ) -> bytes:
     """Rebuild the campaign page from the home and return the bytes it wrote."""
 
@@ -748,7 +934,12 @@ def build_page(
     with server.build_lock:
         try:
             index = build_reading_room(
-                source, values["output"], served=True, launches=launches, **keywords
+                source,
+                values["output"],
+                served=True,
+                launches=launches,
+                notes=notes,
+                **keywords,
             )
             server.served_keyword = True
         except TypeError:
@@ -802,7 +993,7 @@ class CampaignServer(ThreadingHTTPServer):
 
 
 class CampaignHandler(BaseHTTPRequestHandler):
-    """Five routes, four of which only read."""
+    """Six routes, five of which only read."""
 
     server_version = "echelle-campaign"
     sys_version = ""
@@ -905,6 +1096,12 @@ class CampaignHandler(BaseHTTPRequestHandler):
             self._get_state()
         elif route == "/api/browse":
             self._get_browse(parse_qs(parts.query))
+        elif route in (NOTES_ROUTE, NOTES_ROUTE.rstrip("/")):
+            # No listing, at any depth.  The one line says what the address is
+            # for, which is all a person who typed the bare form needs.
+            self._error(self._notes_line(), status=404)
+        elif route.startswith(NOTES_ROUTE):
+            self._get_note(route[len(NOTES_ROUTE) :])
         else:
             self._error(f"no such endpoint: {route}", status=404)
 
@@ -938,11 +1135,57 @@ class CampaignHandler(BaseHTTPRequestHandler):
                     # Every build re-reads the markers, receipts and logs, so
                     # the page never remembers a run: it looks again.
                     launches=run_states(home, plan=home.parent / _plan_name()),
+                    # Looked up again on every request, like everything else
+                    # here: a note dropped into the folder while the tab was
+                    # open is linked on the next reload, and one taken away
+                    # stops being offered.
+                    notes=note_pages(home),
                 ),
                 "text/html; charset=utf-8",
             )
         except (OSError, ValueError) as exc:
             self._error(f"cannot build the campaign page: {exc}", status=500)
+
+    def _notes_line(self) -> str:
+        """One line about this address: what it opens, or that nothing named it.
+
+        A campaign that never asked for notes is told so plainly, because the
+        answer is an edit to campaign.toml and not a file to go looking for.
+        """
+
+        server: CampaignServer = self.server  # type: ignore[assignment]
+        home = server.home
+        if home is None or notes_root(home) is None:
+            return (
+                'this campaign.toml names no notes folder; add notes = "<folder>" '
+                "to it and the pages in that folder are served here"
+            )
+        return (
+            f"there is no index here: {NOTES_ROUTE}<name> opens one page from the "
+            "folder this campaign.toml's notes key names"
+        )
+
+    def _get_note(self, name: str) -> None:
+        """Hand back one file out of the campaign's own notes folder.
+
+        Read straight off disk and sent as it is: nothing here parses, rewrites
+        or renders the operator's own page, so what he wrote is what he sees.
+        """
+
+        server: CampaignServer = self.server  # type: ignore[assignment]
+        resolved = resolve_note(server.home, name)
+        if resolved is None:
+            self._error(f"no such note: {name[:80]}; {self._notes_line()}", status=404)
+            return
+        try:
+            body = resolved.read_bytes()
+        except OSError as exc:
+            self._error(f"cannot read that note: {exc.strerror or exc}", status=404)
+            return
+        # Same freshness contract as every other answer: an edited note shows
+        # its edit on the next reload rather than whenever the browser feels
+        # like asking again.
+        self._send(200, body, note_type(name) or "text/plain; charset=utf-8")
 
     def _get_state(self) -> None:
         server: CampaignServer = self.server  # type: ignore[assignment]

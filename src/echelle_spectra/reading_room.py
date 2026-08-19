@@ -38,9 +38,12 @@ When a local server serves the same page (``served=True``) it gains one power
 the file cannot have: it may ask that server which folders exist on this
 machine.  That is the whole served half — a folder picker behind a Browse
 button on the composer's data-folder field, plus :func:`render_setup_page`, the
-one-screen page a machine with no campaign home yet is served.  Every one of
-those pieces is *appended* to the static build rather than woven into it, so
-the one-shot file keeps its "fetches nothing" contract byte for byte.
+one-screen page a machine with no campaign home yet is served, plus one quiet
+header link to the operator's own pages in the folder campaign.toml's ``notes``
+key names -- names only, never their contents, which stay on his machine.
+Every one of those pieces is *appended* to the static build rather than woven
+into it, so the one-shot file keeps its "fetches nothing" contract byte for
+byte.
 
 A campaign home whose catalog has not been written yet gets no second page of
 its own: the server renders it as the FULL page over a synthesized empty
@@ -53,10 +56,12 @@ import html
 import json
 import os
 import re
+from collections.abc import Sequence
 from datetime import datetime, timezone
 from importlib.resources import files
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 from .campaign_run import GATE_SAMPLE, GATE_UNGATED, GATE_UNRECORDED, GATE_VERDICT
 from .catalog import load_catalog, source_catalog_path
@@ -3066,6 +3071,57 @@ HOME_ENDPOINT = "/api/home"
 #: command, a flag, or an argument list this page assembled.
 RUN_ENDPOINT = "/api/run"
 
+#: Where the server serves the folder campaign.toml's ``notes`` key names.  The
+#: operator's private how-to pages live there and are never carried by this
+#: repository or by a static build: this page only ever holds a link, and the
+#: names in it come from the server, which has already decided it will serve
+#: each one.
+NOTES_ENDPOINT = "/notes/"
+
+#: How many note pages the header names before it stops naming them.  The topbar
+#: is one line; a campaign with a shelf of notes writes itself an index page and
+#: links the rest from there.
+NOTES_SHOWN = 3
+
+_NOTES_CSS = """
+/* Served only. The operator's own pages, one quiet line at the end of the bar. */
+.topbar .notes { flex: 0 0 auto; font-size: .82rem; margin-left: 1rem; }
+.topbar .notes .more { color: var(--muted); }
+"""
+
+
+def _note_href(name: str) -> str:
+    """One note's address, percent-escaped so a spaced filename still opens."""
+
+    return NOTES_ENDPOINT + quote(name, safe="")
+
+
+def _notes_link(notes: list[str]) -> str:
+    """The header's one quiet link to the notes folder, or nothing at all.
+
+    Nothing at all is the common case and the important one: with no notes
+    folder named, or none holding a page, the header is the one it always was.
+    One page gets the plain words; several are named by their filename stems so
+    the operator can go straight to the one wanted, and past
+    :data:`NOTES_SHOWN` the line names the first few and counts the rest rather
+    than wrapping the bar.  There is no listing anywhere -- neither here nor at
+    the endpoint -- so what the folder holds beyond these names is not on this
+    page.
+    """
+
+    if not notes:
+        return ""
+    if len(notes) == 1:
+        return f'<span class="notes"><a href="{_e(_note_href(notes[0]))}">Campaign notes</a></span>'
+    shown = notes if len(notes) <= NOTES_SHOWN + 1 else notes[:NOTES_SHOWN]
+    links = " · ".join(
+        f'<a href="{_e(_note_href(name))}">{_e(Path(name).stem)}</a>' for name in shown
+    )
+    rest = len(notes) - len(shown)
+    more = f' <span class="more">+{rest} more</span>' if rest else ""
+    return f'<span class="notes">Campaign notes: {links}{more}</span>'
+
+
 _PICKER_CSS = """
 /* Served only. A stable gutter is declared before anything can lock the page,
    so opening the dialog cannot shift the layout -- or a rail -- sideways. */
@@ -3591,7 +3647,12 @@ def _page(context: dict[str, Any]) -> str:
     # home to launch into, so a served build handed none simply has no Run
     # control and says nothing about running.
     runnable = context.get("launches") is not None
+    # The operator's own pages are a served-only address too, and one this build
+    # never reads: only their names arrive here, from the server that will serve
+    # them.  With none, both the markup and its rule are the empty string.
+    notes = list(context.get("notes") or []) if served else []
     picker_css = _PICKER_CSS + (_RUN_CSS if runnable else "") if served else ""
+    picker_css += _NOTES_CSS if notes else ""
     picker_markup = _PICKER_MARKUP if served else ""
     served_js = (_PICKER_JS + _SERVED_JS + (_RUN_JS if runnable else "")) if served else ""
     if runnable:
@@ -3616,7 +3677,7 @@ def _page(context: dict[str, Any]) -> str:
         "<title>Echelle campaign</title>\n"
         f"<style>{_CSS}{picker_css}</style></head><body>\n"
         f'<header class="topbar"><h1>Echelle campaign</h1>{_tab_bar()}'
-        f'<span class="tagline">{tagline}</span></header>\n'
+        f'<span class="tagline">{tagline}</span>{_notes_link(notes)}</header>\n'
         '<div class="wrap"><div class="rail-grid">'
         f'<aside class="rail rail-left" id="rail-left" aria-label="Controls">{left}</aside>'
         f'<main class="content" id="content">{views}</main>'
@@ -3972,6 +4033,7 @@ def build_reading_room(
     served: bool = False,
     compose_catalog_path: str | Path | None = None,
     launches: dict[str, Any] | None = None,
+    notes: Sequence[str] | None = None,
 ) -> Path:
     """Build one page; no worker or command execution surface exists either way.
 
@@ -4001,6 +4063,12 @@ def build_reading_room(
     (served only) is what puts a Run control beside each command row; the state
     it renders is read off those files on every build and remembered nowhere, so
     a run started from a terminal reads exactly like a run started from here.
+
+    ``notes`` (served only) is the file names of the operator's own pages the
+    server has decided it will serve out of the folder campaign.toml's ``notes``
+    key names.  It puts one quiet link in the header and nothing else: this
+    build never opens those files, never copies them, and never learns what is
+    in them, which is the whole point of keeping them out of this repository.
     """
 
     composition = campaign_composition(
@@ -4067,6 +4135,7 @@ def build_reading_room(
         # the campaign home their launches belong to; anything less renders the
         # page it always rendered.
         "launches": dict(launches) if served and launches is not None else None,
+        "notes": [str(name) for name in notes] if served and notes else [],
         "catalog_path": _posix(composed_catalog),
         "generated_at": generated_at,
         "sources": sources,

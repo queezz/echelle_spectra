@@ -146,11 +146,85 @@ def test_the_static_build_still_reaches_nothing(static_page: str) -> None:
             assert static_page[max(0, index - 9) : index] == '<a href="'
     assert "fetches nothing" in static_page
     assert 'class="picker"' not in static_page
+    # The operator's own pages live on his machine and are reachable only from
+    # a server; a file build must not so much as name the address.
+    assert "/notes/" not in static_page
+    assert "Campaign notes" not in static_page
+
+
+def test_a_static_build_ignores_notes_entirely(tmp_path: Path) -> None:
+    """``notes`` is served-only wiring, exactly like ``launches``.
+
+    A static build handed some is still the static build, byte for byte: the
+    file has no server to fetch those pages from, so a link into ``/notes/``
+    would be a promise it cannot keep.
+    """
+
+    catalog = _catalog(tmp_path)
+    plain = build_reading_room(catalog, tmp_path / "web-plain").read_bytes()
+    handed = build_reading_room(
+        catalog, tmp_path / "web-notes", notes=["where-echelle-looks.html"]
+    ).read_bytes()
+    assert _STAMP.sub("STAMP", plain.decode("utf-8")) == _STAMP.sub(
+        "STAMP", handed.decode("utf-8")
+    )
 
 
 # ---------------------------------------------------------------------------
 # The served build
 # ---------------------------------------------------------------------------
+
+
+def _notes_page(tmp_path: Path, notes: list[str]) -> str:
+    return build_reading_room(
+        _catalog(tmp_path), tmp_path / "web-notes-served", served=True, notes=notes
+    ).read_text(encoding="utf-8")
+
+
+def test_a_served_build_with_no_notes_is_the_page_it_always_was(
+    served_page: str, tmp_path: Path
+) -> None:
+    """The header gains nothing — not a rule, not an empty span — from a folder
+    that holds no page."""
+
+    assert "/notes/" not in served_page
+    assert "Campaign notes" not in served_page
+    assert ".topbar .notes" not in served_page
+    empty = _notes_page(tmp_path, [])
+    assert _STAMP.sub("STAMP", empty) == _STAMP.sub("STAMP", served_page)
+
+
+def test_one_note_is_one_quiet_link_in_the_header(tmp_path: Path) -> None:
+    page = _notes_page(tmp_path, ["where-echelle-looks.html"])
+    header = page[page.index("<header") : page.index("</header>")]
+    assert (
+        '<span class="notes"><a href="/notes/where-echelle-looks.html">Campaign notes</a></span>'
+        in header
+    )
+    # It sits after the banner sentence, at the quiet end of the bar, and its
+    # one rule arrives with it rather than living in the shared stylesheet.
+    assert header.index("tagline") < header.index('class="notes"')
+    assert ".topbar .notes { flex: 0 0 auto; font-size: .82rem; margin-left: 1rem; }" in page
+
+
+def test_several_notes_are_named_by_their_stems_on_one_line(tmp_path: Path) -> None:
+    page = _notes_page(tmp_path, ["data map.html", "gratings.html", "nas.htm"])
+    assert '<a href="/notes/data%20map.html">data map</a>' in page
+    assert '<a href="/notes/gratings.html">gratings</a>' in page
+    assert '<a href="/notes/nas.htm">nas</a>' in page
+    assert "Campaign notes: " in page
+    assert "more</span>" not in page
+
+
+def test_a_shelf_of_notes_names_the_first_few_and_counts_the_rest(tmp_path: Path) -> None:
+    """The topbar is one line, and it stays one line."""
+
+    page = _notes_page(tmp_path, [f"note-{index}.html" for index in range(1, 8)])
+    for index in (1, 2, 3):
+        assert f'<a href="/notes/note-{index}.html">note-{index}</a>' in page
+    for index in (4, 5, 6, 7):
+        assert f"note-{index}.html" not in page
+    assert '<span class="more">+4 more</span>' in page
 
 
 def test_the_served_build_puts_browse_beside_the_data_folder_field(served_page: str) -> None:

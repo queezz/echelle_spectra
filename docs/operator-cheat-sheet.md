@@ -458,7 +458,11 @@ Prefer clicking to pasting? `echelle serve` (from the campaign folder, or
 with a Browse… folder picker on the data-folder field; a cold start with no
 campaign home lets you pick the campaign folder in the page, which then
 writes `campaign.toml` for you. Loopback only; the page composes and checks,
-the terminal runs the work.
+the terminal runs the work. Add `notes = "<folder>"` to `campaign.toml` — a
+relative or absolute path — and the served page links that folder's own pages
+in its header and serves them at `/notes/<name>`; without the key there are
+none, and pointing several campaigns at one folder keeps the pages in a single
+place, on your machine and out of this repository.
 
 Learn the page with nothing: `echelle web --practice --open` — an invented campaign
 built to a temp folder, labels say PRACTICE.
