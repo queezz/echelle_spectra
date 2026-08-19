@@ -689,3 +689,52 @@ def test_web_open_with_a_home_in_reach_still_builds_statically(
     assert web_main(["--open"]) == 0
 
     assert opened == [(tmp_path / "page" / "index.html").resolve().as_uri()]
+
+
+# ---------------------------------------------------------------------------
+# recal-cube tells the operator when it dropped factor columns
+#
+# The manifest has always recorded the drop; a cross-era run that quietly loses
+# forty columns to the new sphere's narrower coverage needs to say so at the
+# terminal too. The two recorded counts are not additive -- nonpositive is the
+# TOTAL dropped, uncovered is the subset outside coverage -- so the line must
+# name the total and call out the subset, never sum them.
+
+
+def _write_recal_manifest(path: Path, **counts: int) -> Path:
+    record = {"schema": "echelle-recalibration/v1", "changes": ["absolute-factor"]}
+    record.update({key: value for key, value in counts.items() if value})
+    path.write_text(json.dumps(record), encoding="utf-8")
+    return path
+
+
+def test_recal_reports_the_total_and_the_uncovered_subset(tmp_path: Path, capsys) -> None:
+    manifest = _write_recal_manifest(
+        tmp_path / "cube.nc.recalibration.json",
+        dropped_nonpositive_factor_columns=40,
+        dropped_uncovered_factor_columns=37,
+    )
+    campaign_tools_cli._report_dropped_factor_columns(manifest)
+    out = capsys.readouterr().out
+    assert "dropped 40" in out
+    assert "37 of them outside" in out
+    # The counts are a total and its subset; the line never presents their sum.
+    assert "77" not in out
+
+
+def test_recal_names_a_pure_noise_drop_without_a_coverage_clause(
+    tmp_path: Path, capsys
+) -> None:
+    manifest = _write_recal_manifest(
+        tmp_path / "cube.nc.recalibration.json", dropped_nonpositive_factor_columns=3
+    )
+    campaign_tools_cli._report_dropped_factor_columns(manifest)
+    out = capsys.readouterr().out
+    assert "dropped 3" in out
+    assert "outside" not in out
+
+
+def test_recal_says_nothing_when_no_column_was_dropped(tmp_path: Path, capsys) -> None:
+    manifest = _write_recal_manifest(tmp_path / "cube.nc.recalibration.json")
+    campaign_tools_cli._report_dropped_factor_columns(manifest)
+    assert capsys.readouterr().out == ""

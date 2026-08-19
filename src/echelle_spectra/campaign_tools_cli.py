@@ -297,6 +297,37 @@ def catalog_main(argv: list[str] | None = None, *, prog: str = "echelle catalog"
     return _bounded(run)
 
 
+def _report_dropped_factor_columns(manifest_path: Path) -> None:
+    """Say on stdout how many factor columns a recalibration dropped, if any.
+
+    The manifest already records this, but a cross-era run that quietly loses
+    forty columns to the new sphere's narrower coverage is exactly the fact an
+    operator needs told at the terminal rather than found later in a file.
+
+    The two recorded counts are NOT additive: ``dropped_nonpositive_factor_columns``
+    is the TOTAL number of columns dropped, and ``dropped_uncovered_factor_columns``
+    is the subset of those that fell outside the new snapshot's sphere coverage.
+    So the line names the total and, when some were a coverage loss, calls that
+    subset out -- it never sums the two.
+    """
+
+    try:
+        record = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):  # pragma: no cover - the file was just written
+        return
+    total = int(record.get("dropped_nonpositive_factor_columns", 0))
+    uncovered = int(record.get("dropped_uncovered_factor_columns", 0))
+    if not total and not uncovered:
+        return
+    if uncovered:
+        print(
+            f"absolute-factor: dropped {total} wavelength column(s), "
+            f"{uncovered} of them outside the new snapshot's sphere coverage"
+        )
+    else:
+        print(f"absolute-factor: dropped {total} wavelength column(s) with no usable factor")
+
+
 def recal_main(argv: list[str] | None = None, *, prog: str = "echelle recal-cube") -> int:
     from .recalibration import RecalibrationError, recalibrate_cube
     from .snapshot import SnapshotValidationError
@@ -339,6 +370,7 @@ def recal_main(argv: list[str] | None = None, *, prog: str = "echelle recal-cube
         except (RecalibrationError, SnapshotValidationError, OSError) as exc:
             raise CommandError(str(exc)) from None
         print(f"cube: {output}\nmanifest: {manifest}")
+        _report_dropped_factor_columns(manifest)
         return 0
 
     return _bounded(run)
