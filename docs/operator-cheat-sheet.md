@@ -271,16 +271,22 @@ data="/Volumes/NIFS"
 ./echelle drift audit "$data/cubes" \
   --calibrations "$data/calibrations"
 
-# 7. Process the whole drive under that verdict. Name the evidence file the
-#    audit just printed, e.g. drift-evidence-001.json beside the cubes.
-#    --config carries the trigger timing no calibration measures; without it
-#    step 9 cannot write LHD text. See "Getting to echelle txt" below.
+# 7. Process the whole drive under that verdict, in ABSOLUTE units. The LHD
+#    deliverable must be absolutely calibrated, so --units wmsr applies the
+#    snapshot's sphere factor (radiance, W/m2/nm/sr) instead of raw counts, and
+#    --calibration-source names the sphere standard this drive traces to (each
+#    campaign has its own sphere; name that drive's). Name the evidence file the
+#    audit just printed, e.g. drift-evidence-001.json beside the cubes. --config
+#    carries the trigger timing no calibration measures; without it step 9
+#    cannot write LHD text. See "Getting to echelle txt" below.
 ./echelle process "$data/shots" \
   -o "$data/cubes" \
   --runs-dir "$data/runs" \
   --registry "$data/calibration_registry.toml" \
   --calibrations "$data/calibrations" \
   --config "$data/export-timing.toml" \
+  --units wmsr \
+  --calibration-source "snapshot 20250926_cmos integrating sphere" \
   --volume-label NIFS-A \
   --drift-verdict "$data/cubes/drift-evidence-001.json"
 
@@ -350,19 +356,32 @@ can use the bench's `export.toml` whole, with `--config`.
 
 ### `--calibration-source` on absolute runs
 
-The trip loop above exports counts. A run that asks for an absolute scale
-instead — `--units wm`, `wmsr` or `phmsr` — should also say what that scale was
-traced to:
+The trip loop above already runs absolute (`--units wmsr`), because the LHD
+deliverable must be — `echelle txt` refuses a counts cube, so a drive processed
+in counts cannot become LHD text at all. The absolute factor itself comes from
+the registry-resolved snapshot's own sphere; `--units wmsr` only tells the run
+to apply it and write radiance (`W/m2/nm/sr`) instead of raw counts.
+
+`--calibration-source` says what that scale was traced to:
 
 ```powershell
---units wmsr --calibration-source "snapshot 20260814_cmos integrating sphere"
+--units wmsr --calibration-source "snapshot 20250926_cmos integrating sphere"
 ```
 
-It is free text and it becomes the cube's `calibration_source` attribute, the
-only record of which sphere standard stands behind the numbers. An absolute run
-that omits it warns and then writes cubes carrying no such record at all. The
-bench's generated `export.toml` sets it under `[export]` alongside `units`, so a
-non-registry run driven by that file already has it.
+It is free text and it becomes the cube's `calibration_source` attribute — the
+only record of which sphere standard stands behind the numbers, and it is
+carried into the LHD text's own comments. It is one value for the whole run, so
+name the sphere for the drive being processed; a single `echelle process` call
+whose shots span two calibration eras would label them all alike even though
+the factors are still applied per snapshot. An absolute run that omits it warns
+and then writes cubes carrying no such record at all. The bench's generated
+`export.toml` sets it under `[export]` alongside `units`, so a non-registry run
+driven by that file already has it.
+
+The absolute scale stays revisable after the fact: `echelle recal-cube
+--factor-only` re-applies a different era's sphere factor onto a saved cube
+without reopening the raw SIF, so a cube can be re-scaled if a calibration is
+later refined.
 
 Steps 4–7 are the whole gate: a registry-backed run needs either `--sample N`
 or `--sample auto`, which processes at most N (or the derived count) resolved

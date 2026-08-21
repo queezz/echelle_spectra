@@ -189,6 +189,7 @@ def _timed_cube(path: Path, **overrides: object) -> Path:
     attrs: dict[str, object] = {
         "instrument_id": "spec_div1",
         "intensity_units": "W/m2/nm/sr",
+        "calibration_type": "absolute",
         "shot_number": "193778",
         "created_at": "2026-08-14T00:31:00+00:00",
         "snapshot_id": "20250926_cmos",
@@ -268,6 +269,40 @@ def test_cube_text_refuses_a_cube_missing_one_timing_attribute(
     assert attr in message
     assert origin in message
     assert not (tmp_path / "out.txt").exists()
+
+
+def test_cube_text_refuses_a_counts_cube_because_lhd_must_be_absolute(
+    tmp_path: Path,
+) -> None:
+    """The LHD deliverable carries an absolute scale or it is not written at all.
+
+    A counts cube has valid timing and would otherwise produce a perfectly
+    well-formed header reading ValUnit='counts' -- which is exactly the silent
+    wrong-science this refusal exists to stop.
+    """
+
+    cube = _timed_cube(
+        tmp_path / "counts.nc", intensity_units="counts", calibration_type="counts"
+    )
+    with pytest.raises(LhdTextError) as raised:
+        write_cube_text(cube, tmp_path / "counts.txt")
+    message = str(raised.value)
+    assert "absolute" in message
+    assert "wmsr" in message
+    assert "recal-cube" in message
+    assert not (tmp_path / "counts.txt").exists()
+
+
+def test_cube_text_records_the_sphere_standard_the_cube_names(tmp_path: Path) -> None:
+    """When the absolute cube names its sphere standard, the deliverable says so."""
+
+    cube = _timed_cube(
+        tmp_path / "sourced.nc",
+        calibration_source="snapshot 20250926_cmos integrating sphere",
+    )
+    output = write_cube_text(cube, tmp_path / "sourced.txt")
+    text = output.read_text(encoding="utf-8")
+    assert "# calibration_source = snapshot 20250926_cmos integrating sphere" in text
 
 
 class _Value:

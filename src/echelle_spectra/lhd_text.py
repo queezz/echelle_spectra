@@ -226,6 +226,9 @@ def _provenance_comments(source: Path, attrs: Mapping[str, object]) -> list[str]
         ("source_file", "source_file"),
         ("snapshot_id", "snapshot_id"),
         ("snapshot_manifest_sha256", "snapshot_manifest_sha256"),
+        # The sphere standard the absolute scale was traced to, when the run
+        # named one -- so the deliverable itself records which sphere it rests on.
+        ("calibration_source", "calibration_source"),
         ("calibration_registry_sha256", "calibration_registry_sha256"),
         ("calibration_registry_epoch_position", "calibration_registry_epoch_position"),
         ("time_axis_reference", "time_axis_reference"),
@@ -268,6 +271,20 @@ def write_cube_text(
     units = str(ds.attrs.get("intensity_units", "unknown"))
     attrs: dict[str, Any] = dict(ds.attrs)
     timing = cube_timing(attrs, cube=source.name)
+    # The LHD deliverable carries an absolute scale or it is not a deliverable
+    # (owner requirement 2026-08-19: "txt for LHD MUST be absolute"). Counts
+    # would otherwise ship silently -- the header simply says ValUnit='counts'
+    # and nothing downstream refuses it -- so the one place that turns a cube
+    # into LHD text is where the scale is checked. The factor itself is already
+    # in the snapshot; a counts cube just means the run did not ask for it.
+    calibration_type = str(attrs.get("calibration_type", "")).lower()
+    if calibration_type != "absolute":
+        raise LhdTextError(
+            f"the LHD text must be absolutely calibrated, but this cube is {units!r} "
+            f"(calibration_type={calibration_type or 'unset'!r}). Reprocess the drive with "
+            "an absolute --units (wmsr, wm, or phmsr) so the snapshot's sphere factor is "
+            "applied, or revise the cube's absolute factor with echelle recal-cube."
+        )
     header = render_lhd_header(
         diagnostic=str(attrs.get("instrument_id", "Echelle Spectra")),
         shot=str(attrs.get("shot_number", source.stem)),

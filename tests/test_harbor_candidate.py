@@ -124,7 +124,13 @@ def _drift_dispersion(centre_nm: float) -> float:
     return 0.0108 * centre_nm / 656.2790
 
 
-def _line_cube(path: Path, shift_px: float | None, snapshot_id: str = "20250101_cmos") -> None:
+def _line_cube(
+    path: Path,
+    shift_px: float | None,
+    snapshot_id: str = "20250101_cmos",
+    *,
+    absolute: bool = False,
+) -> None:
     """Write a cube whose lines sit where a shifted detector would put them."""
 
     pixels = np.arange(_DRIFT_WIDTH_PX, dtype=float)
@@ -153,8 +159,8 @@ def _line_cube(path: Path, shift_px: float | None, snapshot_id: str = "20250101_
         attrs={
             "spectrocube_version": "0.2.0",
             "instrument_id": "echelle",
-            "calibration_type": "counts",
-            "intensity_units": "counts",
+            "calibration_type": "absolute" if absolute else "counts",
+            "intensity_units": "W/m2/nm/sr" if absolute else "counts",
             "wavelength_medium": "air",
             "snapshot_id": snapshot_id,
             "shot_number": path.stem,
@@ -319,7 +325,8 @@ def test_refinement_historical_and_connected_fixture_path(tmp_path: Path) -> Non
     cube_root = tmp_path / "cubes"
     cube_root.mkdir()
     cube = cube_root / "shot_42.nc"
-    _line_cube(cube, 8.0, snapshot.snapshot_id)
+    # The end of this path writes the LHD deliverable, which must be absolute.
+    _line_cube(cube, 8.0, snapshot.snapshot_id, absolute=True)
     evidence_payload = audit_cubes([cube], evidence_path=tmp_path / "drift.json")
     evidence = write_drift_evidence(tmp_path / "drift.json", evidence_payload)
     refined, accepted = create_refinement_snapshot(
