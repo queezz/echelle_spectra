@@ -143,6 +143,20 @@ Keep acquired SIF files, generated calibrations, configuration, cubes, and run
 receipts outside the kit folder. Then the kit can be replaced without risking
 campaign data.
 
+### A drive this machine can read but not write
+
+A Windows-formatted (NTFS) drive mounts read-only on a Mac. That is fine for
+the data — raw SIFs are only ever read — but the campaign home cannot live on
+that drive there. Point the served page (`echelle serve`, or `echelle web
+--open` from no campaign folder) at the drive anyway: it detects the read-only
+volume, explains it, and offers to create a writable home (under
+`~/Echelle-campaigns/` by default, or any folder you pick) whose
+`campaign.toml` remembers the drive as its `data` folder. Cubes and drift
+evidence then derive into that home instead of beside the data; the Advanced
+fold can re-point them. On a machine that can write the drive — the same drive
+back on Windows — nothing changes: everything derives beside the data as
+before.
+
 ### Windows PowerShell
 
 ```powershell

@@ -17,6 +17,7 @@ from __future__ import annotations
 import json
 import re
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -410,6 +411,135 @@ def test_the_served_banner_does_not_claim_to_reach_nothing(served_page: str) -> 
 
 
 # ---------------------------------------------------------------------------
+# A data drive this machine can read and cannot write
+# ---------------------------------------------------------------------------
+#
+# The owner's field case, 2026-08: the shots live on an NTFS drive, which a Mac
+# mounts read-only.  Nothing about reading them changes; what changes is where
+# everything a run WRITES has to land.  The build measures the seeded folder's
+# volume once and the page carries that measurement, so the operator reads the
+# real destination in the derived fields before pressing anything.
+
+
+def _data_blob(page: str) -> dict[str, Any]:
+    """The page's own JSON blob — what its JavaScript derives from."""
+
+    found = re.search(r"^const DATA=(.*);$", page, re.M)
+    assert found is not None, "the page carries no DATA blob"
+    return json.loads(found.group(1))
+
+
+def _refuse_writes(monkeypatch: pytest.MonkeyPatch, folder: Path) -> None:
+    """Make one folder answer ``os.access(..., W_OK)`` False and nothing else.
+
+    A ``chmod`` cannot express this: the volume refuses the write, not the
+    folder's mode, and a test running as root would not even see the refusal.
+    """
+
+    from echelle_spectra import reading_room
+
+    real = reading_room.os.access
+    wanted = str(folder)
+
+    def _access(path: Any, mode: int, **keywords: Any) -> bool:
+        if str(path) == wanted and mode == reading_room.os.W_OK:
+            return False
+        return real(path, mode, **keywords)
+
+    monkeypatch.setattr(reading_room.os, "access", _access)
+
+
+def _campaign_folders(tmp_path: Path) -> tuple[Path, Path]:
+    """A data folder on the drive, and the campaign home on this machine."""
+
+    data = tmp_path / "HD-LXU3" / "DATA"
+    data.mkdir(parents=True)
+    home = tmp_path / "Echelle-campaigns" / "HD-LXU3-DATA"
+    home.mkdir(parents=True)
+    return data, home
+
+
+def test_a_read_only_data_drive_sends_every_written_thing_into_the_home(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Cubes belong beside their own data — except on a drive that cannot hold
+    them, where the campaign home is the only place left that can."""
+
+    data, home = _campaign_folders(tmp_path)
+    _refuse_writes(monkeypatch, data)
+    page = _built(tmp_path, "web-readonly", served=True, data_folder=data, home=home)
+    blob = _data_blob(page)
+    assert blob["home"] == home.as_posix()
+    assert blob["readonly"] is True
+    values = blob["values"]
+    # Read from where it is; write where writing is possible.
+    assert values["input"] == data.as_posix()
+    assert values["output"] == f"{home.as_posix()}/cubes/DATA"
+    assert values["cubes"] == values["output"]
+    assert values["verdict"] == f"{home.as_posix()}/{blob['evidence_name']}"
+    # The composer opens on the folder the campaign already named, so the
+    # operator confirms a seeded answer instead of retyping a NAS path.
+    assert f'id="f-input" value="{data.as_posix()}"' in page
+    # And the page says once why the derived fields point somewhere else.
+    assert '<p class="note" id="readonly-note">' in page
+    assert "the cubes and the drift evidence derive into the campaign home" in page
+
+
+def test_a_writable_data_drive_derives_beside_its_own_data_and_says_nothing(
+    tmp_path: Path,
+) -> None:
+    """The redirect is the exception, and it stays one: an ordinary drive
+    derives exactly where it always did, and the note stays folded away."""
+
+    data, home = _campaign_folders(tmp_path)
+    page = _built(tmp_path, "web-writable", served=True, data_folder=data, home=home)
+    blob = _data_blob(page)
+    assert blob["home"] == home.as_posix()
+    assert blob["readonly"] is False
+    values = blob["values"]
+    assert values["output"] == data.as_posix()
+    assert values["cubes"] == data.as_posix()
+    assert values["verdict"] == f"{data.as_posix()}/{blob['evidence_name']}"
+    assert '<p class="note" id="readonly-note" hidden>' in page
+
+
+def test_a_static_build_measures_no_volume_and_claims_none(static_page: str) -> None:
+    """A file handed to somebody at another machine knows nothing about drives
+    it will never see, so it says nothing: no home, and no refusal."""
+
+    blob = _data_blob(static_page)
+    assert blob["home"] == ""
+    assert blob["readonly"] is False
+    assert '<p class="note" id="readonly-note" hidden>' in static_page
+
+
+def test_the_picker_names_a_volume_that_refuses_writes(served_page: str) -> None:
+    """Said where the path is read, before anything has been chosen."""
+
+    assert "if (picker.path && payload.writable === false)" in served_page
+    assert "head.textContent = picker.path + ' — read-only';" in served_page
+
+
+def test_a_chosen_folder_is_re_measured_through_the_same_read_only_endpoint(
+    served_page: str,
+) -> None:
+    """The build measures the seed; the browser measures what the operator
+    picks or types next — through ``/api/browse``, which is the one endpoint
+    that already answers this and cannot write anything."""
+
+    assert "function probeFolder(path) {" in served_page
+    assert "if (field.id === 'f-input') { probeFolder(chosen); }" in served_page
+    assert "probeFolder(probedField.value.trim());" in served_page
+    assert "var next = !!payload && payload.writable === false;" in served_page
+    assert "if (next !== folderState.readonly) { folderState.readonly = next; compose(); }" in (
+        served_page
+    )
+    # Still the same two endpoints: measuring a volume added no third one.
+    for found in _api_strings(served_page):
+        assert found in _ENDPOINTS, f"the served page reaches an endpoint it should not: {found}"
+
+
+# ---------------------------------------------------------------------------
 # The Run control: served only, and only with a campaign to launch into
 # ---------------------------------------------------------------------------
 
@@ -578,20 +708,54 @@ def test_the_setup_page_names_the_situation_and_carries_the_picker() -> None:
     assert ">Choose this folder</button>" in text
     assert 'id="pick-home"' in text
     # One sentence of teaching, not a lecture: the page says what to do once.
-    assert text.count("Pick the folder this campaign lives in") == 1
+    assert text.count("Point at the campaign") == 1
+    # And it teaches the one thing that used to be a dead end: a drive that
+    # cannot hold the records is still the drive the data lives on.
+    assert text.count("a read-only drive stays the data source") == 1
 
 
 def test_the_setup_page_writes_the_home_and_then_reloads() -> None:
     text = render_setup_page()
     assert f"fetch('{HOME_ENDPOINT}'" in text
     assert "method: 'POST'" in text
-    assert "JSON.stringify({ folder: folder })" in text
+    # One poster for every shape the setup posts -- the plain choice, and the
+    # read-only fork's create-and-record -- so there is one request to read.
+    assert "JSON.stringify(body)" in text
+    assert "function chooseHome(folder) { postHome({ folder: folder }); }" in text
     assert "window.location.href = '/';" in text
     # A refused folder says so in place, inside the dialog.
     assert "That folder could not become the campaign home." in text
     assert "alert(" not in text
     for found in _api_strings(text):
         assert found in _ENDPOINTS, f"the setup page reaches an endpoint it should not: {found}"
+
+
+def test_a_read_only_answer_forks_the_setup_instead_of_ending_it() -> None:
+    """The drive the owner points at is often the one that cannot hold a home.
+
+    An NTFS drive mounts read-only on his Mac, and the server says so with
+    guidance rather than an error.  The page must have somewhere to put that
+    guidance: a panel that is not an error box, carrying the reason, the data
+    folder that stays where it is, and the two ways forward.
+    """
+
+    text = render_setup_page()
+    assert '<section class="panel" id="setup-fork" hidden>' in text
+    for identifier in ("fork-reason", "fork-data", "fork-suggestion", "fork-error"):
+        assert f'id="{identifier}"' in text
+    # Offered, never decided: creating the suggestion and picking elsewhere are
+    # both one press away, and neither is the page's own choice.
+    assert '<button type="button" id="fork-create">Create it and continue</button>' in text
+    assert '<button type="button" id="fork-else">Pick a different home…</button>' in text
+    # The fork's own request records the data folder in the home it creates.
+    assert (
+        "postHome({ folder: String(payload.suggestion || ''), create: true, data: dataFolder });"
+        in text
+    )
+    assert "postHome({ folder: alt, data: dataFolder });" in text
+    # The reason is the server's sentence, shown, never one this page invents.
+    assert "String(payload.reason || '')" in text
+    assert "if (answer.payload.readonly) {" in text
 
 
 def test_the_setup_page_bakes_in_no_example_drive_path() -> None:

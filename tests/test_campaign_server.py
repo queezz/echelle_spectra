@@ -12,6 +12,7 @@ adopt the file byte for byte, because the operator's hand edits live in it.
 
 from __future__ import annotations
 
+import errno
 import http.client
 import json
 import os
@@ -243,6 +244,141 @@ def test_browse_refuses_a_path_that_is_not_a_folder(client: _Client, tmp_path: P
 
 
 # ---------------------------------------------------------------------------
+# A drive this machine can read and cannot write
+# ---------------------------------------------------------------------------
+#
+# The owner's field case, 2026-08: his shots live on an NTFS drive, and macOS
+# mounts those read-only.  Every question below is one this server has to answer
+# before a single frame is read, because the answer decides where the campaign's
+# own records can live at all.  A chmod cannot stand in for it -- the volume
+# refuses the write, not the folder's mode -- so the refusal is monkeypatched at
+# ``os.access`` and nothing on this machine is made unwritable to test it.
+
+
+def _refuse_writes(monkeypatch: pytest.MonkeyPatch, folder: Path) -> None:
+    """Make exactly one folder answer ``os.access(..., W_OK)`` False."""
+
+    real = campaign_server.os.access
+    wanted = str(folder)
+
+    def _access(path: Any, mode: int, **keywords: Any) -> bool:
+        if str(path) == wanted and mode == campaign_server.os.W_OK:
+            return False
+        return real(path, mode, **keywords)
+
+    monkeypatch.setattr(campaign_server.os, "access", _access)
+
+
+def test_browse_says_whether_this_machine_can_write_where_it_is_looking(
+    client: _Client, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The picker states it, and the composer derives by it."""
+
+    assert client.json_get("/api/browse", path=str(tmp_path))["writable"] is True
+    # The drive list is not a folder, so there is nothing to answer about one:
+    # None is the honest word, and it is not False.
+    assert client.json_get("/api/browse")["writable"] is None
+
+    _refuse_writes(monkeypatch, tmp_path.resolve())
+    refused = client.json_get("/api/browse", path=str(tmp_path))
+    assert refused["writable"] is False
+    # Reading is untouched: a read-only drive still browses exactly as before.
+    assert refused["path"] == str(tmp_path.resolve())
+    assert refused["dirs"] == []
+
+
+def test_a_readonly_folder_is_named_back_and_never_written_to(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Not an error and not a write: a third outcome the caller turns into a
+    fork in the setup, with the folder that refused named in it."""
+
+    drive = tmp_path / "HD-LXU3" / "DATA"
+    drive.mkdir(parents=True)
+    _refuse_writes(monkeypatch, drive.resolve())
+
+    outcome, path = campaign_server.adopt_or_write_home(drive)
+    assert outcome == "readonly"
+    assert path == drive.resolve()
+    assert list(drive.iterdir()) == [], "a folder that cannot be written to was written to"
+
+
+def test_a_volume_that_only_refuses_at_the_write_gets_the_same_guidance(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``os.access`` is an answer, not a guarantee.
+
+    A mount can report a folder writable and still fail the write with EROFS,
+    which is the same situation reaching the operator through a different door.
+    It must arrive as the same fork, never as a traceback in a red box.
+    """
+
+    drive = tmp_path / "HD-LXU3" / "DATA"
+    drive.mkdir(parents=True)
+
+    def _refuse(*arguments: Any, **keywords: Any) -> Any:
+        raise OSError(errno.EROFS, "Read-only file system")
+
+    monkeypatch.setattr(campaign_server, "open", _refuse, raising=False)
+
+    outcome, path = campaign_server.adopt_or_write_home(drive)
+    assert outcome == "readonly"
+    assert path == drive.resolve()
+
+
+def test_creating_the_offered_home_records_the_data_folder_it_reads(tmp_path: Path) -> None:
+    """The two halves of the fork, in one file: a home this machine can write,
+    and a ``data`` line naming the drive it will only ever read."""
+
+    drive = tmp_path / "HD-LXU3" / "DATA"
+    drive.mkdir(parents=True)
+    # Neither the folder nor its parent exists yet; ``create`` makes both.
+    home = tmp_path / "Echelle-campaigns" / "HD-LXU3-DATA"
+
+    outcome, written = campaign_server.adopt_or_write_home(home, create=True, data=drive)
+    assert outcome == "written"
+    assert written == (home / "campaign.toml").resolve()
+    assert home.is_dir()
+
+    document = campaign_server.tomllib.loads(written.read_text(encoding="utf-8"))
+    assert Path(document["data"]) == drive
+    # It is an ordinary hand-editable line, and the page says how to change it.
+    assert "Edit or delete this line to re-point it." in written.read_text(encoding="utf-8")
+    # And the reader every build goes through resolves it to the same folder.
+    assert campaign_server.home_values(written)["data"] == drive
+
+    # Without the key there is no data folder to seed from, and no guess made.
+    plain = tmp_path / "plain"
+    plain.mkdir()
+    _, bare = campaign_server.adopt_or_write_home(plain)
+    assert campaign_server.home_values(bare)["data"] is None
+
+
+def test_the_suggested_home_is_named_after_the_drive_that_refused(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A suggestion has to be explainable or it is a magic folder.
+
+    ``/Volumes/HD-LXU3/DATA`` becomes ``~/Echelle-campaigns/HD-LXU3-DATA``:
+    under the user's own home, where writing is possible, named after the path
+    it stands in for so two campaigns on two drives cannot collide.
+    """
+
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: Path("/Users/owner")))
+
+    suggested = campaign_server.suggest_home(Path("/Volumes/HD-LXU3/DATA"))
+    assert suggested == Path("/Users/owner/Echelle-campaigns/HD-LXU3-DATA")
+    # The mount point itself carries no information and is dropped; every other
+    # part is kept, so nothing on a second drive can land on the same name.
+    assert campaign_server.suggest_home(Path("/mnt/data/shots")) == Path(
+        "/Users/owner/Echelle-campaigns/mnt-data-shots"
+    )
+    # A bare root names nothing at all, and still gets a folder rather than a
+    # crash: the suggestion is offered beside a picker either way.
+    assert campaign_server.suggest_home(Path("/")).name == "campaign"
+
+
+# ---------------------------------------------------------------------------
 # The one write
 # ---------------------------------------------------------------------------
 
@@ -320,6 +456,101 @@ def test_a_home_post_without_a_folder_is_refused(client: _Client) -> None:
         client.post("/api/home", {})
     assert raised.value.code == 400
     assert "folder" in _error_of(raised.value)["error"]
+
+
+def _refused_home(
+    client: _Client, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> tuple[Path, dict[str, Any]]:
+    """Point the setup at a folder whose volume refuses writes, and read the
+    guidance it comes back with."""
+
+    drive = tmp_path / "HD-LXU3" / "DATA"
+    drive.mkdir(parents=True)
+    _refuse_writes(monkeypatch, drive.resolve())
+    return drive, client.post("/api/home", {"folder": str(drive)})
+
+
+def test_a_readonly_folder_gets_guidance_not_an_error(
+    client: _Client, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The dead end this replaced: the operator pointed at his data drive and
+    the setup said only that it could not write there.
+
+    Nothing is wrong with the folder he pointed at -- it is the data, and the
+    data is only ever read.  What cannot live there is the campaign's own
+    records, so the answer names the folder, says why, and offers a home.
+    """
+
+    drive, answer = _refused_home(client, tmp_path, monkeypatch)
+    assert Path(answer["readonly"]) == drive.resolve()
+    assert "error" not in answer and "written" not in answer and "adopted" not in answer
+    assert Path(answer["suggestion"]) == campaign_server.suggest_home(drive.resolve())
+    assert answer["suggestion"].endswith("HD-LXU3-DATA")
+    # One paragraph, saying which folder and why -- not a stack trace and not a
+    # sentence this page invented.
+    assert str(drive.resolve()) in answer["reason"]
+    assert "read but not write" in answer["reason"]
+    assert "stays where it is" in answer["reason"]
+
+    # Nothing was decided: no file, and the server is still in setup.
+    assert not (drive / "campaign.toml").exists()
+    assert client.json_get("/api/state") == {"state": "setup", "home": None}
+
+
+def test_the_offered_home_is_created_and_names_the_drive_it_reads(
+    client: _Client, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The second half of the fork, over the wire.
+
+    The suggestion is offered beside a picker that can point anywhere else, and
+    this test takes that second road on purpose: a test that accepted the
+    suggestion would create a folder in the operator's real home directory.
+    """
+
+    drive, refused = _refused_home(client, tmp_path, monkeypatch)
+    chosen = tmp_path / "records" / "HD-LXU3-DATA"
+
+    written = client.post(
+        "/api/home", {"folder": str(chosen), "create": True, "data": refused["readonly"]}
+    )
+    target = chosen / "campaign.toml"
+    assert Path(written["written"]) == target.resolve()
+    assert chosen.is_dir(), "create was asked for and the folder was not made"
+
+    document = campaign_server.tomllib.loads(target.read_text(encoding="utf-8"))
+    assert Path(document["data"]) == drive.resolve()
+    assert campaign_server.home_values(target.resolve())["data"] == drive.resolve()
+    # The campaign is open on the home that was just made, and the data drive
+    # holds nothing this server put there.
+    assert client.json_get("/api/state") == {
+        "state": "empty",
+        "home": str(target.resolve()),
+    }
+    assert list(drive.iterdir()) == [], "the read-only drive was written to after all"
+
+
+def test_a_home_post_reads_a_folder_a_create_and_a_data_folder_and_nothing_else(
+    client: _Client, tmp_path: Path
+) -> None:
+    """Two keys were added to this endpoint, so the refusal list is worth
+    re-pinning: an endpoint that reads whatever it is sent writes wherever it
+    is told."""
+
+    home = tmp_path / "campaign"
+    home.mkdir()
+    for payload, expected in (
+        ({"folder": str(home), "template": "# mine"}, "never template"),
+        ({"folder": str(home), "notes": "/etc"}, "never notes"),
+        ({"folder": str(home), "data": str(tmp_path / "gone")}, "not a readable folder"),
+        ({"folder": str(home), "data": 7}, "must be named as text"),
+    ):
+        with pytest.raises(HTTPError) as raised:
+            client.post("/api/home", payload)
+        assert raised.value.code == 400
+        message = _error_of(raised.value)["error"]
+        assert expected in message and "\n" not in message
+    assert not (home / "campaign.toml").exists(), "a refused request still wrote a file"
+    assert client.json_get("/api/state")["state"] == "setup"
 
 
 # ---------------------------------------------------------------------------

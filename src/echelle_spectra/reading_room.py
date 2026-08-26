@@ -568,22 +568,40 @@ def _next_evidence_name(drift: list[dict[str, Any]]) -> str:
     return f"drift-evidence-{highest + 1:03d}.json"
 
 
-def _derived_from_folder(folder: str, evidence_name: str) -> dict[str, str]:
+def _derived_from_folder(
+    folder: str, evidence_name: str, *, redirect: str | Path | None = None
+) -> dict[str, str]:
     """Everything the data folder decides, derived in one place.
 
     ``derivedFrom`` in the page's own JavaScript is the other half of this one
     rule; the two must answer the same for the same folder, which is why the
     rule is written once here and mirrored there rather than spelled twice.
+
+    ``redirect`` is the campaign home's folder, given only when the data
+    folder's own volume refuses writes -- an NTFS drive on a Mac.  Cubes and
+    catalogs belong on the drive beside their own data, except on a drive that
+    cannot hold them: there they derive into the home, under ``cubes/<label>``,
+    and the page says so once.
     """
 
     marked = folder.strip() or UNFILLED_FOLDER
     trimmed = _posix(marked).rstrip("/")
+    label = trimmed.rsplit("/", 1)[-1] or marked
+    if redirect is not None and folder.strip():
+        base = _posix(redirect).rstrip("/")
+        return {
+            "input": marked,
+            "output": f"{base}/cubes/{label}",
+            "cubes": f"{base}/cubes/{label}",
+            "label": label,
+            "verdict": f"{base}/{evidence_name}",
+        }
     return {
         "input": marked,
         # Cubes and catalogs belong on the drive beside their own data.
         "output": marked,
         "cubes": marked,
-        "label": trimmed.rsplit("/", 1)[-1] or marked,
+        "label": label,
         "verdict": f"{trimmed}/{evidence_name}",
     }
 
@@ -608,6 +626,8 @@ def _composer_values(
     registry: dict[str, Any],
     evidence_name: str,
     epochs: list[str],
+    folder: str = "",
+    redirect: str | Path | None = None,
 ) -> dict[str, str]:
     """Pre-fill the composer from what the page actually carries.
 
@@ -627,7 +647,7 @@ def _composer_values(
     # either, and an empty seed matches the one option it does offer.
     epoch = next((item for item in epochs if item and item != "unassigned"), "")
     return {
-        **_derived_from_folder("", evidence_name),
+        **_derived_from_folder(folder, evidence_name, redirect=redirect),
         "pattern": "*.SIF",
         "registry": registry.get("path") or "calibration_registry.toml",
         "calibrations": registry.get("calibrations") or "calibrations",
@@ -639,7 +659,12 @@ def _composer_values(
 
 
 def with_answers(
-    values: dict[str, str], *, folder: str, epoch: str, evidence_name: str
+    values: dict[str, str],
+    *,
+    folder: str,
+    epoch: str,
+    evidence_name: str,
+    redirect: str | Path | None = None,
 ) -> dict[str, str]:
     """Fold the page's two answers into one composed value set.
 
@@ -655,7 +680,7 @@ def with_answers(
     """
 
     filled = dict(values)
-    filled.update(_derived_from_folder(folder, evidence_name))
+    filled.update(_derived_from_folder(folder, evidence_name, redirect=redirect))
     # The page's own last line before it fills a template, kept here too: the
     # cubes a step reads are the cubes the previous step wrote.
     filled["cubes"] = filled["output"]
@@ -2479,6 +2504,7 @@ def _composer_card(
     registry: dict[str, Any],
     *,
     served: bool = False,
+    readonly: bool = False,
 ) -> str:
     """Two questions, and every answer they decide folded away behind them.
 
@@ -2508,9 +2534,17 @@ def _composer_card(
         + _text_field(
             "f-input",
             "Data folder (this drive's SIF shots)",
-            "",
+            "" if values["input"] == UNFILLED_FOLDER else values["input"],
             placeholder="the folder holding this drive's SIF shots",
             browse=served,
+        )
+        # Stated once, here, for the whole surface: the redirect itself shows
+        # in the derived fields and the composed commands.
+        + (
+            f'<p class="note" id="readonly-note"{"" if readonly else " hidden"}>'
+            "This folder’s drive is read-only on this machine, so the cubes and "
+            "the drift evidence derive into the campaign home; the Advanced fold "
+            "can re-point them.</p>"
         )
         + '<label class="field"><span>Calibration</span>'
         f'<select id="f-epoch">{_epoch_options(epochs, registry)}</select></label>'
@@ -3078,6 +3112,11 @@ function fill(template, values, shell) {
 var derivedEdits = { output: false, label: false, verdict: false };
 var DERIVED_FIELDS = { output: 'f-output', label: 'f-label', verdict: 'f-verdict' };
 
+/* Whether the data folder's own volume refuses writes. Seeded by the build's
+   own measurement; a served page re-measures through the browse endpoint when
+   the folder changes. A static build keeps the seed, all it can know. */
+var folderState = { readonly: DATA.readonly === true };
+
 /* Python's _derived_from_folder trims with rstrip('/'), which keeps no
    trailing slash at all -- not even the one of a literal root. Stopping a
    character early here would derive '//drift-evidence-001.json' where Python
@@ -3093,15 +3132,28 @@ function folderPath(text) {
 }
 
 /* The other half of _derived_from_folder in reading_room.py: one data folder
-   decides these five values, and the two halves must answer the same. */
+   decides these five values, and the two halves must answer the same. A
+   read-only folder redirects output and evidence into the campaign home,
+   exactly as the Python half does under its redirect argument. */
 function derivedFrom(folder) {
   var marked = folder ? folder : DATA.unfilled;
   var trimmed = folderPath(marked);
+  var label = trimmed.split('/').pop() || marked;
+  if (folder && folderState.readonly && DATA.home) {
+    var base = folderPath(DATA.home);
+    return {
+      input: marked,
+      output: base + '/cubes/' + label,
+      cubes: base + '/cubes/' + label,
+      label: label,
+      verdict: base + '/' + DATA.evidence_name
+    };
+  }
   return {
     input: marked,
     output: marked,
     cubes: marked,
-    label: trimmed.split('/').pop() || marked,
+    label: label,
     verdict: trimmed + '/' + DATA.evidence_name
   };
 }
@@ -3117,6 +3169,8 @@ function applyDerived() {
        rather than showing the marker as if it were an answer. */
     field.value = folder ? derived[key] : '';
   });
+  var note = byId('readonly-note');
+  if (note) { note.hidden = !(folder && folderState.readonly && DATA.home); }
   return derived;
 }
 
@@ -3552,7 +3606,13 @@ function pickerRender(payload) {
   var choose = pickerEl('picker-choose');
   if (!body) { return; }
   picker.path = String(payload.path || '');
-  if (head) { head.textContent = picker.path || 'Drives on this machine'; }
+  if (head) {
+    head.textContent = picker.path || 'Drives on this machine';
+    /* A volume this machine cannot write says so where its path is read. */
+    if (picker.path && payload.writable === false) {
+      head.textContent = picker.path + ' — read-only';
+    }
+  }
   if (choose) { choose.disabled = !picker.path; }
   while (body.firstChild) { body.removeChild(body.firstChild); }
   if (picker.path) {
@@ -3662,6 +3722,9 @@ pickerWire();
 
 #: The served build's own wiring: Browse fills the composer's data folder and
 #: derives everything the composer derives from it, exactly as typing would.
+#: The folder's own volume is re-measured through the same read-only endpoint
+#: the picker browses with, so a drive this machine cannot write is known the
+#: moment it is chosen, not at the first failed run.
 _SERVED_JS = """
 function browseInto(button) {
   var field = byId(button.getAttribute('data-browse'));
@@ -3671,7 +3734,29 @@ function browseInto(button) {
     field.dispatchEvent(new Event('input', { bubbles: true }));
     compose();
     pickerClose();
+    if (field.id === 'f-input') { probeFolder(chosen); }
   }, button);
+}
+
+function probeFolder(path) {
+  if (!DATA.home) { return; }
+  if (!path) {
+    if (folderState.readonly) { folderState.readonly = false; compose(); }
+    return;
+  }
+  fetch(PICKER_BROWSE + encodeURIComponent(path)).then(function (response) {
+    return response.json();
+  }).then(function (payload) {
+    var next = !!payload && payload.writable === false;
+    if (next !== folderState.readonly) { folderState.readonly = next; compose(); }
+  }, function () {});
+}
+
+var probedField = byId('f-input');
+if (probedField) {
+  probedField.addEventListener('change', function () {
+    probeFolder(probedField.value.trim());
+  });
 }
 
 document.addEventListener('click', function (event) {
@@ -3755,26 +3840,73 @@ document.addEventListener('click', function (event) {
 #: The setup page's own wiring: the chosen folder becomes the campaign home.
 _SETUP_JS = (
     """
-function chooseHome(folder) {
+/* One message line, on whichever surface is in front: the picker while it is
+   open, the read-only fork's own line once the picker has closed. */
+function setupSay(message) {
+  var fork = document.getElementById('setup-fork');
+  if (fork && !fork.hidden) {
+    var box = document.getElementById('fork-error');
+    if (box) { box.textContent = message || ''; box.hidden = !message; }
+    return;
+  }
+  pickerSay(message);
+}
+
+function postHome(body) {
   fetch('"""
     + HOME_ENDPOINT
     + """', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ folder: folder })
+    body: JSON.stringify(body)
   }).then(function (response) {
     return response.json().then(function (payload) {
       return { ok: response.ok, payload: payload };
     });
   }).then(function (answer) {
     if (!answer.ok || answer.payload.error) {
-      pickerSay(String(answer.payload.error || 'That folder could not become the campaign home.'));
+      setupSay(String(answer.payload.error || 'That folder could not become the campaign home.'));
+      return;
+    }
+    if (answer.payload.readonly) {
+      offerHome(answer.payload, String(body.data || body.folder || ''));
       return;
     }
     window.location.href = '/';
   }, function () {
-    pickerSay('This machine did not answer, so nothing was written.');
+    setupSay('This machine did not answer, so nothing was written.');
   });
+}
+
+function chooseHome(folder) { postHome({ folder: folder }); }
+
+/* The read-only fork: the pointed folder stays the data, and the home the
+   records need is offered rather than demanded. Choosing another read-only
+   place lands back here with a fresh offer, never in a dead end. */
+function offerHome(payload, dataFolder) {
+  pickerClose();
+  var fork = document.getElementById('setup-fork');
+  if (!fork) { pickerSay(String(payload.reason || 'That folder is read-only.')); return; }
+  document.getElementById('fork-reason').textContent = String(payload.reason || '');
+  document.getElementById('fork-data').textContent = dataFolder;
+  document.getElementById('fork-suggestion').textContent = String(payload.suggestion || '');
+  var box = document.getElementById('fork-error');
+  if (box) { box.hidden = true; }
+  fork.hidden = false;
+  var create = document.getElementById('fork-create');
+  if (create) {
+    create.onclick = function () {
+      postHome({ folder: String(payload.suggestion || ''), create: true, data: dataFolder });
+    };
+  }
+  var elsewhere = document.getElementById('fork-else');
+  if (elsewhere) {
+    elsewhere.onclick = function () {
+      pickerOpen('', function (alt) {
+        postHome({ folder: alt, data: dataFolder });
+      }, elsewhere);
+    };
+  }
 }
 
 var opener = document.getElementById('pick-home');
@@ -3906,6 +4038,7 @@ def _page(context: dict[str, Any]) -> str:
                     context["epochs"],
                     context["registry"],
                     served=bool(context.get("served")),
+                    readonly=bool(context["data"].get("readonly")),
                 ),
             ),
             _group(
@@ -4063,11 +4196,24 @@ def render_setup_page() -> str:
     body = (
         '<section class="panel">'
         "<h2>No campaign home yet</h2>"
-        "<p>Pick the folder this campaign lives in — the one holding, or about to hold, "
-        "its calibrations and its catalog. This machine remembers it, so the next time you "
-        "open this page it opens on the campaign instead of on this screen.</p>"
+        "<p>Point at the campaign — the data folder is enough. A folder that can hold "
+        "the campaign's records becomes the home; a read-only drive stays the data "
+        "source, and this page offers a writable home for the records instead.</p>"
         '<p class="actions"><button type="button" id="pick-home">Pick the campaign folder…'
         "</button></p>"
+        "</section>"
+        # The read-only fork, hidden until the server answers that the pointed
+        # folder cannot hold a home.  The reason arrives from the server and is
+        # stated there once; this panel only holds the two ways forward.
+        '<section class="panel" id="setup-fork" hidden>'
+        "<h2>That drive cannot hold the campaign’s records</h2>"
+        '<p id="fork-reason"></p>'
+        '<p>Data folder, only ever read: <code id="fork-data"></code></p>'
+        '<p>Home this page can create for the records: <code id="fork-suggestion"></code></p>'
+        '<p class="actions">'
+        '<button type="button" id="fork-create">Create it and continue</button>'
+        '<button type="button" id="fork-else">Pick a different home…</button></p>'
+        '<p class="picker-error" id="fork-error" hidden></p>'
         "</section>"
     )
     return _solo_page(
@@ -4340,6 +4486,8 @@ def campaign_composition(
     registry_path: str | Path | None = None,
     calibrations_root: str | Path | None = None,
     compose_catalog_path: str | Path | None = None,
+    data_folder: str | Path | None = None,
+    home: str | Path | None = None,
 ) -> dict[str, Any]:
     """Read one campaign's files once and return everything composed from them.
 
@@ -4368,6 +4516,14 @@ def campaign_composition(
     )
     epochs = [epoch for epoch in epochs if epoch]
     evidence_name = _next_evidence_name(drift)
+    # The seed campaign.toml's ``data`` key supplies, and — measured here, once,
+    # for the build and the page alike — whether that folder's own volume can
+    # hold what a run writes.  A read-only source redirects the derivations
+    # into the campaign home.
+    seeded = _posix(data_folder) if data_folder else ""
+    readonly_source = bool(
+        seeded and home is not None and not os.access(str(data_folder), os.W_OK)
+    )
     return {
         "catalog_path": _posix(composed_catalog),
         "merged": loaded.get("schema") == "echelle-merged-catalog/v1",
@@ -4377,11 +4533,15 @@ def campaign_composition(
         "registry": registry,
         "epochs": epochs,
         "evidence_name": evidence_name,
+        "data_folder": seeded,
+        "readonly_source": readonly_source,
         "values": _composer_values(
             catalog_path=composed_catalog,
             registry=registry,
             evidence_name=evidence_name,
             epochs=epochs,
+            folder=seeded,
+            redirect=home if readonly_source else None,
         ),
     }
 
@@ -4398,6 +4558,8 @@ def build_reading_room(
     compose_catalog_path: str | Path | None = None,
     launches: dict[str, Any] | None = None,
     notes: Sequence[str] | None = None,
+    data_folder: str | Path | None = None,
+    home: str | Path | None = None,
 ) -> Path:
     """Build one page; no worker or command execution surface exists either way.
 
@@ -4441,6 +4603,8 @@ def build_reading_room(
         registry_path=registry_path,
         calibrations_root=calibrations_root,
         compose_catalog_path=compose_catalog_path,
+        data_folder=data_folder,
+        home=home,
     )
     composed_catalog = composition["catalog_path"]
     merged = composition["merged"]
@@ -4524,6 +4688,12 @@ def build_reading_room(
             # do not: the unfilled marker and the next free evidence name.
             "unfilled": UNFILLED_FOLDER,
             "evidence_name": evidence_name,
+            # The campaign home the derivations fall back to when the data
+            # folder's volume refuses writes, and whether the seeded folder
+            # already measured read-only at build time.  Empty and false on a
+            # static build, which cannot measure a volume it will never see.
+            "home": _posix(home) if home else "",
+            "readonly": composition["readonly_source"],
             "drives": [
                 {
                     "label": str(source.get("volume_label", "unknown")),

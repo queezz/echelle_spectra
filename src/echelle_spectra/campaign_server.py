@@ -50,9 +50,11 @@ work from the page without risking exactly that.
 from __future__ import annotations
 
 import argparse
+import errno
 import hashlib
 import json
 import os
+import re
 import string
 import subprocess
 import sys
@@ -98,6 +100,9 @@ registry = "calibration_registry.toml"
 calibrations = "calibrations"
 # Your own how-to pages, served at /notes/. Without this line there are none.
 # notes = "echelle-notes"
+# The data folder the composer starts from -- useful when the data lives on
+# another drive, such as a read-only one.  Without this line the composer asks.
+# data = "/Volumes/NIFS"
 """
 
 SETUP_PLACEHOLDER = "<h1>setup</h1>"
@@ -229,6 +234,10 @@ def home_values(home: Path) -> dict[str, Any]:
         "output": _relative_to(home, document.get("output", "campaign-page")),
         "registry": _relative_to(home, document.get("registry", "calibration_registry.toml")),
         "calibrations": _relative_to(home, document.get("calibrations", "calibrations")),
+        # The data folder the composer starts from, and None unless this file
+        # names one -- the key the setup flow writes when the data lives on a
+        # drive the home cannot (a read-only drive, most of all).
+        "data": _relative_to(home, document.get("data")),
         # The operator's own pages, and None unless this file names them.
         # Resolved like every other path here, which is what lets one shared
         # folder -- on this disk, on a network share -- answer for every
@@ -296,7 +305,7 @@ def browse(raw: str | None) -> dict[str, Any]:
     """Answer one read-only picker step: the drives, or one folder's children."""
 
     if not raw or not raw.strip():
-        return {"path": None, "parent": None, "drives": list_drives(), "dirs": []}
+        return {"path": None, "parent": None, "drives": list_drives(), "dirs": [], "writable": None}
     path = Path(raw.strip()).expanduser()
     if not path.is_dir():
         raise HomeError(f"not a readable folder: {path}")
@@ -331,31 +340,80 @@ def browse(raw: str | None) -> dict[str, Any]:
         "parent": None if parent == resolved else str(parent),
         "dirs": sorted(dirs, key=lambda item: (item["name"].casefold(), item["name"])),
         "drives": None,
+        # Whether this machine could write here -- an NTFS drive on a Mac
+        # answers False for every folder it holds.  The picker says it, and the
+        # composer derives cubes and evidence somewhere writable instead.
+        "writable": os.access(resolved, os.W_OK),
     }
 
 
-def adopt_or_write_home(folder: str | os.PathLike[str]) -> tuple[str, Path]:
+def suggest_home(folder: Path) -> Path:
+    """Where this campaign's records could live when its data drive cannot hold them.
+
+    Deterministic and explainable: a folder under the user's own home, named
+    after the pointed folder's path on its drive -- ``/Volumes/HD-LXU3/DATA``
+    becomes ``~/Echelle-campaigns/HD-LXU3-DATA``.  A suggestion, never a
+    decision: the page offers it beside a picker that can point anywhere else.
+    """
+
+    parts = [part for part in folder.parts if part != folder.anchor]
+    if parts and parts[0].casefold() == "volumes":
+        parts = parts[1:]
+    cleaned = [re.sub(r"[^\w.-]+", "-", part).strip("-.") for part in parts]
+    name = "-".join(part for part in cleaned if part) or "campaign"
+    return Path.home() / "Echelle-campaigns" / name
+
+
+def _data_lines(data: Path) -> str:
+    """The one extra line a home records when its data lives elsewhere."""
+
+    return (
+        "\n# The data folder this campaign reads from -- the picker recorded it, and\n"
+        "# the composer starts from it.  Edit or delete this line to re-point it.\n"
+        f"data = {json.dumps(str(data))}\n"
+    )
+
+
+def adopt_or_write_home(
+    folder: str | os.PathLike[str], *, create: bool = False, data: Path | None = None
+) -> tuple[str, Path]:
     """The one write this server may do, and the guard that keeps it one.
 
-    Returns ``("adopted", path)`` when a campaign home was already there, or
-    ``("written", path)`` when this call created it.  The folder itself is never
-    created and an existing ``campaign.toml`` is never overwritten.
+    Returns ``("adopted", path)`` when a campaign home was already there,
+    ``("written", path)`` when this call created it, or ``("readonly", folder)``
+    when the folder's own volume refuses writes and cannot hold a home at all --
+    the caller turns that into guidance, never into a bare error.  With
+    ``create`` the folder itself may be created (the setup flow creating the
+    home it suggested); an existing ``campaign.toml`` is never overwritten, and
+    ``data`` records the pointed data folder in the file it writes.
     """
 
     root = Path(folder).expanduser()
+    if create:
+        try:
+            root.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            raise HomeError(f"cannot create {root}: {exc.strerror or exc}") from None
     if not root.is_dir():
         raise HomeError(f"no such folder: {root}")
     resolved = root.resolve()
     target = resolved / CAMPAIGN_FILENAME
     if target.is_file():
         return "adopted", target
+    if not os.access(resolved, os.W_OK):
+        return "readonly", resolved
+    document = CAMPAIGN_TEMPLATE if data is None else CAMPAIGN_TEMPLATE + _data_lines(data)
     try:
         # Exclusive creation, so two clicks in two tabs cannot race one file away.
         with open(target, "x", encoding="utf-8", newline="\n") as handle:
-            handle.write(CAMPAIGN_TEMPLATE)
+            handle.write(document)
     except FileExistsError:
         return "adopted", target
     except OSError as exc:
+        # Belt over the braces above: a volume that lied to os.access still
+        # answers EROFS at the write, and gets the same guidance.
+        if exc.errno == errno.EROFS:
+            return "readonly", resolved
         raise HomeError(f"cannot write {target}: {exc.strerror or exc}") from None
     return "written", target
 
@@ -931,6 +989,13 @@ def build_page(
     source = values["catalog"] if load_from is None else load_from
     if load_from is not None:
         keywords["compose_catalog_path"] = values["catalog"]
+    data_folder = values.get("data")
+    # The seed the composer starts from, and the home its derivations fall back
+    # to when that seed's own volume refuses writes.
+    extras: dict[str, Any] = {
+        "data_folder": data_folder if data_folder is not None and data_folder.is_dir() else None,
+        "home": values["home"].parent,
+    }
     with server.build_lock:
         try:
             index = build_reading_room(
@@ -939,6 +1004,7 @@ def build_page(
                 served=True,
                 launches=launches,
                 notes=notes,
+                **extras,
                 **keywords,
             )
             server.served_keyword = True
@@ -1224,12 +1290,51 @@ class CampaignHandler(BaseHTTPRequestHandler):
         server: CampaignServer = self.server  # type: ignore[assignment]
         try:
             payload = self._read_body()
+            unexpected = sorted(set(payload) - {"folder", "create", "data"})
+            if unexpected:
+                named = ", ".join(unexpected)
+                raise HomeError(
+                    f"this endpoint reads a folder, create and data only, and never {named}"
+                )
             folder = payload.get("folder")
             if not isinstance(folder, str) or not folder.strip():
                 raise HomeError("no folder was named")
-            outcome, path = adopt_or_write_home(folder.strip())
+            create = payload.get("create") is True
+            raw_data = payload.get("data")
+            data: Path | None = None
+            if raw_data is not None:
+                if not isinstance(raw_data, str) or not raw_data.strip():
+                    raise HomeError("the data folder must be named as text")
+                data = Path(raw_data.strip()).expanduser()
+                if not data.is_dir():
+                    raise HomeError(f"not a readable folder: {data}")
+                data = data.resolve()
+            outcome, path = adopt_or_write_home(folder.strip(), create=create, data=data)
         except HomeError as exc:
             self._error(str(exc))
+            return
+        if outcome == "readonly":
+            # Not an error: a fork in the setup.  The data can stay right where
+            # it was pointed; only the campaign's own records need a writable
+            # folder, and the page offers one instead of stopping.
+            hint = (
+                " (a Windows-formatted NTFS drive mounts read-only on a Mac)"
+                if sys.platform == "darwin"
+                else ""
+            )
+            self._json(
+                {
+                    "readonly": str(path),
+                    "suggestion": str(suggest_home(path)),
+                    "reason": (
+                        f"{path} sits on a volume this machine can read but not "
+                        f"write{hint}. The campaign home holds what the campaign "
+                        "writes — its catalog, registry and saved calibrations — "
+                        "so it needs a writable folder; the data itself is only "
+                        "ever read, and stays where it is."
+                    ),
+                }
+            )
             return
         server.home = path
         self._json({outcome: str(path)})
@@ -1298,6 +1403,9 @@ class CampaignHandler(BaseHTTPRequestHandler):
                 folder=str(target),
                 epoch=epoch,
                 evidence_name=composition["evidence_name"],
+                # The same rule the page derives by: a data folder whose volume
+                # refuses writes sends cubes and evidence into the home.
+                redirect=None if os.access(target, os.W_OK) else home.parent,
             )
             argv = reading_room.run_argv(verb, composed)
             command = reading_room.run_command(verb, composed)

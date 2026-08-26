@@ -24,6 +24,7 @@ from echelle_spectra.reading_room import (
     _saved_snapshots,
     build_reading_room,
     render_markdown,
+    with_answers,
 )
 from echelle_spectra.snapshot import ROLE_FILENAMES, create_snapshot
 
@@ -286,6 +287,114 @@ def test_the_two_halves_of_the_folder_derivation_agree_at_a_bare_root() -> None:
     source = Path(reading_room.__file__).read_text(encoding="utf-8")
     assert "while (trimmed.length > 0 && trimmed.charAt(trimmed.length - 1) === '/')" in source
     assert "trimmed.length > 1" not in source
+
+
+#: The campaign home a read-only data drive sends its written things into.
+_HOME = "/Users/owner/Echelle-campaigns/HD-LXU3-DATA"
+
+
+def test_a_drive_that_refuses_writes_derives_into_the_campaign_home() -> None:
+    """The one rule the redirect adds, stated where the rule lives.
+
+    Cubes and evidence belong on the drive beside their own data — until that
+    drive is an NTFS volume a Mac mounted read-only, where writing them there
+    is not a preference but an impossibility.  The data folder is untouched:
+    it is still what is READ, and only the written things move.
+    """
+
+    derived = _derived_from_folder(
+        "/Volumes/HD-LXU3/DATA", "drift-evidence-002.json", redirect=_HOME
+    )
+    assert derived == {
+        "input": "/Volumes/HD-LXU3/DATA",
+        "output": f"{_HOME}/cubes/DATA",
+        "cubes": f"{_HOME}/cubes/DATA",
+        # The label is the data folder's own name either way: it names the
+        # shots, not the place their cubes happened to land.
+        "label": "DATA",
+        "verdict": f"{_HOME}/drift-evidence-002.json",
+    }
+    # Without the redirect the same folder derives exactly where it always did.
+    beside = _derived_from_folder("/Volumes/HD-LXU3/DATA", "drift-evidence-002.json")
+    assert beside["output"] == "/Volumes/HD-LXU3/DATA"
+    assert beside["verdict"] == "/Volumes/HD-LXU3/DATA/drift-evidence-002.json"
+    assert beside["label"] == derived["label"]
+
+
+def test_an_unanswered_data_folder_redirects_nowhere_at_all() -> None:
+    """The unfilled marker is a placeholder, not a folder.
+
+    Redirecting it would put the campaign home into the fields of a page whose
+    reader has answered nothing yet — a derived path presented as an answer,
+    with the marker still sitting in the field it came from.
+    """
+
+    derived = _derived_from_folder("   ", "drift-evidence-001.json", redirect=_HOME)
+    assert derived["input"] == "<data folder>"
+    assert derived["output"] == "<data folder>"
+    assert derived["cubes"] == "<data folder>"
+    assert _HOME not in json.dumps(derived)
+
+
+def test_the_composed_run_carries_the_redirect_into_every_written_value() -> None:
+    """``with_answers`` is what the served Run control composes through, so the
+    launched command must land where the page's own fields say it will."""
+
+    composed = with_answers(
+        {"pattern": "*.SIF", "plan": "campaign-plan.toml", "epoch": "stale"},
+        folder="/Volumes/HD-LXU3/DATA",
+        epoch="20250926_cmos",
+        evidence_name="drift-evidence-002.json",
+        redirect=_HOME,
+    )
+    assert composed["input"] == "/Volumes/HD-LXU3/DATA"
+    assert composed["output"] == f"{_HOME}/cubes/DATA"
+    # The cubes a step reads are the cubes the previous step wrote.
+    assert composed["cubes"] == composed["output"]
+    assert composed["verdict"] == f"{_HOME}/drift-evidence-002.json"
+    # Everything not derived from the folder is left exactly as it was handed.
+    assert composed["pattern"] == "*.SIF" and composed["plan"] == "campaign-plan.toml"
+    assert composed["epoch"] == "20250926_cmos"
+    # No redirect, no move: the same two answers derive beside the data.
+    beside = with_answers(
+        {"pattern": "*.SIF"},
+        folder="/Volumes/HD-LXU3/DATA",
+        epoch="",
+        evidence_name="drift-evidence-002.json",
+    )
+    assert beside["output"] == "/Volumes/HD-LXU3/DATA"
+
+
+def test_the_two_halves_of_the_redirect_agree_on_a_read_only_drive() -> None:
+    """``derivedFrom`` grew the redirect branch that ``_derived_from_folder``
+    grew, and the two must answer the same for the same folder and home.
+
+    No JavaScript runs here, so the JavaScript half is pinned as the text it
+    is; the Python half is pinned by calling it, and the two shapes are spelled
+    side by side so an edit to one without the other reads as the mismatch it
+    would be in the browser.
+    """
+
+    from echelle_spectra import reading_room
+
+    label, evidence = "DATA", "drift-evidence-002.json"
+    derived = _derived_from_folder(f"/Volumes/HD-LXU3/{label}", evidence, redirect=_HOME)
+    assert derived["output"] == _HOME + "/cubes/" + label
+    assert derived["cubes"] == _HOME + "/cubes/" + label
+    assert derived["verdict"] == _HOME + "/" + evidence
+
+    source = Path(reading_room.__file__).read_text(encoding="utf-8")
+    # The branch is taken on exactly the same three conditions Python's is: a
+    # folder that was actually answered, a measured refusal, and a home.
+    assert "if (folder && folderState.readonly && DATA.home) {" in source
+    assert "var folderState = { readonly: DATA.readonly === true };" in source
+    assert "var base = folderPath(DATA.home);" in source
+    # And it spells the same three values.
+    assert "output: base + '/cubes/' + label," in source
+    assert "cubes: base + '/cubes/' + label," in source
+    assert "verdict: base + '/' + DATA.evidence_name" in source
+    # The note the page shows follows the same condition, never a fourth rule.
+    assert "note.hidden = !(folder && folderState.readonly && DATA.home);" in source
 
 
 def _shifted_evidence(tmp_path: Path) -> Path:
