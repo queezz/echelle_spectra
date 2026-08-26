@@ -287,7 +287,10 @@ def resolve_cube_paths(inputs: list[str | Path]) -> list[Path]:
     for raw in inputs:
         path = Path(raw)
         if path.is_dir():
-            found = sorted(path.rglob("*.nc"))
+            # A Mac writing to exFAT or SMB leaves an AppleDouble metadata
+            # sibling (._cube.nc) beside every real cube; it is not a dataset
+            # and must never be audited.
+            found = sorted(item for item in path.rglob("*.nc") if not item.name.startswith("."))
             if not found:
                 raise DriftError(f"no .nc cubes found under {path}")
             resolved.extend(found)

@@ -355,6 +355,23 @@ def test_the_interval_is_derived_from_the_cubes_the_dates_actually_keep(
     assert len(select_sample_paths(kept, every=2)) == 20
 
 
+def test_an_appledouble_sibling_is_never_resolved_as_a_cube(tmp_path: Path) -> None:
+    """A Mac writing cubes to an exFAT trip drive leaves a ``._cube.nc``
+    metadata sibling beside every real cube.  The first real field audit
+    crashed opening one as a dataset; a directory expansion skips them.
+    """
+
+    from echelle_spectra.drift import resolve_cube_paths
+
+    folder = tmp_path / "cubes"
+    folder.mkdir()
+    real = folder / "196201_Echelle_spectrocube.nc"
+    real.write_bytes(b"cube bytes")
+    (folder / "._196201_Echelle_spectrocube.nc").write_bytes(b"\x00\x05\x16\x07")
+
+    assert resolve_cube_paths([folder]) == [real]
+
+
 def test_the_unfiltered_derivation_is_unchanged(tmp_path: Path) -> None:
     folder = _dated_drive(tmp_path / "cubes", inside=40, outside=60)
 

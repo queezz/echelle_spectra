@@ -160,6 +160,10 @@ def build_drive_catalog(
     records = []
     errors = []
     for path in sorted(root.rglob("*.nc")):
+        if path.name.startswith("."):
+            # AppleDouble siblings (._cube.nc) a Mac writes on exFAT are
+            # metadata, not cubes; a catalog must not row them as errors.
+            continue
         relative = path.relative_to(root).as_posix()
         try:
             records.append(_cube_record(path, root, gate=gates.get(relative, "")))

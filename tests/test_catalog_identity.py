@@ -727,3 +727,18 @@ def test_drift_date_selection_prefers_t_start_over_the_source_filename(
         sorted(tmp_path.glob("*.nc")), date_from="2025-01-01", date_to="2025-12-31"
     )
     assert [path.name for path in selected] == ["dated.nc"]
+
+
+def test_an_appledouble_sibling_is_not_a_catalog_row(tmp_path: Path) -> None:
+    """A Mac writing to an exFAT trip drive leaves ``._cube.nc`` metadata
+    siblings beside real cubes.  They are not datasets: the catalog must
+    neither row them as cubes nor report them as unreadable errors.
+    """
+
+    cubes = tmp_path / "cubes"
+    cubes.mkdir()
+    (cubes / "._196201_Echelle_spectrocube.nc").write_bytes(b"\x00\x05\x16\x07")
+
+    catalog = load_catalog(build_drive_catalog(cubes, volume_label="NIFS-A"))
+    assert catalog["cubes"] == []
+    assert not catalog.get("errors")
