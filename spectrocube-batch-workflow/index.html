@@ -1623,8 +1623,10 @@ snapshot and every record carries that identity:</p>
 <a id="__codelineno-8-12" name="__codelineno-8-12" href="#__codelineno-8-12"></a>Done. 53/53 exported successfully.
 </code></pre></div>
 <p>Ctrl-C marks the receipt interrupted. Running the same source/destination again
-resumes the newest unfinished receipt and skips a completed output only after
-its recorded source and output digests still match. See
+resumes the newest unfinished receipt and skips a file whose recorded identity
+still matches on disk: the source by size and modification time, the output by
+existence and size. Nothing is re-read, so resuming costs what remains rather
+than what is already done, and the run says so in one line. See
 <a href="../campaign-runs/">Durable campaign runs</a> for the receipt schema and explicit
 <code>--run-dir</code> workflow.</p>
 <p>For several USB drives, pass one folder per drive and repeat the volume label:</p>

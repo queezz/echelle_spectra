@@ -1679,8 +1679,8 @@ sample, then process the drive under the verdict the audit wrote.</p>
 <a id="__codelineno-1-26" name="__codelineno-1-26" href="#__codelineno-1-26"></a>  <span class="p">-</span><span class="n">-volume-label</span> <span class="n">NIFS-A</span> <span class="p">`</span>
 <a id="__codelineno-1-27" name="__codelineno-1-27" href="#__codelineno-1-27"></a>  <span class="p">-</span><span class="n">-drift-verdict</span> <span class="n">D</span><span class="p">:\</span><span class="n">NIFS</span><span class="p">\</span><span class="n">spectrocubes</span><span class="p">\</span><span class="n">drift-evidence</span><span class="p">-</span><span class="n">001</span><span class="p">.</span><span class="n">json</span>
 </code></pre></div>
-<p>Step 3 resumes the receipt written by step 1: the sampled files are verified and
-skipped rather than exported twice.</p>
+<p>Step 3 resumes the receipt written by step 1: the sampled files are recognised
+by their recorded identity and skipped rather than exported twice.</p>
 <p>The terminal reports the current count, measured file rate, and estimated time
 remaining. An ordinary file failure is recorded and processing continues with
 the next source. The command exits nonzero after the run if any source failed.</p>
@@ -1783,18 +1783,29 @@ rather than inventing provenance.</p>
 first written to a temporary sibling and published atomically, so interruption
 does not leave a partial file at the final <code>.nc</code> path.</p>
 <p>Rerun the same command. Echelle automatically finds the newest unfinished run
-with the same source and destination. Before skipping prior work it verifies:</p>
+with the same source and destination. Before skipping prior work it checks the
+recorded identity of both sides, by stat:</p>
 <ol>
-<li>the source path, size, and SHA-256 still match;</li>
-<li>the output path, size, and SHA-256 still match;</li>
+<li>the source path and size still match, and its modification time still
+   matches when the record carries one (receipts written before that field
+   existed are trusted on size alone; campaign sources are read-only mounts);</li>
+<li>the output path is there and still has its recorded size;</li>
 <li>the prior terminal record says the export completed;</li>
 <li>for registry runs, the currently selected snapshot ID still matches the
    recorded snapshot.</li>
 </ol>
-<p>Only then is the source recorded as skipped because its completed output was
-verified. A changed epoch selection, changed source, or changed/missing output
-is not accepted as completed. To name the resume explicitly, use the path
-printed at interruption:</p>
+<p>Only then is the source recorded as skipped, with the reason <code>resumed on
+recorded identity; digests not re-proved</code>, and the run prints one line saying
+how many files it took on trust. A changed epoch selection, changed source, or
+changed/missing output is not accepted as completed.</p>
+<p>Neither side is digested on this path, deliberately: re-reading every finished
+source -- 885 MB apiece, a full day of them -- to re-prove what the records
+already state made resume cost grow with the work done instead of the work
+remaining. The digests stay in the records, a
+receipt that skipped anything this way records <code>resume_trust = "stat"</code>, and
+re-proving them is a separate, deliberate scrub of the catalog. A resume is not
+a verification and never reports itself as one.</p>
+<p>To name the resume explicitly, use the path printed at interruption:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="n">echelle</span> <span class="k">process</span> <span class="n">D</span><span class="p">:\</span><span class="n">NIFS</span><span class="p">\</span><span class="n">shots</span> <span class="n">-o</span> <span class="n">D</span><span class="p">:\</span><span class="n">NIFS</span><span class="p">\</span><span class="n">spectrocubes</span> <span class="p">`</span>
 <a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>  <span class="p">-</span><span class="n">-run-dir</span> <span class="n">local</span><span class="p">\</span><span class="n">runs</span><span class="p">\</span><span class="n">2026</span><span class="p">-</span><span class="n">08</span><span class="p">-</span><span class="n">13_12</span><span class="p">-</span><span class="n">00</span><span class="p">-</span><span class="n">00-nifs-a-shots</span>
 </code></pre></div>
