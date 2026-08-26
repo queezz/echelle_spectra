@@ -1633,9 +1633,17 @@ retains old/new snapshot provenance and gets an adjacent immutable
 Any change is refused with an instruction to re-extract from the read-only raw
 SIF data. There is deliberately no approximation for changed geometry.</p>
 <h2 id="drift-audit-and-refinement">Drift audit and refinement<a class="headerlink" href="#drift-audit-and-refinement" title="Permanent link">¶</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="go">echelle drift audit cubes --every 20 --shot 193778 -o epoch-drift.json</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="go">echelle drift refine epoch-drift.json --calibrations calibrations --accept-shift 5.0</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="go">echelle drift audit cubes --shot 193778</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="go">echelle drift refine drift-evidence-001.json --calibrations calibrations --accept-shift 5.0</span>
 </code></pre></div>
+<p><code>-o</code> is optional: left out, the evidence is written beside the audited cubes as
+the next free <code>drift-evidence-NNN.json</code>, numbered from 001 — evidence stays
+immutable, so a rerun takes the next name rather than overwriting one. <code>--every</code>
+is optional too, derived as <code>max(1, cubes // 20)</code> so roughly 20 cubes are
+measured. With <code>--from</code>/<code>--to</code>, <code>cubes</code> counts only the cubes inside the
+window: the audit filters by date before it samples, so deriving from the
+unfiltered set would promise twenty measurements and take one. An explicit
+<code>--every</code> or <code>-o</code> always wins.</p>
 <p>The audit fits baseline-subtracted Balmer and Fulcher centroids over the
 plasma-bright frames only, then leaves wavelength for detector pixels. Each
 line's wavelength residual is divided by the dispersion the cube's own stored
@@ -1695,13 +1703,26 @@ verdict authorizes only the <code>-rN</code> refinement it created; insufficient
 misaligned evidence is refused. See <a href="../campaign-runs/">Durable campaign runs</a>
 for the gate and the authorization each receipt records.</p>
 <h2 id="the-campaign-page">The campaign page<a class="headerlink" href="#the-campaign-page" title="Permanent link">¶</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="go">echelle web --catalog all-years.json --drift epoch-drift.json --registry calibration_registry.toml --output reading-room</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="nv">$Data</span> <span class="p">=</span> <span class="s2">"D:\NIFS"</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="n">echelle</span> <span class="n">web</span> <span class="p">`</span>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>  <span class="p">-</span><span class="n">-catalog</span> <span class="s2">"$Data\all-years.json"</span> <span class="p">`</span>
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a>  <span class="p">-</span><span class="n">-output</span> <span class="s2">"$Data\campaign-page"</span> <span class="p">`</span>
+<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a>  <span class="p">-</span><span class="n">-registry</span> <span class="s2">"$Data\calibration_registry.toml"</span> <span class="p">`</span>
+<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a>  <span class="p">-</span><span class="n">-drift</span> <span class="s2">"$Data\epoch-drift.json"</span> <span class="p">`</span>
+<a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a>  <span class="p">-</span><span class="n">-open</span>
 </code></pre></div>
 <p><code>echelle web</code> writes one self-contained <code>index.html</code> — no sidecar, no second
 file, nothing fetched at open time — organized by the work rather than by the
-data. Four tabs: <strong>Now</strong> (the flow), <strong>Drives</strong> (the catalog), <strong>Calibration</strong>
-(epochs and drift evidence in sequence position) and <strong>Reading room</strong> (the
-packaged canon). Pressing a tab always returns it to its own home state, even
+data, and always prints its absolute path. <code>--open</code> additionally opens it in
+the default browser; without a <code>campaign.toml</code> supplying <code>--catalog</code>/
+<code>--output</code>/<code>--registry</code>/<code>--calibrations</code>/<code>--drift</code>, every path is named
+explicitly as above. The page also links out to the documentation site. Four
+tabs: <strong>Now</strong> (the flow), <strong>Drives</strong> (the catalog), <strong>Calibration</strong> (each
+saved snapshot's own record — its folder, its lamps and spheres, and what the
+bench measured — with the epochs and the drift evidence following as pipeline
+context) and <strong>Reading room</strong> (the packaged canon). Pressing a tab always
+returns it to its own home state, even
 from inside an open fold, and lands at the top of the destination. Each rail
 carries only the active tab's cargo: controls left, scope, context, legend and
 the "On this page" index right. Both rails are sticky at an offset derived from
@@ -1719,16 +1740,22 @@ visually primary one — the page's answer to "what do I do first" — and drive
 that did not answer keep one collapsed remembered line each. Teaching lives
 once per tab, in that tab's legend; cards carry chips, counts and one truncated
 path whose whole value stays in its title.</p>
-<p>The composer is pre-filled from the page's own data — drives and epochs from
-the catalog, epoch ids from <code>--registry</code>, verdict paths from <code>--drift</code> — and
-writes a plan TOML plus three commands: the bulk <code>echelle process --plan</code> run
-that reads that plan, the <code>echelle drift audit</code> that must precede it, and an
-<code>echelle-calib</code> bench check. It lives in the Now rail, where the ready steps'
-commands are read; the Drives rail keeps a one-press entry into it. Every
-command row leads with plain words, keeps the literal command behind a
-show/hide toggle, offers PowerShell and POSIX shapes, and copies the whole
-command whether the toggle is open or closed. The raw-SIF input folder is the
-one field the page cannot fill, and it says so rather than guessing.</p>
+<p>The composer asks for exactly two things: the data folder holding the SIF
+shots, and the calibration — a registry epoch. Everything else is derived —
+the cubes folder is the data folder, the volume label is the folder name, the
+evidence file is the next free <code>drift-evidence-NNN.json</code>, and the sample size
+is <code>--sample auto</code> — with every derived value editable under an "Advanced"
+fold before the commands are copied. It writes three commands, read in
+campaign order: the sample, the <code>echelle drift audit</code> wavelength-alignment
+check, and the bulk <code>echelle process</code> conversion, which stays locked until the
+audit's verdict authorizes it. It is pre-filled from the page's own data —
+drives and epochs from the catalog, epoch ids from <code>--registry</code> — and lives in
+the Now rail, where the ready steps' commands are read; the Drives rail keeps
+a one-press entry into it. Every command row leads with plain words, keeps the
+literal command behind a show/hide toggle, offers PowerShell and POSIX shapes,
+and copies the whole command whether the toggle is open or closed. The raw-SIF
+data folder and the calibration are the two things the page cannot derive and
+must ask for.</p>
 <p>Three step states have no file behind them today and are rendered as <code>not
 recorded</code> rather than guessed: the bench session itself (only the snapshot it
 saves is evidence), the LHD text export (no receipt or catalog field records

@@ -1963,7 +1963,7 @@ because only this package knows what the calibration quantities mean.</p>
 </tr>
 <tr>
 <td><code>calibration_source</code></td>
-<td><code>"integrating sphere (echelle_spectra)"</code> (absolute modes only)</td>
+<td>absolute modes only; the library default is <code>"integrating sphere (echelle_spectra)"</code>, but the CLI writes it only when <code>--calibration-source</code> or the config's <code>[export] calibration_source</code> supplies one, and warns when an absolute run supplies neither</td>
 </tr>
 </tbody>
 </table>
@@ -2105,8 +2105,8 @@ pair and export absolute spectral radiance:</p>
 <a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a><span class="c"># Save to a separate output directory</span>
 <a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a><span class="n">echelle-spectrocube</span> <span class="s2">"$Data\shots"</span> <span class="p">-</span><span class="n">-units</span> <span class="n">wmsr</span> <span class="n">-o</span> <span class="s2">"$Data\nc"</span>
 <a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a>
-<a id="__codelineno-11-7" name="__codelineno-11-7" href="#__codelineno-11-7"></a><span class="c"># Preview what would happen (no files written)</span>
-<a id="__codelineno-11-8" name="__codelineno-11-8" href="#__codelineno-11-8"></a><span class="n">echelle-spectrocube</span> <span class="s2">"$Data\shots"</span> <span class="p">-</span><span class="n">-dry-run</span> <span class="p">-</span><span class="n">-verbose</span>
+<a id="__codelineno-11-7" name="__codelineno-11-7" href="#__codelineno-11-7"></a><span class="c"># Preview what would happen (no files written); the files found are listed</span>
+<a id="__codelineno-11-8" name="__codelineno-11-8" href="#__codelineno-11-8"></a><span class="n">echelle-spectrocube</span> <span class="s2">"$Data\shots"</span> <span class="p">-</span><span class="n">-dry-run</span>
 </code></pre></div>
 <h3 id="full-option-reference">Full option reference<a class="headerlink" href="#full-option-reference" title="Permanent link">¶</a></h3>
 <table>
@@ -2211,7 +2211,7 @@ pair and export absolute spectral radiance:</p>
 <tr>
 <td><code>--calibration-source</code></td>
 <td>config/default</td>
-<td>Absolute calibration source metadata</td>
+<td>Free text naming the flux standard behind an absolute export; an absolute run without one warns and records no such provenance</td>
 </tr>
 <tr>
 <td><code>--no-drop-nonfinite-columns</code></td>
@@ -2226,7 +2226,7 @@ pair and export absolute spectral radiance:</p>
 <tr>
 <td><code>--pattern</code></td>
 <td><code>*.SIF</code></td>
-<td>Glob for batch discovery (also tries <code>*.sif</code> as fallback)</td>
+<td>Batch discovery glob. A plain filename pattern searches the whole source tree, skipping calibration folders (any <code>calibrations/</code>, or any folder holding a <code>snapshot.toml</code>) — every skipped folder is named in the batch header's <code>Skipped:</code> line and recorded under <code>pruned_dirs</code> in the run receipt. Junctions and symbolic links are matched where they sit but never descended into. A pattern containing <code>/</code> or <code>**</code> is used exactly as typed. Also tries <code>*.sif</code> as fallback.</td>
 </tr>
 <tr>
 <td><code>--overwrite</code></td>
@@ -2236,7 +2236,7 @@ pair and export absolute spectral radiance:</p>
 <tr>
 <td><code>--dry-run</code></td>
 <td>—</td>
-<td>Print plan without writing</td>
+<td>Print the plan without writing, naming every discovered file under <code>Would convert:</code></td>
 </tr>
 <tr>
 <td><code>--verbose</code></td>

@@ -1488,9 +1488,9 @@ acceptance.</p>
 </tr>
 <tr>
 <td>9 per-drive catalog</td>
-<td><code>catalog.build_drive_catalog</code>, automatic batch hook, <code>campaign_run.ensure_drive_identity</code></td>
-<td><code>test_catalog_identity.py</code> drive-id, reconnection, read-only fallback, and gate-row cases</td>
-<td><code>campaign-runs.md</code></td>
+<td><code>catalog.build_drive_catalog</code>, automatic batch hook, <code>campaign_run.ensure_drive_identity</code>, <code>campaign_run.resolve_receipt_directory</code></td>
+<td><code>test_catalog_identity.py</code> drive-id, reconnection, read-only fallback, gate-row, and input/output-seam cases (rehearsal with runs-root paths; refusals)</td>
+<td><code>campaign-runs.md</code>, <code>operator-cheat-sheet.md</code> step 8</td>
 </tr>
 <tr>
 <td>9 merged missing-drive index</td>
@@ -1501,8 +1501,8 @@ acceptance.</p>
 <tr>
 <td>9 cube-derived text</td>
 <td><code>lhd_text.py</code>, <code>campaign_tools_cli.txt_main</code></td>
-<td>frozen-header/cube fixture and missing-timing refusal</td>
-<td><code>harbor-candidate.md</code></td>
+<td>frozen-header/cube fixture and missing-timing refusal; documented <code>export-timing.toml</code> carried through a registry run to the cube</td>
+<td><code>harbor-candidate.md</code>, <code>operator-cheat-sheet.md</code> "Getting to <code>echelle txt</code>"</td>
 </tr>
 <tr>
 <td>9 one writer, two frozen dialects</td>
@@ -1560,7 +1560,7 @@ acceptance.</p>
 </tr>
 <tr>
 <td>12 composer/no worker control</td>
-<td>rail composer filling one shared command template; plan TOML read back by the composed <code>echelle process --plan</code></td>
+<td>rail composer asking two inputs (data folder, calibration epoch) and deriving the rest; composed sample/wavelength-alignment-check/bulk-convert commands read in campaign order, the last unlocked by the verdict</td>
 <td>both shell shapes and full copy payload per command; page contains no execution or network surface; visual/perimeter gate deferred</td>
 <td><code>harbor-candidate.md</code></td>
 </tr>
