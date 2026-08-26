@@ -172,3 +172,6 @@ cython_debug/
 # Large generated files — regenerate with 02_pattern_calibration.ipynb
 examples/pattern_image_synthetic.txt
 examples/obsolete/pattern_image_synthetic.txt
+
+# Local AI-session scaffolding — never repository content
+.claude/
