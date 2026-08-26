@@ -69,6 +69,40 @@ def test_create_snapshot_copies_role_files_and_verifies_digests(
         assert target.stat().st_size == artifact.size_bytes
 
 
+def test_a_destination_that_refuses_file_flags_still_takes_the_save(
+    tmp_path: Path, calibration_sources: dict[str, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A field drive's filesystem may refuse metadata the source carries.
+
+    The real case: Dropbox stamps packaged sources with a BSD file flag
+    (UF_TRACKED), and an exFAT trip drive answers ``chflags`` with EINVAL --
+    an errno ``shutil.copystat`` does not forgive, so ``copy2`` crashed the
+    save after every number was computed.  The save copies bytes first and
+    treats unportable metadata as droppable, never fatal.
+    """
+
+    import errno
+    import shutil as shutil_module
+
+    def refusing_copystat(src, dst, **kwargs):  # noqa: ANN001, ANN003 - test double
+        raise OSError(errno.EINVAL, "Invalid argument", str(dst))
+
+    monkeypatch.setattr(shutil_module, "copystat", refusing_copystat)
+    snapshot = create_snapshot(
+        tmp_path / "calibrations",
+        snapshot_id="20260826_cmos",
+        detector="CMOS",
+        files=calibration_sources,
+        lamps=["Ne"],
+    )
+    for artifact in snapshot.artifacts:
+        target = snapshot.root / artifact.path
+        assert hashlib.sha256(target.read_bytes()).hexdigest() == artifact.sha256
+        source = calibration_sources[artifact.role]
+        # The mtime still travels even when the flag copy is refused.
+        assert abs(target.stat().st_mtime - source.stat().st_mtime) < 2
+
+
 def test_changed_artifact_fails_integrity_validation(
     tmp_path: Path, calibration_sources: dict[str, Path]
 ) -> None:

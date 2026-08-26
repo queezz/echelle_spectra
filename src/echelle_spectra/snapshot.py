@@ -869,7 +869,18 @@ def create_snapshot(  # noqa: C901 - atomic assembly keeps all cleanup in one sc
             )
 
         def copied(role: str, source: Path, target: Path, label: str = "") -> Artifact:
-            shutil.copy2(source, target)
+            # Not copy2: copy2's copystat forwards BSD file flags, and a source
+            # inside Dropbox carries UF_TRACKED, which an exFAT destination (a
+            # field drive) answers with EINVAL -- an errno copystat does not
+            # forgive, crashing the save after every number was computed.  The
+            # bytes and the mtime are what the manifest cares about; flags a
+            # drive cannot hold are dropped, not fatal.
+            shutil.copyfile(source, target)
+            try:
+                shutil.copystat(source, target)
+            except OSError:
+                stat = source.stat()
+                os.utime(target, (stat.st_atime, stat.st_mtime))
             sha256, size_bytes = file_digest(target)
             return Artifact(
                 role=role,
