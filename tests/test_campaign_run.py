@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 import threading
 from collections import defaultdict
@@ -392,7 +393,8 @@ def test_multi_drive_receipt_trees_are_named_for_the_drive_that_was_processed(
     assert trees[1].startswith("nifs-b-data-")
 
 
-def test_changed_output_is_not_accepted_as_completed(tmp_path: Path) -> None:
+def _exported_receipt(tmp_path: Path) -> tuple[RunReceipt, Path, Path]:
+    """Return a receipt holding one export record, with its source and output."""
     source_root = tmp_path / "source"
     output_root = tmp_path / "output"
     source_root.mkdir()
@@ -410,19 +412,104 @@ def test_changed_output_is_not_accepted_as_completed(tmp_path: Path) -> None:
         snapshot_id="20260813_cmos",
         expected_files=1,
     )
-    identity = receipt.identity_for(source)
     receipt.append(
-        identity,
+        receipt.identity_for(source),
         output,
         status="exported",
         started_at="2026-08-13T00:00:00Z",
         finished_at="2026-08-13T00:00:01Z",
         duration_s=1.0,
     )
-    assert receipt.completed_output_is_valid(identity, output)
-    output.write_text("tampered", encoding="utf-8")
-    assert not receipt.completed_output_is_valid(identity, output)
+    return receipt, source, output
+
+
+def test_resume_trusts_recorded_identity_by_stat_and_not_by_digest(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Deliberate replacement for the old always-digest resume check.
+
+    This test used to pin the opposite rule: a completed output counted only
+    after the source *and* the output were digested again.  That is what made a
+    resume cost a full re-read of every finished file -- 885 MB per shot -- so
+    the resume path now trusts the stat identity it recorded and nothing is
+    read here at all.  A resized output is still refused; a same-size edit is
+    accepted, and re-proving digests belongs to the catalog scrub verb.
+    """
+
+    receipt, source, output = _exported_receipt(tmp_path)
+    identity = receipt.identity_for(source)
+
+    def refuse(path: Path, **_kwargs) -> str:
+        raise AssertionError(f"resume digested {path}")
+
+    monkeypatch.setattr("echelle_spectra.campaign_run.sha256_file", refuse)
+    assert receipt.resumable_record(identity, output) is not None
+
+    output.write_text("tampered cube", encoding="utf-8")
+    assert receipt.resumable_record(identity, output) is None
     assert receipt.has_export_record(identity)
+
+    output.write_text("CUBE", encoding="utf-8")
+    assert receipt.resumable_record(identity, output) is not None
+
+
+def test_record_without_source_mtime_resumes_on_recorded_size_alone(tmp_path: Path) -> None:
+    """Receipts written before the mtime field still resume, by size.
+
+    The sources are read-only campaign mounts, so size alone is the identity
+    those older records can offer, and refusing them would mean re-converting
+    every drive that was processed before this change.
+    """
+
+    receipt, source, output = _exported_receipt(tmp_path)
+    for record in receipt._records:
+        record.pop("source_mtime_ns")
+    identity = receipt.identity_for(source)
+    assert receipt.resumable_record(identity, output) is not None
+
+    source.write_text("source grew", encoding="utf-8")
+    assert receipt.resumable_record(receipt.identity_for(source), output) is None
+
+
+def test_changed_source_is_not_resumed_whether_size_or_mtime_moved(tmp_path: Path) -> None:
+    """A source that is no longer the recorded file gets converted again."""
+
+    receipt, source, output = _exported_receipt(tmp_path)
+    original = source.stat()
+
+    source.write_text("a longer source", encoding="utf-8")
+    assert receipt.resumable_record(receipt.identity_for(source), output) is None
+
+    source.write_text("source", encoding="utf-8")
+    os.utime(source, ns=(original.st_atime_ns, original.st_mtime_ns + 1_000_000_000))
+    touched = receipt.identity_for(source)
+    assert touched.size_bytes == original.st_size
+    assert receipt.resumable_record(touched, output) is None
+
+
+def test_missing_or_resized_output_is_not_resumed(tmp_path: Path) -> None:
+    """An output that is gone, or no longer its recorded size, is not a finished file."""
+
+    receipt, source, output = _exported_receipt(tmp_path)
+    identity = receipt.identity_for(source)
+
+    output.write_text("cube with more in it", encoding="utf-8")
+    assert receipt.resumable_record(identity, output) is None
+
+    output.unlink()
+    assert receipt.resumable_record(identity, output) is None
+
+
+def test_export_record_carries_stat_identity_and_both_digests(tmp_path: Path) -> None:
+    """Recording duty is unchanged: an exported file is still digested on both sides."""
+
+    receipt, source, _output = _exported_receipt(tmp_path)
+    record = receipt._records[-1]
+    assert record["source_size_bytes"] == source.stat().st_size
+    assert record["source_mtime_ns"] == source.stat().st_mtime_ns
+    assert len(record["source_sha256"]) == 64
+    assert len(record["output_sha256"]) == 64
+    assert record["source_sha256"] == sha256_file(source)
 
 
 def test_resume_refuses_changed_completed_output(tmp_path: Path, fake_spectrocube) -> None:
@@ -474,6 +561,107 @@ def test_resume_refuses_changed_completed_output(tmp_path: Path, fake_spectrocub
     assert resumed.state == "partial"
     assert resumed.counts()["failed"] == 1
     assert "output changed" in resumed._records[-1]["reason"]
+
+
+def test_resumed_batch_skips_finished_sources_without_reading_them(
+    tmp_path: Path, fake_spectrocube, capsys
+) -> None:
+    """The whole point: a skipped source is never opened, so resume is O(remaining)."""
+
+    source_root = tmp_path / "source"
+    output_root = tmp_path / "output"
+    source_root.mkdir()
+    output_root.mkdir()
+    _files(source_root, "a.SIF", "b.SIF")
+    done_source = source_root / "a.SIF"
+    done_output = output_root / "a_spectrocube.nc"
+    done_output.write_text("cube from a.SIF", encoding="utf-8")
+    receipt = RunReceipt.create(
+        tmp_path / "run",
+        source_root=source_root,
+        output_root=output_root,
+        pattern="*.SIF",
+        volume_label="fixture",
+        snapshot_id="20260813_cmos",
+        expected_files=2,
+    )
+    receipt.append(
+        receipt.identity_for(done_source),
+        done_output,
+        status="exported",
+        started_at="2026-08-13T00:00:00Z",
+        finished_at="2026-08-13T00:00:01Z",
+        duration_s=1.0,
+    )
+    receipt.finish("interrupted")
+    recorded_digest = receipt._records[-1]["source_sha256"]
+
+    from echelle_spectra import campaign_run
+
+    real_digest = campaign_run.sha256_file
+
+    def digest_unless_skipped(path: Path, **kwargs) -> str:
+        if Path(path).resolve() == done_source.resolve():
+            raise AssertionError(f"resume re-read the finished source {path}")
+        return real_digest(Path(path), **kwargs)
+
+    calls: list[str] = []
+    with (
+        patch("echelle_spectra.campaign_run.sha256_file", side_effect=digest_unless_skipped),
+        patch("echelle_spectra.tools.loader.build_calibration", return_value=object()),
+        patch(
+            "echelle_spectra.spectrocube_cli._export_one",
+            side_effect=_successful_export(calls),
+        ),
+        pytest.raises(SystemExit) as result,
+    ):
+        main([str(source_root), "-o", str(output_root), "--run-dir", str(receipt.directory)])
+
+    assert result.value.code == 0
+    assert calls == ["b.SIF"]
+    resumed = RunReceipt.load(receipt.directory)
+    assert resumed.resume_trust == "stat"
+    assert 'resume_trust = "stat"' in resumed.manifest_path.read_text(encoding="utf-8")
+    skipped = next(
+        record for record in resumed._records if record["status"] == "skipped"
+    )
+    assert "recorded identity" in skipped["reason"]
+    # The digest is carried from the record that proved it, not taken again.
+    assert skipped["source_sha256"] == recorded_digest
+
+    shown = capsys.readouterr().out
+    assert shown.count("Resumed 1 file(s) on recorded identity (size+mtime)") == 1
+    assert "echelle catalog verify" in shown
+
+
+def test_run_that_resumed_nothing_claims_no_recorded_identity(
+    tmp_path: Path, fake_spectrocube, capsys
+) -> None:
+    """A run that converted everything it accounted for must not read as a resume."""
+
+    source_root = tmp_path / "source"
+    source_root.mkdir()
+    _files(source_root, "a.SIF", "b.SIF")
+    output_root = tmp_path / "cubes"
+    runs = tmp_path / "runs"
+    calls: list[str] = []
+
+    with (
+        patch("echelle_spectra.tools.loader.build_calibration", return_value=object()),
+        patch(
+            "echelle_spectra.spectrocube_cli._export_one",
+            side_effect=_successful_export(calls),
+        ),
+        pytest.raises(SystemExit) as result,
+    ):
+        main([str(source_root), "-o", str(output_root), "--runs-dir", str(runs)])
+
+    assert result.value.code == 0
+    assert calls == ["a.SIF", "b.SIF"]
+    receipt = RunReceipt.load(next(runs.iterdir()))
+    assert receipt.resume_trust == ""
+    assert "resume_trust" not in receipt.manifest_path.read_text(encoding="utf-8")
+    assert "Resumed" not in capsys.readouterr().out
 
 
 def test_status_reports_latest_receipt(tmp_path: Path, capsys) -> None:

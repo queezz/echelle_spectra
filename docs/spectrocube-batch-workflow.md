@@ -134,8 +134,10 @@ Done. 53/53 exported successfully.
 ```
 
 Ctrl-C marks the receipt interrupted. Running the same source/destination again
-resumes the newest unfinished receipt and skips a completed output only after
-its recorded source and output digests still match. See
+resumes the newest unfinished receipt and skips a file whose recorded identity
+still matches on disk: the source by size and modification time, the output by
+existence and size. Nothing is re-read, so resuming costs what remains rather
+than what is already done, and the run says so in one line. See
 [Durable campaign runs](campaign-runs.md) for the receipt schema and explicit
 `--run-dir` workflow.
 

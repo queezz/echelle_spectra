@@ -48,6 +48,7 @@ from .campaign_run import (
     GATE_SAMPLE,
     GATE_UNGATED,
     GATE_VERDICT,
+    RESUME_TRUST_STAT,
     RunReceipt,
     default_volume_label,
     ensure_drive_identity,
@@ -1281,6 +1282,7 @@ def _run_batch_target(
     failed: list[Path] = []
     n_exported = 0
     n_skipped = 0
+    n_resumed = 0
     n_dry_run = 0
     total = len(sif_files)
     batch_started = time.monotonic()
@@ -1348,21 +1350,34 @@ def _run_batch_target(
                     stream=sys.stderr,
                 )
 
-        if result is None and (
-            receipt is not None
+        resumed_record = (
+            receipt.resumable_record(source, nc_out, snapshot_id=selected_snapshot_id)
+            if result is None
+            and receipt is not None
             and source is not None
             and not args.overwrite
-            and receipt.completed_output_is_valid(
-                source, nc_out, snapshot_id=selected_snapshot_id
+            else None
+        )
+        if resumed_record is not None:
+            # The earlier record proved this source's digest; the resumed record
+            # carries that proof forward rather than re-reading the file to
+            # restate it.
+            source = source.with_recorded_sha256(str(resumed_record.get("source_sha256", "")))
+            n_resumed += 1
+            receipt.record_resume_trust(RESUME_TRUST_STAT)
+            result = ExportResult(
+                "skipped", "resumed on recorded identity; digests not re-proved"
             )
-        ):
-            result = ExportResult("skipped", "completed output verified from prior receipt")
         elif result is None and (
             receipt is not None
             and source is not None
             and not args.overwrite
             and nc_out.exists()
             and receipt.has_export_record(source, snapshot_id=selected_snapshot_id)
+            # Only the output is in question here. A source that no longer
+            # matches its record is a different file, and re-converting it is
+            # the answer to that, not a complaint about the cube beside it.
+            and receipt.source_matches_record(source, snapshot_id=selected_snapshot_id)
         ):
             result = ExportResult(
                 "failed",
@@ -1437,6 +1452,14 @@ def _run_batch_target(
             n_exported += 1
         _emit_target(
             _progress_line(index, total, batch_started, status), target_label=target_label
+        )
+
+    # One plain line, once, so a fast resume never reads as a verified one.
+    if n_resumed:
+        _emit_target(
+            f"Resumed {n_resumed} file(s) on recorded identity (size+mtime); "
+            "'echelle catalog verify' re-proves digests on demand.",
+            target_label=target_label,
         )
 
     n_ok = len(sif_files) - len(failed)

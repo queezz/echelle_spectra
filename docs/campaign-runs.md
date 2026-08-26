@@ -84,8 +84,8 @@ echelle process D:\NIFS\shots `
   --drift-verdict D:\NIFS\spectrocubes\drift-evidence-001.json
 ```
 
-Step 3 resumes the receipt written by step 1: the sampled files are verified and
-skipped rather than exported twice.
+Step 3 resumes the receipt written by step 1: the sampled files are recognised
+by their recorded identity and skipped rather than exported twice.
 
 The terminal reports the current count, measured file rate, and estimated time
 remaining. An ordinary file failure is recorded and processing continues with
@@ -193,18 +193,31 @@ first written to a temporary sibling and published atomically, so interruption
 does not leave a partial file at the final `.nc` path.
 
 Rerun the same command. Echelle automatically finds the newest unfinished run
-with the same source and destination. Before skipping prior work it verifies:
+with the same source and destination. Before skipping prior work it checks the
+recorded identity of both sides, by stat:
 
-1. the source path, size, and SHA-256 still match;
-2. the output path, size, and SHA-256 still match;
+1. the source path and size still match, and its modification time still
+   matches when the record carries one (receipts written before that field
+   existed are trusted on size alone; campaign sources are read-only mounts);
+2. the output path is there and still has its recorded size;
 3. the prior terminal record says the export completed;
 4. for registry runs, the currently selected snapshot ID still matches the
    recorded snapshot.
 
-Only then is the source recorded as skipped because its completed output was
-verified. A changed epoch selection, changed source, or changed/missing output
-is not accepted as completed. To name the resume explicitly, use the path
-printed at interruption:
+Only then is the source recorded as skipped, with the reason `resumed on
+recorded identity; digests not re-proved`, and the run prints one line saying
+how many files it took on trust. A changed epoch selection, changed source, or
+changed/missing output is not accepted as completed.
+
+Neither side is digested on this path, deliberately: re-reading every finished
+source -- 885 MB apiece, a full day of them -- to re-prove what the records
+already state made resume cost grow with the work done instead of the work
+remaining. The digests stay in the records, a
+receipt that skipped anything this way records `resume_trust = "stat"`, and
+re-proving them is a separate, deliberate scrub of the catalog. A resume is not
+a verification and never reports itself as one.
+
+To name the resume explicitly, use the path printed at interruption:
 
 ```powershell
 echelle process D:\NIFS\shots -o D:\NIFS\spectrocubes `

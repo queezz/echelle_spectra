@@ -22,6 +22,14 @@ RUN_SCHEMA = "echelle-run/v1"
 RECORD_SCHEMA = "echelle-run-record/v1"
 TERMINAL_STATUSES = {"exported", "skipped", "failed", "interrupted"}
 
+# How a resume decided a file was already done. Digesting an 885 MB source to
+# re-prove a file the receipt already accounts for makes resume cost grow with
+# the work *done* rather than the work remaining, so a resume trusts the stat
+# identity it recorded -- size, and modification time when the record carries
+# one -- and says so. Re-proving digests is the scrub verb's duty, never a
+# resume's, and a receipt that resumed anything records which of the two it did.
+RESUME_TRUST_STAT = "stat"
+
 # How a run was authorized to touch a calibration epoch. The authorization keys
 # are optional additions to the v1 run schema: receipts written before the gate
 # existed stay readable and report GATE_UNRECORDED rather than borrowing an
@@ -254,12 +262,36 @@ def target_runs_root(
 
 @dataclass(frozen=True)
 class SourceIdentity:
-    """Content identity recorded before processing starts."""
+    """What a source is: its stat identity now, and its digest when one is due.
+
+    The stat fields are taken before processing and cost nothing.  The digest
+    costs a full read of a campaign-sized file, so it is *not* a field: it is
+    computed only when a record is about to record it, which for a run that
+    skips a file means never.  ``recorded_sha256`` carries a digest an earlier
+    record already proved, so a resumed file's record keeps the digest its
+    export earned without the source being opened again.
+    """
 
     path: Path
     key: str
     size_bytes: int
-    sha256: str
+    mtime_ns: int = 0
+    recorded_sha256: str = ""
+
+    @property
+    def sha256(self) -> str:
+        """Return the source digest, reading the whole file unless one is carried."""
+        return self.recorded_sha256 or sha256_file(self.path)
+
+    def with_recorded_sha256(self, digest: str) -> SourceIdentity:
+        """Return this identity carrying a digest an earlier record already proved."""
+        return SourceIdentity(
+            path=self.path,
+            key=self.key,
+            size_bytes=self.size_bytes,
+            mtime_ns=self.mtime_ns,
+            recorded_sha256=digest,
+        )
 
 
 @dataclass
@@ -284,6 +316,7 @@ class RunReceipt:
     drift_evidence_sha256: str = ""
     drift_verdict: str = ""
     pruned_dirs: tuple[str, ...] = ()
+    resume_trust: str = ""
     _records: list[dict[str, Any]] = field(default_factory=list, repr=False)
 
     @property
@@ -352,44 +385,85 @@ class RunReceipt:
             drift_evidence_sha256=run.get("drift_evidence_sha256", ""),
             drift_verdict=run.get("drift_verdict", ""),
             pruned_dirs=tuple(str(item) for item in run.get("pruned_dirs") or ()),
+            resume_trust=run.get("resume_trust", ""),
         )
         receipt._records = list(read_records(receipt.records_path))
         return receipt
 
     def identity_for(self, source: Path) -> SourceIdentity:
+        """Describe a source by one stat call; its digest waits until a record needs it."""
+        stat = source.stat()
         return SourceIdentity(
             path=source.resolve(),
             key=_relative_or_absolute(source, self.source_root),
-            size_bytes=source.stat().st_size,
-            sha256=sha256_file(source),
+            size_bytes=stat.st_size,
+            mtime_ns=stat.st_mtime_ns,
         )
 
-    def completed_output_is_valid(
+    def _latest_export_record(
+        self, source: SourceIdentity, *, snapshot_id: str | None = None
+    ) -> dict[str, Any] | None:
+        for record in reversed(self._records):
+            if record.get("status") != "exported" or record.get("source") != source.key:
+                continue
+            if snapshot_id is not None and record.get("snapshot_id") != snapshot_id:
+                return None
+            return record
+        return None
+
+    def source_matches_record(
+        self, source: SourceIdentity, *, snapshot_id: str | None = None
+    ) -> bool:
+        """Return whether the source on disk is still the one the record exported.
+
+        The comparison is by stat: the recorded size always, and the recorded
+        modification time when the record carries one.  Records written before
+        ``source_mtime_ns`` existed are trusted on size alone -- the sources are
+        read-only campaign mounts, and re-reading terabytes to re-derive what
+        the record already states is what made resume unusable.
+        """
+
+        record = self._latest_export_record(source, snapshot_id=snapshot_id)
+        if record is None:
+            return False
+        if int(record.get("source_size_bytes", -1)) != source.size_bytes:
+            return False
+        recorded_mtime = record.get("source_mtime_ns")
+        if recorded_mtime is None:
+            return True
+        return int(recorded_mtime) == source.mtime_ns
+
+    def resumable_record(
         self,
         source: SourceIdentity,
         output: Path,
         *,
         snapshot_id: str | None = None,
-    ) -> bool:
-        """Return true only when a prior export still matches source and output."""
+    ) -> dict[str, Any] | None:
+        """Return the record that lets a resume skip this source, or None.
+
+        This is trust, not proof.  The source is trusted when its recorded stat
+        identity still matches (see :meth:`source_matches_record`); the output
+        is trusted when the file the record names is there and still has its
+        recorded size.  Neither side is digested here, so the cost of a resume
+        follows the work remaining instead of the work already finished.  The
+        digests stay in the records, and re-proving them belongs to the catalog
+        scrub verb an operator runs deliberately.
+        """
+
         output = output.resolve()
-        for record in reversed(self._records):
-            if record.get("status") != "exported" or record.get("source") != source.key:
-                continue
-            if record.get("source_sha256") != source.sha256:
-                return False
-            if int(record.get("source_size_bytes", -1)) != source.size_bytes:
-                return False
-            if snapshot_id is not None and record.get("snapshot_id") != snapshot_id:
-                return False
-            if record.get("output") != _relative_or_absolute(output, self.output_root):
-                return False
-            if not output.is_file():
-                return False
-            if int(record.get("output_size_bytes", -1)) != output.stat().st_size:
-                return False
-            return record.get("output_sha256") == sha256_file(output)
-        return False
+        record = self._latest_export_record(source, snapshot_id=snapshot_id)
+        if record is None:
+            return None
+        if not self.source_matches_record(source, snapshot_id=snapshot_id):
+            return None
+        if record.get("output") != _relative_or_absolute(output, self.output_root):
+            return None
+        if not output.is_file():
+            return None
+        if int(record.get("output_size_bytes", -1)) != output.stat().st_size:
+            return None
+        return record
 
     def has_export_record(self, source: SourceIdentity, *, snapshot_id: str | None = None) -> bool:
         """Return whether this run ever published an output for the source key."""
@@ -415,12 +489,19 @@ class RunReceipt:
         if status not in TERMINAL_STATUSES:
             raise ValueError(f"Unsupported receipt status: {status}")
         output = output.resolve()
+        # An exported file was read from end to end anyway, so recording its
+        # digest costs one more pass and remains this run's proof. A file that
+        # was skipped, failed or interrupted was not read: it carries the digest
+        # an earlier record proved, if there is one, and otherwise carries none
+        # rather than pretending a digest was taken.
+        digest = source.sha256 if status == "exported" else source.recorded_sha256
         record: dict[str, Any] = {
             "schema": RECORD_SCHEMA,
             "source": source.key,
             "source_path": str(source.path),
             "source_size_bytes": source.size_bytes,
-            "source_sha256": source.sha256,
+            "source_mtime_ns": source.mtime_ns,
+            "source_sha256": digest,
             "volume_label": self.volume_label,
             "snapshot_id": snapshot_id or self.snapshot_id,
             "output": _relative_or_absolute(output, self.output_root),
@@ -491,6 +572,19 @@ class RunReceipt:
         self.pruned_dirs = tuple(str(item) for item in pruned_dirs)
         self.write_manifest()
 
+    def record_resume_trust(self, trust: str = RESUME_TRUST_STAT) -> None:
+        """Record that this run skipped work on recorded identity rather than proof.
+
+        A reader of the receipt must be able to tell a run that digested every
+        cube it accepted from one that took the records at their word, so the
+        key appears only on runs that did the latter.
+        """
+
+        if self.resume_trust == trust:
+            return
+        self.resume_trust = trust
+        self.write_manifest()
+
     def finish(self, state: str) -> None:
         self.state = state
         self.write_manifest()
@@ -541,6 +635,14 @@ class RunReceipt:
                     + "]"
                 ]
                 if self.pruned_dirs
+                else []
+            ),
+            # Written only when this run actually skipped work on recorded
+            # identity, so a run that proved everything it wrote keeps the
+            # manifest it always had and never claims a resume it did not make.
+            *(
+                [f"resume_trust = {_toml_string(self.resume_trust)}"]
+                if self.resume_trust
                 else []
             ),
             *self._authorization_lines(),
