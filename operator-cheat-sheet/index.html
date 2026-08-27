@@ -2075,6 +2075,11 @@ developer tools cannot be assumed.</p>
 <td>Yes; safest first command</td>
 </tr>
 <tr>
+<td><code>echelle inventory DRIVE_ROOT [--output DIR]</code></td>
+<td>Answers <em>which drive is this</em>: the curator's <code>*cycle*_Echelle_setup.xlsx</code> logbooks (days, date span, trigger delays, and every day not taken at 2.5 s), the observing day folders with their shot ranges and frame counts, the calibration folders, the free space, and whether the cubes would fit beside the data. Reads only; writes one <code>inventory/&lt;volume&gt;.json</code> under <code>--output</code> (default: this folder). A logbook needs <code>openpyxl</code>; without it the logbook is reported present-but-unread rather than skipped</td>
+<td>Yes; run it the moment a drive is plugged in</td>
+</tr>
+<tr>
 <td><code>echelle snapshot create</code></td>
 <td>Copies role-named calibration inputs into one immutable, digested snapshot</td>
 <td>Yes, usually through the bench</td>
@@ -2118,6 +2123,11 @@ developer tools cannot be assumed.</p>
 <td><code>echelle drift audit/refine</code></td>
 <td>Samples Balmer/Fulcher centroids, solves one rigid detector shift in pixels, emits a four-state verdict, and accepts immutable <code>-rN</code> refinements. <code>-o</code> is optional — omitted, the evidence lands beside the audited cubes as the next free <code>drift-evidence-NNN.json</code>; <code>--every</code> is optional too, derived so roughly 20 cubes get measured; with <code>--from</code>/<code>--to</code> the derivation counts only the cubes inside the window, because the audit filters by date before it samples. Each Balmer window is judged against both the H and D references and assigned to the nearer one, so a deuterium shot is tagged <code>D</code> and read as aligned instead of condemned by the 0.178 nm isotope offset; a <code>D</code> shot drops the H2 Fulcher anchors, and a tag that disagrees with the bundled LHD deuterium calendar is flagged in the evidence, never silently resolved</td>
 <td>Candidate; required before any registry run</td>
+</tr>
+<tr>
+<td><code>echelle drift geometry DATA_ROOT</code></td>
+<td>Answers <em>where does this light sit</em>: reads one mid-day frame per sampled day (<code>--every N</code>, default 6; <code>--every 0</code>, or a single day folder, asks the three-frame spread — first day, middle day, last day) and measures its order-band centres against each <code>--pattern</code> given, defaulting to the packaged 2024 and 2025 patterns. Prints the per-day table, writes <code>inventory/&lt;volume&gt;-pattern-survey.json</code>, and ends on <code>GEOMETRY_OK</code> or <code>GEOMETRY_ALARM</code> against the 1.5-row alarm for the <strong>last</strong> pattern given. Exit 0 inside the alarm, 2 past it, 3 when nothing could be measured</td>
+<td>Yes; required before a bulk run over a failing wavelength audit</td>
 </tr>
 <tr>
 <td><code>echelle web [--open]</code></td>

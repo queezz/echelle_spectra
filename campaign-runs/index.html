@@ -772,6 +772,17 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix="">
       
         <li class="md-nav__item">
+  <a href="#before-the-run-which-drive-is-this-and-where-does-its-light-sit" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Before the run: which drive is this, and where does its light sit
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#batch-discovery" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1482,6 +1493,17 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix="">
       
         <li class="md-nav__item">
+  <a href="#before-the-run-which-drive-is-this-and-where-does-its-light-sit" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Before the run: which drive is this, and where does its light sit
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#batch-discovery" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1610,6 +1632,41 @@
 <p><code>echelle process</code> turns a folder of SIF files into SpectroCubes without making
 you keep the run state in your head. Every non-dry batch creates a durable run
 receipt under <code>local/runs/</code> by default.</p>
+<h2 id="before-the-run-which-drive-is-this-and-where-does-its-light-sit">Before the run: which drive is this, and where does its light sit<a class="headerlink" href="#before-the-run-which-drive-is-this-and-where-does-its-light-sit" title="Permanent link">¶</a></h2>
+<p>A drive that arrives in a box raises two questions before any conversion is
+worth starting, and each has its own verb.</p>
+<p><code>echelle inventory DRIVE_ROOT</code> answers <strong>which drive is this</strong>. It reads the
+curator's <code>*cycle*_Echelle_setup.xlsx</code> logbooks, the observing day folders and
+the shot ranges in their filenames, the calibration folders, and the free
+space, then says in one screen how many days and frames are here, which shots
+they span, which days were <em>not</em> taken at the ordinary 2.5 s trigger delay, and
+whether roughly 15 MB of cube per frame would fit beside the data or the output
+has to go somewhere else. It writes nothing to the drive: the record lands as
+<code>inventory/&lt;volume&gt;.json</code> under <code>--output</code> (default: the folder you ran it in),
+so a campaign home accumulates one file per drive it has ever seen. Reading a
+logbook needs <code>openpyxl</code>, which this package does not require — without it the
+logbook is reported present-but-unread, and every other fact is still measured.</p>
+<p><code>echelle drift geometry DATA_ROOT</code> answers <strong>where does this light sit</strong>. It
+reads one mid-day frame per sampled day — one day in six by default, or the
+three-frame spread of first, middle and last day with <code>--every 0</code> — and
+measures where that frame's order bands actually sit against each candidate
+era pattern. The per-day table is the campaign's geometry diary between
+calibrations, and it is written alongside the inventory as
+<code>inventory/&lt;volume&gt;-pattern-survey.json</code>.</p>
+<p>The last line is the gate. Against the <strong>last</strong> <code>--pattern</code> given (default: the
+packaged 2025 pattern, the newest era), the verb ends on <code>GEOMETRY_OK</code> when the
+worst per-order offset is inside 1.5 rows and <code>GEOMETRY_ALARM</code> otherwise, and
+leaves with exit 0, 2, or 3 — 3 meaning nothing could be measured, which is
+never the same answer as nothing wrong. This is the one check that gates
+conversion, because it is the one thing a saved cube cannot revise: wavelength
+and flux can be corrected later with <code>echelle recal-cube</code>, but a run extracted
+off the wrong rows summed light that is now gone. That asymmetry is why a bulk
+run over a <em>failing</em> wavelength audit is permitted at all — but only when the
+geometry has been separately verified here first.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="n">echelle</span> <span class="n">inventory</span> <span class="n">E</span><span class="p">:\</span> <span class="p">-</span><span class="n">-output</span> <span class="n">D</span><span class="p">:\</span><span class="n">campaign</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="n">echelle</span> <span class="n">drift</span> <span class="n">geometry</span> <span class="n">E</span><span class="p">:\</span> <span class="p">-</span><span class="n">-output</span> <span class="n">D</span><span class="p">:\</span><span class="n">campaign</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="k">if</span> <span class="p">(</span><span class="nv">$LASTEXITCODE</span> <span class="o">-ne</span> <span class="n">0</span><span class="p">)</span> <span class="p">{</span> <span class="k">throw</span> <span class="s2">"geometry is not verified; do not convert"</span> <span class="p">}</span>
+</code></pre></div>
 <h2 id="batch-discovery">Batch discovery<a class="headerlink" href="#batch-discovery" title="Permanent link">¶</a></h2>
 <p>A plain filename pattern — the default <code>*.SIF</code>, or anything else with no <code>/</code>
 and no <code>**</code> — walks the <em>whole</em> source tree under the folder you named, not
@@ -1630,14 +1687,14 @@ written into it — and then the whole day drops out of the next run. So every
 run that pruned anything names it. The batch header prints the count and the
 folders, relative to the source root, bounded to the first five plus a count
 of the rest:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>SpectroCube batch
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>Source:      D:\NIFS\shots
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>Destination: D:\NIFS\spectrocubes
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>Pattern:     *.SIF
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>Files:       412 (export)
-<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>Skipped:     2 calibration folder(s) not searched (named 'calibrations', or holding a snapshot.toml):
-<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>               20190207
-<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>               calibrations
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>SpectroCube batch
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>Source:      D:\NIFS\shots
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>Destination: D:\NIFS\spectrocubes
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>Pattern:     *.SIF
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>Files:       412 (export)
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>Skipped:     2 calibration folder(s) not searched (named 'calibrations', or holding a snapshot.toml):
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>               20190207
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>               calibrations
 </code></pre></div>
 <p>The run receipt carries the same list in full, under <code>pruned_dirs</code> in
 <code>run.toml</code>, so an auditor reading the receipt months later sees the skip the
@@ -1651,33 +1708,33 @@ calibration folder, move or rename the <code>snapshot.toml</code> that marked it
 point <code>--pattern</code> at a path pattern to search exactly where you mean.</p>
 <p>A registry-backed drive takes three commands: sample the epoch, audit the
 sample, then process the drive under the verdict the audit wrote.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="c"># 1. Sample the epoch. --sample auto derives the count from what the folder</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="c">#    holds (max(5, min(30, ceil(files/25))), or every file when fewer than</span>
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="c">#    5); no verdict is needed yet, and every produced cube is marked</span>
-<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="c">#    drift_sample.</span>
-<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="n">echelle</span> <span class="k">process</span> <span class="n">D</span><span class="p">:\</span><span class="n">NIFS</span><span class="p">\</span><span class="n">shots</span> <span class="p">`</span>
-<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>  <span class="n">-o</span> <span class="n">D</span><span class="p">:\</span><span class="n">NIFS</span><span class="p">\</span><span class="n">spectrocubes</span> <span class="p">`</span>
-<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>  <span class="p">-</span><span class="n">-registry</span> <span class="n">D</span><span class="p">:\</span><span class="n">NIFS</span><span class="p">\</span><span class="n">calibration_registry</span><span class="p">.</span><span class="n">toml</span> <span class="p">`</span>
-<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>  <span class="p">-</span><span class="n">-calibrations</span> <span class="n">D</span><span class="p">:\</span><span class="n">NIFS</span><span class="p">\</span><span class="n">calibrations</span> <span class="p">`</span>
-<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a>  <span class="p">-</span><span class="n">-volume-label</span> <span class="n">NIFS-A</span> <span class="p">`</span>
-<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a>  <span class="p">-</span><span class="n">-sample</span> <span class="n">auto</span>
-<a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a>
-<a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a><span class="c"># 2. Audit the sample into one immutable verdict file. The audit takes the</span>
-<a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a><span class="c">#    cube folder itself, so the same line works in any shell. -o is optional:</span>
-<a id="__codelineno-1-14" name="__codelineno-1-14" href="#__codelineno-1-14"></a><span class="c">#    left out, the evidence is written beside the audited cubes as the next</span>
-<a id="__codelineno-1-15" name="__codelineno-1-15" href="#__codelineno-1-15"></a><span class="c">#    free drift-evidence-NNN.json, numbered from 001 (evidence is immutable,</span>
-<a id="__codelineno-1-16" name="__codelineno-1-16" href="#__codelineno-1-16"></a><span class="c">#    so a rerun takes the next name rather than overwriting).</span>
-<a id="__codelineno-1-17" name="__codelineno-1-17" href="#__codelineno-1-17"></a><span class="n">echelle</span> <span class="n">drift</span> <span class="n">audit</span> <span class="n">D</span><span class="p">:\</span><span class="n">NIFS</span><span class="p">\</span><span class="n">spectrocubes</span> <span class="p">`</span>
-<a id="__codelineno-1-18" name="__codelineno-1-18" href="#__codelineno-1-18"></a>  <span class="p">-</span><span class="n">-calibrations</span> <span class="n">D</span><span class="p">:\</span><span class="n">NIFS</span><span class="p">\</span><span class="n">calibrations</span>
-<a id="__codelineno-1-19" name="__codelineno-1-19" href="#__codelineno-1-19"></a>
-<a id="__codelineno-1-20" name="__codelineno-1-20" href="#__codelineno-1-20"></a><span class="c"># 3. Process the whole drive under that verdict, naming the file the audit</span>
-<a id="__codelineno-1-21" name="__codelineno-1-21" href="#__codelineno-1-21"></a><span class="c">#    printed.</span>
-<a id="__codelineno-1-22" name="__codelineno-1-22" href="#__codelineno-1-22"></a><span class="n">echelle</span> <span class="k">process</span> <span class="n">D</span><span class="p">:\</span><span class="n">NIFS</span><span class="p">\</span><span class="n">shots</span> <span class="p">`</span>
-<a id="__codelineno-1-23" name="__codelineno-1-23" href="#__codelineno-1-23"></a>  <span class="n">-o</span> <span class="n">D</span><span class="p">:\</span><span class="n">NIFS</span><span class="p">\</span><span class="n">spectrocubes</span> <span class="p">`</span>
-<a id="__codelineno-1-24" name="__codelineno-1-24" href="#__codelineno-1-24"></a>  <span class="p">-</span><span class="n">-registry</span> <span class="n">D</span><span class="p">:\</span><span class="n">NIFS</span><span class="p">\</span><span class="n">calibration_registry</span><span class="p">.</span><span class="n">toml</span> <span class="p">`</span>
-<a id="__codelineno-1-25" name="__codelineno-1-25" href="#__codelineno-1-25"></a>  <span class="p">-</span><span class="n">-calibrations</span> <span class="n">D</span><span class="p">:\</span><span class="n">NIFS</span><span class="p">\</span><span class="n">calibrations</span> <span class="p">`</span>
-<a id="__codelineno-1-26" name="__codelineno-1-26" href="#__codelineno-1-26"></a>  <span class="p">-</span><span class="n">-volume-label</span> <span class="n">NIFS-A</span> <span class="p">`</span>
-<a id="__codelineno-1-27" name="__codelineno-1-27" href="#__codelineno-1-27"></a>  <span class="p">-</span><span class="n">-drift-verdict</span> <span class="n">D</span><span class="p">:\</span><span class="n">NIFS</span><span class="p">\</span><span class="n">spectrocubes</span><span class="p">\</span><span class="n">drift-evidence</span><span class="p">-</span><span class="n">001</span><span class="p">.</span><span class="n">json</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="c"># 1. Sample the epoch. --sample auto derives the count from what the folder</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="c">#    holds (max(5, min(30, ceil(files/25))), or every file when fewer than</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="c">#    5); no verdict is needed yet, and every produced cube is marked</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="c">#    drift_sample.</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="n">echelle</span> <span class="k">process</span> <span class="n">D</span><span class="p">:\</span><span class="n">NIFS</span><span class="p">\</span><span class="n">shots</span> <span class="p">`</span>
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>  <span class="n">-o</span> <span class="n">D</span><span class="p">:\</span><span class="n">NIFS</span><span class="p">\</span><span class="n">spectrocubes</span> <span class="p">`</span>
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>  <span class="p">-</span><span class="n">-registry</span> <span class="n">D</span><span class="p">:\</span><span class="n">NIFS</span><span class="p">\</span><span class="n">calibration_registry</span><span class="p">.</span><span class="n">toml</span> <span class="p">`</span>
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>  <span class="p">-</span><span class="n">-calibrations</span> <span class="n">D</span><span class="p">:\</span><span class="n">NIFS</span><span class="p">\</span><span class="n">calibrations</span> <span class="p">`</span>
+<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a>  <span class="p">-</span><span class="n">-volume-label</span> <span class="n">NIFS-A</span> <span class="p">`</span>
+<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a>  <span class="p">-</span><span class="n">-sample</span> <span class="n">auto</span>
+<a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a>
+<a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a><span class="c"># 2. Audit the sample into one immutable verdict file. The audit takes the</span>
+<a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a><span class="c">#    cube folder itself, so the same line works in any shell. -o is optional:</span>
+<a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a><span class="c">#    left out, the evidence is written beside the audited cubes as the next</span>
+<a id="__codelineno-2-15" name="__codelineno-2-15" href="#__codelineno-2-15"></a><span class="c">#    free drift-evidence-NNN.json, numbered from 001 (evidence is immutable,</span>
+<a id="__codelineno-2-16" name="__codelineno-2-16" href="#__codelineno-2-16"></a><span class="c">#    so a rerun takes the next name rather than overwriting).</span>
+<a id="__codelineno-2-17" name="__codelineno-2-17" href="#__codelineno-2-17"></a><span class="n">echelle</span> <span class="n">drift</span> <span class="n">audit</span> <span class="n">D</span><span class="p">:\</span><span class="n">NIFS</span><span class="p">\</span><span class="n">spectrocubes</span> <span class="p">`</span>
+<a id="__codelineno-2-18" name="__codelineno-2-18" href="#__codelineno-2-18"></a>  <span class="p">-</span><span class="n">-calibrations</span> <span class="n">D</span><span class="p">:\</span><span class="n">NIFS</span><span class="p">\</span><span class="n">calibrations</span>
+<a id="__codelineno-2-19" name="__codelineno-2-19" href="#__codelineno-2-19"></a>
+<a id="__codelineno-2-20" name="__codelineno-2-20" href="#__codelineno-2-20"></a><span class="c"># 3. Process the whole drive under that verdict, naming the file the audit</span>
+<a id="__codelineno-2-21" name="__codelineno-2-21" href="#__codelineno-2-21"></a><span class="c">#    printed.</span>
+<a id="__codelineno-2-22" name="__codelineno-2-22" href="#__codelineno-2-22"></a><span class="n">echelle</span> <span class="k">process</span> <span class="n">D</span><span class="p">:\</span><span class="n">NIFS</span><span class="p">\</span><span class="n">shots</span> <span class="p">`</span>
+<a id="__codelineno-2-23" name="__codelineno-2-23" href="#__codelineno-2-23"></a>  <span class="n">-o</span> <span class="n">D</span><span class="p">:\</span><span class="n">NIFS</span><span class="p">\</span><span class="n">spectrocubes</span> <span class="p">`</span>
+<a id="__codelineno-2-24" name="__codelineno-2-24" href="#__codelineno-2-24"></a>  <span class="p">-</span><span class="n">-registry</span> <span class="n">D</span><span class="p">:\</span><span class="n">NIFS</span><span class="p">\</span><span class="n">calibration_registry</span><span class="p">.</span><span class="n">toml</span> <span class="p">`</span>
+<a id="__codelineno-2-25" name="__codelineno-2-25" href="#__codelineno-2-25"></a>  <span class="p">-</span><span class="n">-calibrations</span> <span class="n">D</span><span class="p">:\</span><span class="n">NIFS</span><span class="p">\</span><span class="n">calibrations</span> <span class="p">`</span>
+<a id="__codelineno-2-26" name="__codelineno-2-26" href="#__codelineno-2-26"></a>  <span class="p">-</span><span class="n">-volume-label</span> <span class="n">NIFS-A</span> <span class="p">`</span>
+<a id="__codelineno-2-27" name="__codelineno-2-27" href="#__codelineno-2-27"></a>  <span class="p">-</span><span class="n">-drift-verdict</span> <span class="n">D</span><span class="p">:\</span><span class="n">NIFS</span><span class="p">\</span><span class="n">spectrocubes</span><span class="p">\</span><span class="n">drift-evidence</span><span class="p">-</span><span class="n">001</span><span class="p">.</span><span class="n">json</span>
 </code></pre></div>
 <p>Step 3 resumes the receipt written by step 1: the sampled files are recognised
 by their recorded identity and skipped rather than exported twice.</p>
@@ -1730,14 +1787,14 @@ never had.</p>
 <h2 id="several-drives-at-once">Several drives at once<a class="headerlink" href="#several-drives-at-once" title="Permanent link">¶</a></h2>
 <p>Pass one source folder per drive. Echelle runs one sequential reader for each
 source and processes those sources concurrently:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="n">echelle</span> <span class="k">process</span> <span class="n">D</span><span class="p">:\</span><span class="n">NIFS</span><span class="p">\</span><span class="n">shots</span> <span class="n">E</span><span class="p">:\</span><span class="n">NIFS</span><span class="p">\</span><span class="n">shots</span> <span class="p">`</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>  <span class="n">-o</span> <span class="n">F</span><span class="p">:\</span><span class="n">NIFS</span><span class="p">\</span><span class="n">spectrocubes</span> <span class="p">`</span>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>  <span class="p">-</span><span class="n">-runs-dir</span> <span class="n">F</span><span class="p">:\</span><span class="n">NIFS</span><span class="p">\</span><span class="n">runs</span> <span class="p">`</span>
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>  <span class="p">-</span><span class="n">-volume-label</span> <span class="n">NIFS-A</span> <span class="p">`</span>
-<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>  <span class="p">-</span><span class="n">-volume-label</span> <span class="n">NIFS-B</span> <span class="p">`</span>
-<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>  <span class="p">-</span><span class="n">-registry</span> <span class="n">F</span><span class="p">:\</span><span class="n">NIFS</span><span class="p">\</span><span class="n">calibration_registry</span><span class="p">.</span><span class="n">toml</span> <span class="p">`</span>
-<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>  <span class="p">-</span><span class="n">-calibrations</span> <span class="n">F</span><span class="p">:\</span><span class="n">NIFS</span><span class="p">\</span><span class="n">calibrations</span> <span class="p">`</span>
-<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>  <span class="p">-</span><span class="n">-drift-verdict</span> <span class="n">F</span><span class="p">:\</span><span class="n">NIFS</span><span class="p">\</span><span class="n">epoch-drift</span><span class="p">.</span><span class="n">json</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="n">echelle</span> <span class="k">process</span> <span class="n">D</span><span class="p">:\</span><span class="n">NIFS</span><span class="p">\</span><span class="n">shots</span> <span class="n">E</span><span class="p">:\</span><span class="n">NIFS</span><span class="p">\</span><span class="n">shots</span> <span class="p">`</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>  <span class="n">-o</span> <span class="n">F</span><span class="p">:\</span><span class="n">NIFS</span><span class="p">\</span><span class="n">spectrocubes</span> <span class="p">`</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>  <span class="p">-</span><span class="n">-runs-dir</span> <span class="n">F</span><span class="p">:\</span><span class="n">NIFS</span><span class="p">\</span><span class="n">runs</span> <span class="p">`</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>  <span class="p">-</span><span class="n">-volume-label</span> <span class="n">NIFS-A</span> <span class="p">`</span>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>  <span class="p">-</span><span class="n">-volume-label</span> <span class="n">NIFS-B</span> <span class="p">`</span>
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>  <span class="p">-</span><span class="n">-registry</span> <span class="n">F</span><span class="p">:\</span><span class="n">NIFS</span><span class="p">\</span><span class="n">calibration_registry</span><span class="p">.</span><span class="n">toml</span> <span class="p">`</span>
+<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a>  <span class="p">-</span><span class="n">-calibrations</span> <span class="n">F</span><span class="p">:\</span><span class="n">NIFS</span><span class="p">\</span><span class="n">calibrations</span> <span class="p">`</span>
+<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a>  <span class="p">-</span><span class="n">-drift-verdict</span> <span class="n">F</span><span class="p">:\</span><span class="n">NIFS</span><span class="p">\</span><span class="n">epoch-drift</span><span class="p">.</span><span class="n">json</span>
 </code></pre></div>
 <p>Each target is gated on its own. <code>--sample 5</code> samples each source folder
 separately, so one campaign command can produce the audit input for every drive
@@ -1806,8 +1863,8 @@ receipt that skipped anything this way records <code>resume_trust = "stat"</code
 re-proving them is a separate, deliberate scrub of the catalog. A resume is not
 a verification and never reports itself as one.</p>
 <p>To name the resume explicitly, use the path printed at interruption:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="n">echelle</span> <span class="k">process</span> <span class="n">D</span><span class="p">:\</span><span class="n">NIFS</span><span class="p">\</span><span class="n">shots</span> <span class="n">-o</span> <span class="n">D</span><span class="p">:\</span><span class="n">NIFS</span><span class="p">\</span><span class="n">spectrocubes</span> <span class="p">`</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>  <span class="p">-</span><span class="n">-run-dir</span> <span class="n">local</span><span class="p">\</span><span class="n">runs</span><span class="p">\</span><span class="n">2026</span><span class="p">-</span><span class="n">08</span><span class="p">-</span><span class="n">13_12</span><span class="p">-</span><span class="n">00</span><span class="p">-</span><span class="n">00-nifs-a-shots</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="n">echelle</span> <span class="k">process</span> <span class="n">D</span><span class="p">:\</span><span class="n">NIFS</span><span class="p">\</span><span class="n">shots</span> <span class="n">-o</span> <span class="n">D</span><span class="p">:\</span><span class="n">NIFS</span><span class="p">\</span><span class="n">spectrocubes</span> <span class="p">`</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>  <span class="p">-</span><span class="n">-run-dir</span> <span class="n">local</span><span class="p">\</span><span class="n">runs</span><span class="p">\</span><span class="n">2026</span><span class="p">-</span><span class="n">08</span><span class="p">-</span><span class="n">13_12</span><span class="p">-</span><span class="n">00</span><span class="p">-</span><span class="n">00-nifs-a-shots</span>
 </code></pre></div>
 <p>Use <code>--new-run</code> when you intentionally want a separate receipt. Use
 <code>--overwrite</code> only when existing outputs should be replaced.</p>
@@ -1817,12 +1874,12 @@ receipt records the authorization of the run in front of it.</p>
 <h2 id="drive-identity">Drive identity<a class="headerlink" href="#drive-identity" title="Permanent link">¶</a></h2>
 <p>On the first processing of a source, the run writes a small
 <code>echelle-drive-id.toml</code> at the source root you named:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="n">schema</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"echelle-drive-id/v1"</span>
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>
-<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="k">[drive]</span>
-<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="n">id</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"0b6c1e2f9a5b4c7d8e9f0a1b2c3d4e5f"</span>
-<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="n">label</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"NIFS-A"</span>
-<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="n">created_at</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"2026-08-14T09:12:04.118Z"</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="n">schema</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"echelle-drive-id/v1"</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="k">[drive]</span>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="n">id</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"0b6c1e2f9a5b4c7d8e9f0a1b2c3d4e5f"</span>
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="n">label</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"NIFS-A"</span>
+<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="n">created_at</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"2026-08-14T09:12:04.118Z"</span>
 </code></pre></div>
 <p>Later runs read it instead of writing a new one, and catalogs key on the <code>id</code>.
 A USB disk that returns as <code>D:</code> on Windows and under <code>/Volumes/NIFS</code> on macOS
@@ -1838,9 +1895,9 @@ warning, and records it as <code>drive_warning</code> in the receipt and in the 
 cube row records its digest, size, snapshot ID, <code>t_start</code>, and the <code>gate</code> that
 authorized the run that produced it, so a sampled drive never reads as a
 verified one. Write or refresh one by hand with the same command the run uses:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="n">echelle</span> <span class="n">catalog</span> <span class="n">build</span> <span class="n">D</span><span class="p">:\</span><span class="n">NIFS</span><span class="p">\</span><span class="n">spectrocubes</span> <span class="p">`</span>
-<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>  <span class="p">-</span><span class="n">-volume-label</span> <span class="n">NIFS-A</span> <span class="p">`</span>
-<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>  <span class="p">-</span><span class="n">-receipt-dir</span> <span class="n">local</span><span class="p">\</span><span class="n">runs</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="n">echelle</span> <span class="n">catalog</span> <span class="n">build</span> <span class="n">D</span><span class="p">:\</span><span class="n">NIFS</span><span class="p">\</span><span class="n">spectrocubes</span> <span class="p">`</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>  <span class="p">-</span><span class="n">-volume-label</span> <span class="n">NIFS-A</span> <span class="p">`</span>
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>  <span class="p">-</span><span class="n">-receipt-dir</span> <span class="n">local</span><span class="p">\</span><span class="n">runs</span>
 </code></pre></div>
 <p><code>--receipt-dir</code> is optional and adds the run's state, counts, calibration
 authority, gate, and stable drive id to the catalog. It takes either the runs
@@ -1871,9 +1928,9 @@ that merge safe to repeat:</p>
   unavailable by an absolute path written on a different operating system.</li>
 </ul>
 <p>Merge automatically after every completed target by naming the index on the run:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="n">echelle</span> <span class="k">process</span> <span class="n">D</span><span class="p">:\</span><span class="n">NIFS</span><span class="p">\</span><span class="n">shots</span> <span class="n">-o</span> <span class="n">D</span><span class="p">:\</span><span class="n">NIFS</span><span class="p">\</span><span class="n">spectrocubes</span> <span class="p">`</span>
-<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>  <span class="p">-</span><span class="n">-volume-label</span> <span class="n">NIFS-A</span> <span class="p">`</span>
-<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>  <span class="p">-</span><span class="n">-central-index</span> <span class="n">C</span><span class="p">:\</span><span class="n">NIFS</span><span class="p">\</span><span class="n">all-years</span><span class="p">.</span><span class="n">json</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="n">echelle</span> <span class="k">process</span> <span class="n">D</span><span class="p">:\</span><span class="n">NIFS</span><span class="p">\</span><span class="n">shots</span> <span class="n">-o</span> <span class="n">D</span><span class="p">:\</span><span class="n">NIFS</span><span class="p">\</span><span class="n">spectrocubes</span> <span class="p">`</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>  <span class="p">-</span><span class="n">-volume-label</span> <span class="n">NIFS-A</span> <span class="p">`</span>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>  <span class="p">-</span><span class="n">-central-index</span> <span class="n">C</span><span class="p">:\</span><span class="n">NIFS</span><span class="p">\</span><span class="n">all-years</span><span class="p">.</span><span class="n">json</span>
 </code></pre></div>
 <p>Only a completed target is folded in; an interrupted or partial run still writes
 its per-drive catalog but is not published into the index as though the drive
@@ -1884,7 +1941,7 @@ catalog's <code>generated_at</code> is bumped. That bump is what makes the drive
 whatever the all-years index still remembers, so the next auto or manual merge
 propagates the correction without rebuilding the index.</p>
 <h2 id="status">Status<a class="headerlink" href="#status" title="Permanent link">¶</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="n">echelle</span> <span class="n">status</span> <span class="p">-</span><span class="n">-runs</span> <span class="n">local</span><span class="p">\</span><span class="n">runs</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="n">echelle</span> <span class="n">status</span> <span class="p">-</span><span class="n">-runs</span> <span class="n">local</span><span class="p">\</span><span class="n">runs</span>
 </code></pre></div>
 <p>Status reports the newest run's state, accounted sources, result counts,
 calibration authority, and the gate that authorized it. Individual records
