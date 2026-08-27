@@ -59,6 +59,7 @@ UMBRELLA_COMMANDS = {
     "txt",
     "recal-cube",
     "drift",
+    "inventory",
     "web",
     "historical",
 }

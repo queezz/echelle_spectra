@@ -22,6 +22,9 @@ dependencies = [
   "matplotlib>=3.5.2",
   "numpy>=1.23.1",
   "pandas>=1.5.0",
+  # The curator's *cycle*_Echelle_setup.xlsx logbooks are the campaign's
+  # timing authority; the inventory verb reads them with openpyxl.
+  "openpyxl>=3.1.0",
   "pyqt5>=5.15.7",
   "pyqtgraph>=0.12.4",
   "scipy>=1.8.1",

@@ -172,6 +172,55 @@ SNAPSHOT_REMEDY = "create one with `echelle snapshot create`, or the live bench 
 CALIBRATIONS_REMEDY = "snapshots are written there by `echelle snapshot create` and by `echelle-calib`"
 REGISTRY_REMEDY = "write the ordered epoch registry by hand; `echelle status` reports what it reads"
 DRIFT_REMEDY = "write one with `echelle drift audit`"
+DRIVE_REMEDY = "point it at the mounted campaign drive, the one holding DATA"
+PATTERN_REMEDY = (
+    "extract one with `echelle-pattern`, or leave --pattern off to use the packaged eras"
+)
+
+
+def inventory_main(argv: list[str] | None = None, *, prog: str = "echelle inventory") -> int:
+    """Say what is on one campaign drive, and write the record beside it."""
+
+    from .drive_inventory import format_inventory, inventory_drive, write_inventory
+
+    parser = argparse.ArgumentParser(
+        prog=prog,
+        description=(
+            "Say which drive this is: curator logbooks, observing days and their "
+            "shot ranges, calibration folders, free space, and whether the cubes "
+            "would fit beside the data. Nothing is written to the drive."
+        ),
+    )
+    parser.add_argument(
+        "drive_root",
+        metavar="DRIVE_ROOT",
+        help="The mounted drive to read, for example /Volumes/LHD2025 or E:\\.",
+    )
+    parser.add_argument(
+        "--output",
+        default=".",
+        metavar="DIR",
+        help="Folder the inventory/ record is written into (default: this folder).",
+    )
+    args = parser.parse_args(argv)
+
+    def run() -> int:
+        root = _require_dir(
+            args.drive_root, flag="the DRIVE_ROOT argument", what="drive root", remedy=DRIVE_REMEDY
+        )
+        output = _require_dir(
+            args.output, flag="--output", what="output folder", remedy="create it first"
+        )
+        try:
+            record = inventory_drive(root)
+            written = write_inventory(record, output)
+        except OSError as exc:
+            raise CommandError(str(exc)) from None
+        for line in format_inventory(record, written):
+            print(line)
+        return 0
+
+    return _bounded(run)
 
 
 def txt_main(argv: list[str] | None = None, *, prog: str = "echelle-cube2txt") -> int:
@@ -438,6 +487,48 @@ def drift_main(argv: list[str] | None = None, *, prog: str = "echelle drift") ->
             "in the folder the audited cubes share."
         ),
     )
+    geometry = commands.add_parser(
+        "geometry",
+        help="Say whether a drive's light sits on a calibration's order pattern.",
+        description=(
+            "Read one bright frame per sampled day and measure where its order "
+            "bands sit against each candidate pattern. Prints the per-day table, "
+            "writes the survey JSON, and ends with GEOMETRY_OK or GEOMETRY_ALARM "
+            "for the last pattern given. Exit 0 inside the alarm, 2 past it, "
+            "3 when nothing could be measured."
+        ),
+    )
+    geometry.add_argument(
+        "data_root",
+        metavar="DATA_ROOT",
+        help="The drive, its DATA folder, or one day folder.",
+    )
+    geometry.add_argument(
+        "--pattern",
+        action="append",
+        default=[],
+        metavar="FILE",
+        help=(
+            "Order pattern to measure against. Repeat once per era; the last one "
+            "given carries the verdict. Default: the packaged 2024 and 2025 patterns."
+        ),
+    )
+    geometry.add_argument(
+        "--every",
+        type=int,
+        default=None,
+        metavar="N",
+        help=(
+            "Read one day in N (default: 6). Zero asks the three-frame spread "
+            "instead: first day, middle day, last day."
+        ),
+    )
+    geometry.add_argument(
+        "--output",
+        default=".",
+        metavar="DIR",
+        help="Folder the inventory/ survey is written into (default: this folder).",
+    )
     refine = commands.add_parser(
         "refine", help="Accept a shifted verdict and emit an immutable -rN snapshot."
     )
@@ -458,9 +549,53 @@ def drift_main(argv: list[str] | None = None, *, prog: str = "echelle drift") ->
     def run() -> int:
         if args.action == "audit":
             return _drift_audit(args)
+        if args.action == "geometry":
+            return _drift_geometry(args)
         return _drift_refine(args)
 
     return _bounded(run)
+
+
+def _drift_geometry(args: argparse.Namespace) -> int:
+    """Survey where a drive's light sits, and end on the one-word verdict."""
+
+    from .pattern_survey import (
+        DEFAULT_EVERY,
+        PatternSurveyError,
+        load_patterns,
+        survey_geometry,
+        verdict_lines,
+        write_survey,
+    )
+
+    root = _require_dir(
+        args.data_root, flag="the DATA_ROOT argument", what="data root", remedy=DRIVE_REMEDY
+    )
+    output = _require_dir(
+        args.output, flag="--output", what="output folder", remedy="create it first"
+    )
+    patterns = [
+        _require_file(raw, flag="--pattern", what="order pattern", remedy=PATTERN_REMEDY)
+        for raw in args.pattern
+    ]
+    every = DEFAULT_EVERY if args.every is None else int(args.every)
+    try:
+        payload = survey_geometry(
+            root,
+            patterns=load_patterns(patterns),
+            every=every,
+            report=print,
+        )
+        written = write_survey(payload, output)
+    except PatternSurveyError as exc:
+        raise CommandError(str(exc)) from None
+    except OSError as exc:
+        raise CommandError(str(exc)) from None
+    print(f"\nwritten: {written}")
+    lines, code = verdict_lines(payload)
+    for line in lines:
+        print(line)
+    return code
 
 
 def _immutable_evidence(output: Path) -> CommandError:

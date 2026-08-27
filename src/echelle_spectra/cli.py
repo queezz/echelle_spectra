@@ -55,7 +55,12 @@ def _build_parser() -> argparse.ArgumentParser:
     commands.add_parser("catalog", help="Build or merge cube catalogs.")
     commands.add_parser("txt", help="Write canonical LHD text from a saved cube.")
     commands.add_parser("recal-cube", help="Revise saved-cube wavelength/flux calibration.")
-    commands.add_parser("drift", help="Audit science-line drift or accept a refinement.")
+    commands.add_parser(
+        "inventory", help="Say what is on one campaign drive: logbooks, days, calibrations, space."
+    )
+    commands.add_parser(
+        "drift", help="Audit science-line drift, survey pattern geometry, or accept a refinement."
+    )
     commands.add_parser(
         "web", help="Build the read-only campaign page: stepper, drives, calibration, reading room."
     )
@@ -219,7 +224,7 @@ def main(argv: list[str] | None = None) -> int:
         from .campaign_server import serve_main
 
         return int(serve_main(remainder, prog="echelle serve"))
-    if command in {"catalog", "txt", "recal-cube", "drift", "web", "historical"}:
+    if command in {"catalog", "txt", "recal-cube", "drift", "inventory", "web", "historical"}:
         from . import campaign_tools_cli
 
         entry = {
@@ -227,6 +232,7 @@ def main(argv: list[str] | None = None) -> int:
             "txt": campaign_tools_cli.txt_main,
             "recal-cube": campaign_tools_cli.recal_main,
             "drift": campaign_tools_cli.drift_main,
+            "inventory": campaign_tools_cli.inventory_main,
             "web": campaign_tools_cli.web_main,
             "historical": campaign_tools_cli.historical_main,
         }[command]

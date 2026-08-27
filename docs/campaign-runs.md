@@ -4,6 +4,48 @@
 you keep the run state in your head. Every non-dry batch creates a durable run
 receipt under `local/runs/` by default.
 
+## Before the run: which drive is this, and where does its light sit
+
+A drive that arrives in a box raises two questions before any conversion is
+worth starting, and each has its own verb.
+
+`echelle inventory DRIVE_ROOT` answers **which drive is this**. It reads the
+curator's `*cycle*_Echelle_setup.xlsx` logbooks, the observing day folders and
+the shot ranges in their filenames, the calibration folders, and the free
+space, then says in one screen how many days and frames are here, which shots
+they span, which days were *not* taken at the ordinary 2.5 s trigger delay, and
+whether roughly 15 MB of cube per frame would fit beside the data or the output
+has to go somewhere else. It writes nothing to the drive: the record lands as
+`inventory/<volume>.json` under `--output` (default: the folder you ran it in),
+so a campaign home accumulates one file per drive it has ever seen. Reading a
+logbook needs `openpyxl`, which this package does not require — without it the
+logbook is reported present-but-unread, and every other fact is still measured.
+
+`echelle drift geometry DATA_ROOT` answers **where does this light sit**. It
+reads one mid-day frame per sampled day — one day in six by default, or the
+three-frame spread of first, middle and last day with `--every 0` — and
+measures where that frame's order bands actually sit against each candidate
+era pattern. The per-day table is the campaign's geometry diary between
+calibrations, and it is written alongside the inventory as
+`inventory/<volume>-pattern-survey.json`.
+
+The last line is the gate. Against the **last** `--pattern` given (default: the
+packaged 2025 pattern, the newest era), the verb ends on `GEOMETRY_OK` when the
+worst per-order offset is inside 1.5 rows and `GEOMETRY_ALARM` otherwise, and
+leaves with exit 0, 2, or 3 — 3 meaning nothing could be measured, which is
+never the same answer as nothing wrong. This is the one check that gates
+conversion, because it is the one thing a saved cube cannot revise: wavelength
+and flux can be corrected later with `echelle recal-cube`, but a run extracted
+off the wrong rows summed light that is now gone. That asymmetry is why a bulk
+run over a *failing* wavelength audit is permitted at all — but only when the
+geometry has been separately verified here first.
+
+```powershell
+echelle inventory E:\ --output D:\campaign
+echelle drift geometry E:\ --output D:\campaign
+if ($LASTEXITCODE -ne 0) { throw "geometry is not verified; do not convert" }
+```
+
 ## Batch discovery
 
 A plain filename pattern — the default `*.SIF`, or anything else with no `/`
