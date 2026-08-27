@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -331,3 +332,24 @@ def test_drift_geometry_help_exits_zero():
         echelle_main(["drift", "geometry", "--help"])
 
     assert exit_info.value.code == 0
+
+
+def test_two_patterns_sharing_a_filename_get_their_own_columns(tmp_path: Path) -> None:
+    """Snapshot patterns are all named pattern.txt, so keying columns by bare
+    filename collapsed two eras into one silently-identical pair of columns —
+    the first field survey against the 2019 and 2024 snapshots printed one
+    measurement twice. Colliding names are disambiguated by their folder.
+    """
+
+    from echelle_spectra.pattern_survey import load_patterns
+
+    a = tmp_path / "20190529_cmos" / "pattern.txt"
+    b = tmp_path / "20240305_cmos" / "pattern.txt"
+    for path, base in ((a, 40), (b, 49)):
+        path.parent.mkdir()
+        rows = np.tile(np.arange(base, base + 3 * 10, 10), (64, 1))
+        np.savetxt(path, rows, fmt="%d")
+    choices = load_patterns([a, b])
+    keys = [choice.key for choice in choices]
+    assert keys == ["20190529_cmos/pattern.txt", "20240305_cmos/pattern.txt"]
+    assert not np.array_equal(choices[0].rows, choices[1].rows)

@@ -94,10 +94,16 @@ def load_patterns(paths: Sequence[str | Path] | None) -> list[PatternChoice]:
 
     if not paths:
         return packaged_patterns()
+    resolved = [Path(raw) for raw in paths]
+    # Snapshot patterns are all named pattern.txt, so a bare filename is not
+    # an identity: when names collide, each column is headed by the folder
+    # that makes it unique -- 20190529_cmos/pattern.txt, never two identical
+    # columns silently reporting one measurement.
+    names = [path.name for path in resolved]
     chosen = []
-    for raw in paths:
-        path = Path(raw)
-        chosen.append(PatternChoice(path.name, str(path), _load_pattern(path)))
+    for path in resolved:
+        key = path.name if names.count(path.name) == 1 else f"{path.parent.name}/{path.name}"
+        chosen.append(PatternChoice(key, str(path), _load_pattern(path)))
     return chosen
 
 
