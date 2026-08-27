@@ -273,7 +273,15 @@ def _load_epochs(raw_epochs: list[object], root: Path) -> list[CalibrationEpoch]
             )
         try:
             snapshot_id = validate_snapshot_id(str(item["snapshot_id"]))
-            snapshot = load_snapshot(root / snapshot_id)
+            # The light check: schema, roles, and the digests of the artifacts
+            # the snapshot OWNS -- everything processing consumes. Referenced
+            # raw sources are provenance living wherever the campaign keeps
+            # them (another disk, another machine, an absolute path from
+            # another OS); re-proving them belongs to `snapshot validate`,
+            # run where those files live -- a registry that refuses to
+            # process because a provenance file is on a drive in somebody's
+            # pocket has confused trust with proof.
+            snapshot = load_snapshot(root / snapshot_id, verify_references=False)
         except SnapshotError as exc:
             raise CalibrationRegistryError(
                 f"registry epochs[{position}] snapshot {item.get('snapshot_id')!r} is invalid: {exc}"

@@ -191,3 +191,48 @@ def test_path_parser_supports_lhd_shots_and_dates_without_confusing_them() -> No
     both = source_identity_from_path(Path("2025-09-26") / "shot_193778.SIF")
     assert both.shot_number == 193778
     assert both.acquisition_date == date(2025, 9, 26)
+
+
+def test_a_referenced_source_in_a_pocket_does_not_block_the_registry(
+    tmp_path: Path,
+) -> None:
+    """A snapshot may REFERENCE its raw sources wherever the campaign keeps
+    them -- another disk, an absolute path from another operating system, a
+    drive that left in somebody's pocket. Those files are provenance, not
+    something processing consumes, so the registry loads the snapshot on the
+    artifacts it owns and leaves re-proving references to `snapshot
+    validate`, run where the files live. Found 2026-08-27: the 2025 and 2026
+    snapshots reference raw frames by absolute macOS paths, which would have
+    broken every registry load on the institute's Windows machines.
+    """
+
+    snapshots = tmp_path / "calibrations"
+    sources = tmp_path / "pocket-drive"
+    sources.mkdir()
+    files: dict[str, Path] = {}
+    for role in ROLE_FILENAMES:
+        source = sources / f"{role}.dat"
+        source.write_text(f"{role}\n", encoding="utf-8")
+        files[role] = source
+    lamp = sources / "thar.sif"
+    lamp.write_text("lamp light\n", encoding="utf-8")
+    create_snapshot(
+        snapshots,
+        snapshot_id="20260827_cmos",
+        detector="cmos",
+        files=files,
+        lamps=("ThAr",),
+        lamp_files=[("ThAr", lamp)],
+        validity={"date_from": "2026-08-27"},
+        reference_raw=True,
+    )
+    # The pocket leaves the building.
+    import shutil
+
+    shutil.rmtree(sources)
+
+    registry = load_calibration_registry(
+        _registry(tmp_path / "calibration_registry.toml", "20260827_cmos"),
+        snapshots_root=snapshots,
+    )
+    assert registry.resolve(_identity(day="2026-08-30")).snapshot_id == "20260827_cmos"
