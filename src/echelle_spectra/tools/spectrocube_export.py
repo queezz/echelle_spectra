@@ -752,8 +752,14 @@ def to_spectrocube(
         )
 
     # --- build metadata attrs ---
+    from echelle_spectra import __version__ as _pkg_version
+
     attrs: dict[str, object] = {
         "source_package": "echelle_spectra",
+        # The exact package version that made this cube: two code states can
+        # share one campaign (owner ruling 2026-08-28), so the cube itself
+        # names its maker instead of leaving that to git archaeology.
+        "source_package_version": _pkg_version,
         "created_at": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
     }
 

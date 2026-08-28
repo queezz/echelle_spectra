@@ -662,3 +662,14 @@ class TestBackgroundCounts:
         )
         with pytest.raises(ValueError, match="calibration factor"):
             reconstruct_counts(ds)
+
+
+class TestSourcePackageVersion:
+    """Every cube names the exact package version that made it (2026-08-28)."""
+
+    def test_version_attr_written_and_matches_package(self):
+        import echelle_spectra
+
+        sp = _make_synthetic_spectrum()
+        sc = to_spectrocube(sp)
+        assert sc.ds.attrs["source_package_version"] == echelle_spectra.__version__
