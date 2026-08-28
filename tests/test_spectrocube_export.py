@@ -548,3 +548,117 @@ class TestEdgeCases:
         sp = _make_synthetic_spectrum(n_frames=7)
         sc = to_spectrocube(sp)
         assert sc.sizes["frame"] == 7
+
+
+class TestBackgroundCounts:
+    """Noise provenance: the subtracted dark level rides the cube (2026-08-28)."""
+
+    @staticmethod
+    def _spectrum_with_background(n_frames=3, n_wavelengths=50):
+        sp = _make_synthetic_spectrum(n_frames=n_frames, n_wavelengths=n_wavelengths)
+        rng = np.random.default_rng(7)
+        sp.background_counts = rng.uniform(90.0, 110.0, size=n_wavelengths)
+        return sp
+
+    def test_variable_written_with_values_and_attrs(self):
+        sp = self._spectrum_with_background()
+        sc = to_spectrocube(sp)
+        assert "background_counts" in sc.ds
+        np.testing.assert_allclose(
+            sc.ds["background_counts"].values, sp.background_counts
+        )
+        var_attrs = sc.ds["background_counts"].attrs
+        assert var_attrs["units"] == "counts"
+        assert "background_frames" in var_attrs["meaning"]
+        assert "total_counts" in var_attrs["application"]
+
+    def test_absent_when_spectrum_carries_none(self):
+        sp = _make_synthetic_spectrum()
+        sp.background_counts = None
+        sc = to_spectrocube(sp)
+        assert "background_counts" not in sc.ds
+
+    def test_absent_for_legacy_spectrum_without_attribute(self):
+        sp = _make_synthetic_spectrum()
+        assert not hasattr(sp, "background_counts")
+        sc = to_spectrocube(sp)
+        assert "background_counts" not in sc.ds
+
+    def test_background_follows_wavelength_crop(self):
+        sp = self._spectrum_with_background(n_wavelengths=60)
+        sc = to_spectrocube(sp, wavelength_min_nm=500.0)
+        kept = sp.wavelength >= 500.0
+        np.testing.assert_allclose(
+            sc.ds["background_counts"].values, sp.background_counts[kept]
+        )
+        assert sc.sizes["wavelength"] == int(np.count_nonzero(kept))
+
+    def test_background_follows_nonfinite_column_drop(self):
+        sp = self._spectrum_with_background()
+        sp.counts[0, 5] = np.nan
+        sp.wm[0, 5] = np.nan
+        sp.wmsr[0, 5] = np.nan
+        sp.phmsr[0, 5] = np.nan
+        expected = np.delete(sp.background_counts, 5)
+        sc = to_spectrocube(sp)
+        np.testing.assert_allclose(sc.ds["background_counts"].values, expected)
+
+    def test_reconstruct_counts_round_trip_on_counts_cube(self):
+        from echelle_spectra.tools.spectrocube_export import reconstruct_counts
+
+        sp = self._spectrum_with_background()
+        sc = to_spectrocube(sp, units="counts", squeeze_single_frame=False)
+        result = reconstruct_counts(sc)
+        np.testing.assert_allclose(result["net_counts"], sp.counts)
+        np.testing.assert_allclose(
+            result["total_counts"], sp.counts + sp.background_counts[np.newaxis, :]
+        )
+
+    def test_reconstruct_counts_round_trip_on_absolute_dataset(self):
+        import xarray as xr
+
+        from echelle_spectra.tools.spectrocube_export import reconstruct_counts
+
+        rng = np.random.default_rng(11)
+        n_wl = 40
+        wavelength = np.linspace(400.0, 700.0, n_wl)
+        counts = rng.uniform(200.0, 5000.0, size=(4, n_wl))
+        background = rng.uniform(90.0, 110.0, size=n_wl)
+        factor = rng.uniform(1e-7, 5e-7, size=n_wl)
+        exposure_s = 0.125
+        intensity = counts / exposure_s * factor[np.newaxis, :]
+        ds = xr.Dataset(
+            {
+                "intensity": (("frame", "wavelength"), intensity),
+                "applied_absolute_calibration_factor": (("wavelength",), factor),
+                "background_counts": (("wavelength",), background),
+            },
+            coords={"wavelength": wavelength, "frame": np.arange(4.0)},
+            attrs={"calibration_type": "absolute", "exposure_s": exposure_s},
+        )
+        result = reconstruct_counts(ds)
+        np.testing.assert_allclose(result["net_counts"], counts, rtol=1e-12)
+        np.testing.assert_allclose(
+            result["total_counts"], counts + background[np.newaxis, :], rtol=1e-12
+        )
+
+    def test_reconstruct_counts_reports_missing_provenance_as_none(self):
+        from echelle_spectra.tools.spectrocube_export import reconstruct_counts
+
+        sp = _make_synthetic_spectrum()
+        sc = to_spectrocube(sp, units="counts", squeeze_single_frame=False)
+        result = reconstruct_counts(sc)
+        assert result["total_counts"] is None
+
+    def test_reconstruct_counts_refuses_absolute_without_factor(self):
+        import xarray as xr
+
+        from echelle_spectra.tools.spectrocube_export import reconstruct_counts
+
+        ds = xr.Dataset(
+            {"intensity": (("wavelength",), np.ones(5))},
+            coords={"wavelength": np.linspace(500.0, 501.0, 5)},
+            attrs={"calibration_type": "absolute", "exposure_s": 0.1},
+        )
+        with pytest.raises(ValueError, match="calibration factor"):
+            reconstruct_counts(ds)

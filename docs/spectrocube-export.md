@@ -118,6 +118,31 @@ sc = export_spectrocube(
 
 ---
 
+## Noise provenance: `background_counts`
+
+`Spectrum` subtracts the averaged dark frames from every frame **before**
+calibration, which would destroy the total-counts information a shot-noise
+model needs. Since 2026-08-28 the exporter preserves it: when the source
+`Spectrum` carries the subtracted per-pixel dark level, the cube gains a
+wavelength-aligned `background_counts` data variable (units: counts). Total
+detector counts are then reconstructible from the cube alone:
+
+```python
+from echelle_spectra.tools.spectrocube_export import reconstruct_counts
+
+counts = reconstruct_counts(sc)
+counts["net_counts"]    # background-subtracted counts per exposure
+counts["total_counts"]  # + the subtracted dark level (None for pre-fix cubes)
+```
+
+A cube whose `background_frames` attribute names subtracted frames but which
+lacks the `background_counts` variable predates this fix — its noise must
+come from a sampled empirical noise law instead. Detector noise constants,
+when known, ride as global attributes via `extra_attrs` (e.g.
+`detector_gain_e_per_count`, `read_noise_e`).
+
+---
+
 ## Reloading a saved SpectroCube
 
 ```python

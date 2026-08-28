@@ -30,7 +30,15 @@ if TYPE_CHECKING:
 
     from echelle_spectra.snapshot import Snapshot
 
-__all__ = ["to_spectrocube", "export_spectrocube"]
+__all__ = ["to_spectrocube", "export_spectrocube", "reconstruct_counts"]
+
+#: How a reader recovers total detector counts from an exported cube.
+BACKGROUND_COUNTS_APPLICATION = (
+    "total_counts = net_counts + background_counts, where net_counts is the "
+    "stored intensity for counts cubes and "
+    "intensity / applied_absolute_calibration_factor * exposure_s for "
+    "absolute cubes"
+)
 
 # ---------------------------------------------------------------------------
 # Unit / calibration-type metadata table
@@ -389,6 +397,59 @@ def _crop_wavelength_axis(
 # ---------------------------------------------------------------------------
 
 
+def reconstruct_counts(cube) -> dict[str, np.ndarray | None]:
+    """Recover per-pixel detector counts from an exported cube.
+
+    Parameters
+    ----------
+    cube : spectrocube.SpectroCube or xarray.Dataset
+        A cube produced by :func:`to_spectrocube` / :func:`export_spectrocube`.
+
+    Returns
+    -------
+    dict
+        ``{"net_counts": ndarray, "total_counts": ndarray | None}``.
+        ``net_counts`` is the background-subtracted counts per exposure
+        (identical in shape to the stored intensity).  ``total_counts`` adds
+        the subtracted per-pixel dark level back and is ``None`` for cubes
+        that predate the ``background_counts`` variable — those cubes cannot
+        support a first-principles shot-noise estimate and need the sampled
+        empirical noise law instead.
+
+    Raises
+    ------
+    ValueError
+        If an absolute cube lacks the applied calibration factor or a positive
+        ``exposure_s`` attribute, so counts cannot be reconstructed at all.
+    """
+    ds = getattr(cube, "ds", cube)
+    intensity = np.asarray(ds["intensity"].values, dtype=float)
+    calibration_type = str(ds.attrs.get("calibration_type", ""))
+    if calibration_type == "counts":
+        net = intensity
+    else:
+        if "applied_absolute_calibration_factor" not in ds:
+            raise ValueError(
+                "cube stores calibrated intensity but no applied absolute "
+                "calibration factor; counts cannot be reconstructed"
+            )
+        exposure_s = float(ds.attrs.get("exposure_s", 0.0))
+        if not np.isfinite(exposure_s) or exposure_s <= 0:
+            raise ValueError(
+                "counts reconstruction requires a finite positive exposure_s attribute"
+            )
+        factor = np.asarray(
+            ds["applied_absolute_calibration_factor"].values, dtype=float
+        )
+        net = intensity / factor * exposure_s
+    if "background_counts" in ds:
+        background = np.asarray(ds["background_counts"].values, dtype=float)
+        total = net + background
+    else:
+        total = None
+    return {"net_counts": net, "total_counts": total}
+
+
 def to_spectrocube(
     spectrum,
     *,
@@ -449,7 +510,20 @@ def to_spectrocube(
     **extra_attrs
         Any additional key/value pairs are forwarded to
         :meth:`~spectrocube.SpectroCube.from_arrays` as global NetCDF
-        attributes (e.g. ``notes="my experiment"``).
+        attributes (e.g. ``notes="my experiment"``).  Detector noise
+        constants, when known, belong here too — e.g.
+        ``detector_gain_e_per_count=...`` and ``read_noise_e=...`` — so a
+        reader can turn reconstructed counts into a shot-noise estimate.
+
+    Notes
+    -----
+    When the source ``Spectrum`` carries a ``background_counts`` array (the
+    per-pixel dark level its constructor subtracted from every frame), it is
+    exported as a wavelength-aligned ``background_counts`` data variable, so
+    total detector counts — and hence per-pixel noise — stay reconstructible
+    from the cube alone (see :func:`reconstruct_counts`).  A cube whose
+    ``background_frames`` attribute names subtracted frames but which lacks
+    the variable predates this provenance fix.
 
     Returns
     -------
@@ -499,6 +573,10 @@ def to_spectrocube(
         intensity_2d = intensity_2d[np.newaxis, :]
 
     aligned: dict[str, np.ndarray] = {}
+    background_counts = getattr(spectrum, "background_counts", None)
+    if background_counts is not None:
+        aligned["background_counts"] = np.asarray(background_counts, dtype=float)
+
     polynomial_payload: dict[str, object] | None = None
     wavelength_accuracy_nm: float | None = None
     if snapshot is not None:
@@ -816,6 +894,27 @@ def to_spectrocube(
                     "application": APPLIED_FACTOR_APPLICATION,
                 },
             )
+    if "background_counts" in aligned:
+        import xarray as xr
+
+        # The dark subtraction destroys the total-counts information a
+        # shot-noise model needs; this variable preserves it, making per-pixel
+        # counts (and hence noise) reconstructible from the cube alone.  A cube
+        # whose background_frames attribute names subtracted frames but which
+        # lacks this variable predates the fix.
+        sc.ds["background_counts"] = xr.DataArray(
+            aligned["background_counts"],
+            dims=("wavelength",),
+            attrs={
+                "units": "counts",
+                "meaning": (
+                    "per-pixel dark level subtracted from every frame before "
+                    "calibration; average of the frames named by the "
+                    "background_frames attribute"
+                ),
+                "application": BACKGROUND_COUNTS_APPLICATION,
+            },
+        )
     return sc
 
 

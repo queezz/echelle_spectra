@@ -843,6 +843,9 @@ class Spectrum:
                 )
                 self.info["BackgroundFrames"] = []
                 subtract = np.zeros(image.spectra.shape[1:])
+                # Nothing was subtracted, so counts stay total counts and no
+                # per-pixel dark level needs preserving.
+                self.background_counts = None
             else:
                 # identify the longest consecutive chain of frames, and use that as list of background frame indices
                 self.info["BackgroundFrames"] = max(
@@ -853,10 +856,15 @@ class Spectrum:
                 subtract = (
                     np.sum(image.spectra[self.info["BackgroundFrames"]], axis=0) / n_bg
                 )
+                # The subtraction destroys the total-counts information a noise
+                # model needs; keep the subtracted level so the exporter can
+                # write it into the cube (owner decision 2026-08-28).
+                self.background_counts = subtract
             self.counts = image.spectra - subtract
         else:
             self.info["BackgroundFrames"] = []
             self.counts = image.spectra
+            self.background_counts = None
 
         self.absolute = image.clbr.absolute
         self.direction = image.clbr.direction
