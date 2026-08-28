@@ -1691,7 +1691,10 @@ recorded in metadata.</p>
               <div class="doc-md-description">
                 <p>Any additional key/value pairs are forwarded to
 :meth:<code>~spectrocube.SpectroCube.from_arrays</code> as global NetCDF
-attributes (e.g. <code>notes="my experiment"</code>).</p>
+attributes (e.g. <code>notes="my experiment"</code>).  Detector noise
+constants, when known, belong here too — e.g.
+<code>detector_gain_e_per_count=...</code> and <code>read_noise_e=...</code> — so a
+reader can turn reconstructed counts into a shot-noise estimate.</p>
               </div>
             </td>
             <td>
@@ -1701,6 +1704,17 @@ attributes (e.g. <code>notes="my experiment"</code>).</p>
       </tbody>
     </table>
 
+
+<details class="note" open="">
+  <summary>Notes</summary>
+  <p>When the source <code>Spectrum</code> carries a <code>background_counts</code> array (the
+per-pixel dark level its constructor subtracted from every frame), it is
+exported as a wavelength-aligned <code>background_counts</code> data variable, so
+total detector counts — and hence per-pixel noise — stay reconstructible
+from the cube alone (see :func:<code>reconstruct_counts</code>).  A cube whose
+<code>background_frames</code> attribute names subtracted frames but which lacks
+the variable predates this provenance fix.</p>
+</details>
 
     <p><span class="doc-section-title">Returns:</span></p>
     <table>
