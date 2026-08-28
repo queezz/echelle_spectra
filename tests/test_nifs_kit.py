@@ -60,7 +60,7 @@ def _requirement_blocks(text: str) -> list[str]:
 def test_manifest_pins_supported_matrix_and_project_identity() -> None:
     manifest = load_manifest(MANIFEST)
     pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
-    assert manifest.application_version == pyproject["project"]["version"] == "1.6.0"
+    assert manifest.application_version == pyproject["project"]["version"] == "1.7.0"
     assert manifest.toolchain["python"] == (ROOT / ".python-version").read_text().strip()
     assert set(manifest.platforms) == {
         "windows-x86_64",

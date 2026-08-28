@@ -5,6 +5,55 @@ follows the Fleet convention from 0.3.0 onward: a substantial capability earns
 a minor release, a compatible correction earns a patch, and documentation,
 tests, or internal refactoring alone do not move the number.
 
+## 1.7.0 — 2026-08-28
+
+This release closes the held campaign-automation era: everything since 1.6.0
+shipped under a deliberate version hold while the multi-year LHD conversion
+campaign was being built and run, and lands here as one release — the version
+that converts the archive's remaining drives.
+
+**Every cube now carries its noise provenance and its maker.** The dark
+subtraction in `Spectrum` destroyed the total-counts information a per-pixel
+shot-noise model needs; the exporter now writes the subtracted per-pixel dark
+level as a wavelength-aligned `background_counts` variable, and
+`reconstruct_counts()` recovers net and total detector counts from a cube
+alone. Cubes also record `source_package_version`, so a campaign spanning two
+code states names each cube's maker. A cube whose `background_frames`
+attribute names subtracted frames but which lacks the variable predates this
+release.
+
+**Campaigns run from read-only archive drives at scale.** A campaign home can
+live beside a read-only NTFS data drive; batch discovery is recursive with
+calibration folders pruned and AppleDouble siblings skipped; drive and run
+identity cross the input/output seam into receipts and catalogs; resume cost
+follows the work remaining; the registry loads snapshots on owned artifacts;
+and the field verbs (`echelle inventory`, drift geometry survey) give the
+package its own eyes on an unknown drive.
+
+**The drift verdict earned physics discipline.** The auditor reads the plasma
+background off the dark frames, decides the verdict on lines strong enough to
+carry it, reports weak scatter beside rather than inside the decision, and
+raises a loud `era-misassigned-calibration` verdict when an all-Balmer isotope
+flip betrays the wrong epoch. Cubes recalibrate onto another era's snapshot
+with honestly dropped factor columns counted and reported.
+
+**The served campaign page walks the owner's own procedure.** `echelle serve`
+opens real folders with a picker, writes the campaign home from its setup
+page, composes every command from two inputs (data folder and calibration
+epoch), launches the campaign's own verbs as detached processes with durable
+receipts, renders each snapshot as a physicist's record on the Calibration
+tab, and shows saved snapshots even without a registry.
+
+**The calibration bench closes the loop at the instrument.** One press
+auto-anchors to the CLI's numbers, the bench extracts a pattern from the
+folder's own sphere and rebases without a restart, saves campaign-aware with
+the destination named before the save, accepts historical folders as they
+were shot (signal-only spheres included), and snapshots reference their
+source light instead of copying it, dated by the day the light was taken.
+
+**LHD deliverables state their calibration.** `echelle txt` refuses a
+non-absolute cube, and the text records the cube's calibration source.
+
 ## 1.6.0 — 2026-08-14
 
 **Every registry-backed export now resolves one reviewed immutable calibration
